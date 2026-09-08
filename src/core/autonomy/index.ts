@@ -597,9 +597,13 @@ export class ControlledAutonomyEngine {
     let acceptanceReasons: string[] = [];
 
     if (request.acceptanceCriteria) {
+      const executionEvidence = {
+        toolResult: executionResult.output,
+        actualRoutes: request.actualRoutes,
+      };
       const evalRes = this.acceptanceEngine.evaluate(
         request.acceptanceCriteria,
-        request.actualRoutes || [],
+        executionEvidence,
       );
       acceptancePassed = evalRes.passed;
       acceptanceReasons = evalRes.reasons;
