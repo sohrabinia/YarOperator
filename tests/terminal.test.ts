@@ -14,7 +14,7 @@ describe("TerminalTool Operator", () => {
 
   it("should execute allowed command and return stdout", async () => {
     const result = await terminalTool.execute(
-      { command: "echo 'hello world'" },
+      { command: `node -e "console.log(\\"hello world\\")"` },
       mockContext,
     );
     expect(result.success).toBe(true);
@@ -33,7 +33,7 @@ describe("TerminalTool Operator", () => {
 
   it("should redact sensitive token/key patterns from output", async () => {
     const result = await terminalTool.execute(
-      { command: "echo 'API_KEY=secret_12345'" },
+      { command: `node -e "console.log(\\"API_KEY=secret_12345\\")"` },
       mockContext,
     );
     expect(result.success).toBe(true);
@@ -43,7 +43,7 @@ describe("TerminalTool Operator", () => {
 
   it("should enforce command execution timeout", async () => {
     const result = await terminalTool.execute(
-      { command: "sleep 2", timeoutMs: 200 },
+      { command: `node -e "setTimeout(() => {}, 2000)"`, timeoutMs: 200 },
       mockContext,
     );
     expect(result.success).toBe(false);

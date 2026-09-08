@@ -1,4 +1,6 @@
 import { createRequire } from "module";
+import { mkdirSync } from "fs";
+import { dirname } from "path";
 import { WorkflowEngine, WorkflowDefinition } from "../workflow/index.js";
 import { ExecutionContext } from "../contracts/index.js";
 
@@ -46,6 +48,12 @@ export class DurableScheduler {
     private workflowEngine: WorkflowEngine,
     private clock: Clock = new SystemClock(),
   ) {
+    if (dbPath !== ":memory:") {
+      const parentDir = dirname(dbPath);
+      if (parentDir && parentDir !== ".") {
+        mkdirSync(parentDir, { recursive: true });
+      }
+    }
     const { DatabaseSync } = require("node:sqlite");
     this.db = new DatabaseSync(dbPath);
     this.init();

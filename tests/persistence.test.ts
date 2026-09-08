@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { OperationalStateStore } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 describe("OperationalStateStore Durable Operational Memory", () => {
-  const dbFile = "/tmp/test_operational_memory.db";
+  const dbFile = join(tmpdir(), "test_operational_memory.db");
 
   beforeEach(() => {
     if (existsSync(dbFile)) {

@@ -10,6 +10,8 @@ import {
   Tool,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 class TestClock implements Clock {
   constructor(private currentTime: Date) {}
@@ -24,7 +26,7 @@ class TestClock implements Clock {
 }
 
 describe("DurableScheduler Remediated Capabilities", () => {
-  const dbFile = "/tmp/test_scheduler_remediated.db";
+  const dbFile = join(tmpdir(), "test_scheduler_remediated.db");
   let registry: ToolRegistry;
   let auditLogger: AuditLogger;
   let executionEngine: ExecutionEngine;
@@ -61,7 +63,7 @@ describe("DurableScheduler Remediated Capabilities", () => {
     const cronSchedule: ScheduleDefinition = {
       id: "cron_sched",
       type: "CRON",
-      cronExpression: "0 12 * * *", // 12:00 UTC every day
+      cronExpression: "0 12 * * *",
       timezone: "UTC",
       enabled: true,
       workflow: {
@@ -96,13 +98,11 @@ describe("DurableScheduler Remediated Capabilities", () => {
 
     scheduler.registerSchedule(schedule);
 
-    // Occurrence 1
     clock.advance(1000);
     const claim1 = scheduler.claimDueOccurrence("w1");
     expect(claim1).not.toBeNull();
     await scheduler.executeOccurrence(claim1!.id, "exec_1");
 
-    // Occurrence 2 automatically scheduled after Occurrence 1 execution
     clock.advance(1000);
     const claim2 = scheduler.claimDueOccurrence("w1");
     expect(claim2).not.toBeNull();
@@ -127,7 +127,6 @@ describe("DurableScheduler Remediated Capabilities", () => {
     };
 
     scheduler.registerSchedule(schedule);
-    // Simulate multiple missed occurrences by advancing time without claiming
     scheduler.scheduleNextOccurrence(
       schedule.id,
       new Date("2026-01-01T00:00:01.000Z"),
@@ -143,7 +142,7 @@ describe("DurableScheduler Remediated Capabilities", () => {
     expect(skippedCount).toBeGreaterThan(0);
 
     const claimable = scheduler.claimDueOccurrence("w1");
-    expect(claimable).not.toBeNull(); // Exactly one execution opportunity preserved
+    expect(claimable).not.toBeNull();
     scheduler.close();
   });
 });

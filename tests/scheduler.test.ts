@@ -10,6 +10,8 @@ import {
   Tool,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 class TestClock implements Clock {
   constructor(private currentTime: Date) {}
@@ -24,7 +26,7 @@ class TestClock implements Clock {
 }
 
 describe("DurableScheduler Operator", () => {
-  const dbFile = "/tmp/test_scheduler.db";
+  const dbFile = join(tmpdir(), "test_scheduler.db");
   let registry: ToolRegistry;
   let auditLogger: AuditLogger;
   let executionEngine: ExecutionEngine;
