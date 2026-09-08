@@ -28,3 +28,4 @@ export * from "./core/baseline/index.js";
 export * from "./core/regression/index.js";
 export * from "./core/acceptance/index.js";
 export * from "./core/autonomous/index.js";
+export * from "./core/autonomy/index.js";
