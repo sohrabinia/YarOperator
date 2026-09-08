@@ -17,3 +17,4 @@ export * from "./core/context/index.js";
 export * from "./core/workspace/index.js";
 export * from "./core/memory/index.js";
 export * from "./core/development/index.js";
+export * from "./core/owner/index.js";
