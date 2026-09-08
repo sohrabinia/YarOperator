@@ -157,6 +157,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
 
       expect(res.success).toBe(true);
       expect(res.state).toBe("COMPLETED");
+      expect(res.decision.scopeValid).toBe(true);
       expect(mockTool.invocations.length).toBe(1);
       expect(mockTool.invocations[0].params).toEqual(params);
       expect(res.evidence?.toolResult).toEqual({
@@ -460,6 +461,32 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       );
       expect(res.decision).toBe("BLOCKED");
       expect(res.reason).toContain("Attempt to modify security boundary");
+    });
+
+    it("13. SAFE decision explicitly reports scopeValid === true", async () => {
+      policyEngine.setRule("mock_exec_tool", "SAFE");
+      const scope = orchestrator.createExecutionScope({
+        workspaceId: "yartrader",
+        agentId: "jules_autonomy_agent",
+        capabilities: ["software-development"],
+        tools: ["mock_exec_tool"],
+      });
+
+      const request: AutonomousActionRequest = {
+        taskId: "task_safe_scope_check",
+        workspaceId: "yartrader",
+        toolId: "mock_exec_tool",
+        params: {},
+      };
+
+      const res = await autonomyEngine.evaluateAutonomyDecision(
+        request,
+        scope,
+        mockContext,
+      );
+      expect(res.decision).toBe("SAFE");
+      expect(res.scopeValid).toBe(true);
+      expect(res.toolAuthorized).toBe(true);
     });
   });
 });

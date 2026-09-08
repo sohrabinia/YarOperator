@@ -371,7 +371,7 @@ export class ControlledAutonomyEngine {
       reason: `Tool '${request.toolId}' is authorized by PolicyEngine.`,
       policyResult: (rule || "SAFE") as ActionSafetyLevel | "UNCLASSIFIED",
       approvalRequired: false,
-      scopeValid: false,
+      scopeValid: true,
       toolAuthorized: true,
       workspaceId: request.workspaceId,
       environmentId: request.environmentId,
