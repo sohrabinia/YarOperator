@@ -15,3 +15,4 @@ export * from "./core/persistence/index.js";
 export * from "./core/scheduler/index.js";
 export * from "./core/context/index.js";
 export * from "./core/workspace/index.js";
+export * from "./core/memory/index.js";
