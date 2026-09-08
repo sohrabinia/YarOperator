@@ -92,7 +92,7 @@ export class GitHubTool implements Tool<GitHubPRParams, GitHubPRResult> {
       success: true,
       output: {
         prNumber,
-        url: `https://github.com/sohrabinia/YarTrader.Op/pull/${prNumber}`,
+        url: `https://github.com/sohrabinia/YarOperator/pull/${prNumber}`,
         status: params.action === "merge_pr" ? "MERGED" : "OPEN",
       },
     };

@@ -1,4 +1,4 @@
-export const OPERATOR_NAME = "YarTrader.Op";
+export const OPERATOR_NAME = "YarOperator";
 export const OPERATOR_VERSION = "0.1.0";
 
 export * from "./core/contracts/index.js";

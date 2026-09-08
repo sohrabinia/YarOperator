@@ -1,6 +1,6 @@
-# YarTrader Operator (`YarTrader.Op`)
+# YarOperator
 
-Canonical, deterministic general-purpose operator for YarTrader built with strict security boundaries, durable operational memory, and scheduling capabilities.
+An independent Personal AI Operator foundation built with strict security boundaries, durable operational memory, and scheduling capabilities.
 
 ## Architectural Directives
 

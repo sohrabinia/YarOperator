@@ -1,4 +1,4 @@
-# 1. Clean Rebuild of YarTrader Operator
+# 1. Clean Rebuild of YarOperator
 
 ## Status
 
@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The YarTrader Operator was clean-rebuilt in `sohrabinia/YarTrader.Op` to establish an independent, clean canonical baseline without legacy Git history or technical debt.
+The YarOperator foundation was established in `sohrabinia/YarOperator` as an independent Personal AI Operator foundation to create a clean canonical baseline without legacy Git history or technical debt.
 
 ## Decision
 

@@ -1,7 +1,7 @@
 {
-  "name": "yartrader-op",
+  "name": "yar-operator",
   "version": "0.1.0",
-  "description": "Canonical YarTrader Operator with explicit security boundaries, deterministic workflows, durable state, and scheduler.",
+  "description": "An independent Personal AI Operator foundation with explicit security boundaries, deterministic workflows, durable state, and scheduler.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,9 +17,9 @@
     "automation",
     "governance",
     "architecture",
-    "yartrader"
+    "yar-operator"
   ],
-  "author": "YarTrader Team",
+  "author": "YarOperator Team",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^22.10.1",
@@ -28,7 +28,7 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
-    "cron-parser": "^5.10.0",
+    "cron-parser": "^5.0.0",
     "playwright": "^1.49.1"
   }
 }
