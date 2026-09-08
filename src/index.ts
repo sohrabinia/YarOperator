@@ -1,4 +1,4 @@
-export const OPERATOR_NAME = "YarTrader.Op";
+export const OPERATOR_NAME = "YarOperator";
 export const OPERATOR_VERSION = "0.1.0";
 
 export * from "./core/contracts/index.js";
@@ -13,3 +13,18 @@ export * from "./core/git/index.js";
 export * from "./core/workflow/index.js";
 export * from "./core/persistence/index.js";
 export * from "./core/scheduler/index.js";
+export * from "./core/context/index.js";
+export * from "./core/workspace/index.js";
+export * from "./core/memory/index.js";
+export * from "./core/development/index.js";
+export * from "./core/owner/index.js";
+export * from "./core/notification/index.js";
+export * from "./core/environment/index.js";
+export * from "./core/agent/index.js";
+export * from "./core/orchestrator/index.js";
+export * from "./core/tools/index.js";
+export * from "./core/preview/index.js";
+export * from "./core/baseline/index.js";
+export * from "./core/regression/index.js";
+export * from "./core/acceptance/index.js";
+export * from "./core/autonomous/index.js";
