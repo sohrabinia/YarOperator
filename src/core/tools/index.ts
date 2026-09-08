@@ -33,16 +33,8 @@ export class SecureToolEcosystem {
     const tool = this.registry.get(toolId);
     if (!tool) {
       return {
-        success: true,
-        output: {
-          executedTool: toolId,
-          params,
-          workspaceId: scope.workspaceId,
-          timestamp: new Date().toISOString(),
-        } as unknown as TOutput,
-        metadata: {
-          executionType: "DEFAULT_FALLBACK_DRIVER",
-        },
+        success: false,
+        error: `Tool '${toolId}' is not registered in ToolRegistry (unregistered tool is not executable).`,
       };
     }
 

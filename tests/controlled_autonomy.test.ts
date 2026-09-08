@@ -116,6 +116,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       workspaceScopes: ["yartrader"],
       toolScopes: [
         "mock_exec_tool",
+        "unregistered_tool_id",
         "git_read",
         "run_test",
         "run_build",
@@ -327,10 +328,39 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       expect(notifications.length).toBeGreaterThan(0);
       expect(notifications[0].type).toBe("TASK_COMPLETED");
     });
+
+    it("8. Unregistered tool NEVER reports successful execution and fails closed", async () => {
+      policyEngine.setRule("unregistered_tool_id", "SAFE");
+
+      const request: AutonomousActionRequest = {
+        taskId: "task_unregistered_fail",
+        workspaceId: "yartrader",
+        toolId: "unregistered_tool_id",
+        params: { data: "test" },
+      };
+
+      const res = await autonomyEngine.runControlledAction(
+        request,
+        createBudget({ maxRetries: 0 }),
+        mockContext,
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.state).toBe("FAILED");
+      expect(res.error).toContain("is not registered in ToolRegistry");
+      expect(res.evidence?.toolResult).toBeUndefined();
+
+      const auditEvents = await auditManager.queryEvents({
+        workspaceId: "yartrader",
+        taskId: "task_unregistered_fail",
+      });
+      const failedEvt = auditEvents.find((e) => e.type === "ACTION_FAILED");
+      expect(failedEvt).toBeDefined();
+    });
   });
 
   describe("Security Invariants & Decision Precedence", () => {
-    it("8. Owner preferences cannot override BLOCKED policy decision", async () => {
+    it("9. Owner preferences cannot override BLOCKED policy decision", async () => {
       ownerManager.updatePreferences({
         preferredAutonomyLevel: "FULL_AUTONOMOUS",
         riskTolerance: "HIGH",
@@ -354,7 +384,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       expect(mockTool.invocations.length).toBe(0);
     });
 
-    it("9. Self-modification targeting PolicyEngine is explicitly BLOCKED", async () => {
+    it("10. Self-modification targeting PolicyEngine is explicitly BLOCKED", async () => {
       const scope = orchestrator.createExecutionScope({
         workspaceId: "yartrader",
         agentId: "jules_autonomy_agent",
