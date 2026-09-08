@@ -13,3 +13,5 @@ export * from "./core/git/index.js";
 export * from "./core/workflow/index.js";
 export * from "./core/persistence/index.js";
 export * from "./core/scheduler/index.js";
+export * from "./core/context/index.js";
+export * from "./core/workspace/index.js";
