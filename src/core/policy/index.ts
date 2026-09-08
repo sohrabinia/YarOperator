@@ -132,6 +132,10 @@ export class PolicyEngine {
     this.explicitRules.set(toolId, level);
   }
 
+  getRule(toolId: string): ActionSafetyLevel | undefined {
+    return this.explicitRules.get(toolId);
+  }
+
   async evaluate(
     request: ToolRequest,
   ): Promise<{ allowed: boolean; reason?: string }> {
