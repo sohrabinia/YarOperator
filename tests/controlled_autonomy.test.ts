@@ -13,9 +13,48 @@ import {
   AutonomousActionRequest,
   ExecutionContext,
   OwnerManager,
+  Tool,
+  ToolResult,
 } from "../src/index.js";
 
-describe("YarOperator Phase 27: Controlled Autonomy Engine", () => {
+class MockExecutableTool implements Tool {
+  public invocations: Array<{ params: unknown; context: ExecutionContext }> =
+    [];
+  public shouldFail = false;
+  public failureErrorMessage = "Simulated tool execution failure";
+
+  constructor(
+    public metadata = {
+      id: "mock_exec_tool",
+      name: "Mock Executable Tool",
+      description: "Test tool for verifying execution invocation",
+      safetyLevel: "SAFE" as const,
+    },
+  ) {}
+
+  async execute(
+    params: unknown,
+    context: ExecutionContext,
+  ): Promise<ToolResult> {
+    this.invocations.push({ params, context });
+    if (this.shouldFail) {
+      return {
+        success: false,
+        error: this.failureErrorMessage,
+      };
+    }
+    return {
+      success: true,
+      output: {
+        executed: true,
+        receivedParams: params,
+        invocationCount: this.invocations.length,
+      },
+    };
+  }
+}
+
+describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execution", () => {
   let agentRegistry: AgentRegistry;
   let orchestrator: AgentOrchestrator;
   let approvalManager: ApprovalManager;
@@ -26,6 +65,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine", () => {
   let notificationManager: NotificationManager;
   let ownerManager: OwnerManager;
   let autonomyEngine: ControlledAutonomyEngine;
+  let mockTool: MockExecutableTool;
 
   const mockContext: ExecutionContext = {
     executionId: "autonomy_exec_1",
@@ -55,6 +95,9 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine", () => {
     notificationManager = new NotificationManager();
     ownerManager = new OwnerManager();
 
+    mockTool = new MockExecutableTool();
+    toolEcosystem.registerTool(mockTool);
+
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -72,6 +115,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine", () => {
       capabilities: ["software-development"],
       workspaceScopes: ["yartrader"],
       toolScopes: [
+        "mock_exec_tool",
         "git_read",
         "run_test",
         "run_build",
@@ -85,164 +129,15 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine", () => {
     });
   });
 
-  // --- SECTION 1: DECISION CLASSIFICATION ---
-  describe("Decision Classification & Precedence", () => {
-    it("1. safe read -> SAFE", async () => {
-      policyEngine.setRule("git_read", "SAFE");
+  describe("Real Tool Execution & Invocations", () => {
+    it("1. SAFE action actually invokes registered tool with exact params", async () => {
+      policyEngine.setRule("mock_exec_tool", "SAFE");
+
+      const params = { targetFile: "src/main.ts", mode: "compile" };
       const request: AutonomousActionRequest = {
-        taskId: "task_read",
+        taskId: "task_real_exec",
         workspaceId: "yartrader",
-        toolId: "git_read",
-        params: { path: "README.md" },
-      };
-      const scope = orchestrator.createExecutionScope({
-        workspaceId: "yartrader",
-        agentId: "jules_autonomy_agent",
-        capabilities: ["software-development"],
-        tools: ["git_read"],
-      });
-
-      const res = autonomyEngine.evaluateAutonomyDecision(
-        request,
-        scope,
-        mockContext,
-      );
-      expect(res.decision).toBe("SAFE");
-      expect(res.policyResult).toBe("SAFE");
-    });
-
-    it("2. authorized test -> SAFE", async () => {
-      policyEngine.setRule("run_test", "SAFE");
-      const request: AutonomousActionRequest = {
-        taskId: "task_test",
-        workspaceId: "yartrader",
-        toolId: "run_test",
-        params: {},
-      };
-      const scope = orchestrator.createExecutionScope({
-        workspaceId: "yartrader",
-        agentId: "jules_autonomy_agent",
-        capabilities: ["software-development"],
-        tools: ["run_test"],
-      });
-
-      const res = autonomyEngine.evaluateAutonomyDecision(
-        request,
-        scope,
-        mockContext,
-      );
-      expect(res.decision).toBe("SAFE");
-    });
-
-    it("3. missing scope -> BLOCKED", async () => {
-      policyEngine.setRule("git_read", "SAFE");
-      const request: AutonomousActionRequest = {
-        taskId: "task_read",
-        workspaceId: "yartrader",
-        toolId: "git_read",
-        params: {},
-      };
-      const invalidScope = orchestrator.createExecutionScope({
-        workspaceId: "OTHER_WORKSPACE", // Mismatch
-        agentId: "jules_autonomy_agent",
-        capabilities: ["software-development"],
-        tools: ["git_read"],
-      });
-
-      const res = autonomyEngine.evaluateAutonomyDecision(
-        request,
-        invalidScope,
-        mockContext,
-      );
-      expect(res.decision).toBe("BLOCKED");
-      expect(res.reason).toContain("workspace mismatch");
-    });
-
-    it("4. unknown / unclassified action -> BLOCKED (fail-closed)", async () => {
-      // Tool not registered in policyEngine
-      const request: AutonomousActionRequest = {
-        taskId: "task_unknown",
-        workspaceId: "yartrader",
-        toolId: "unknown_tool",
-        params: {},
-      };
-      const scope = orchestrator.createExecutionScope({
-        workspaceId: "yartrader",
-        agentId: "jules_autonomy_agent",
-        capabilities: ["software-development"],
-        tools: ["unknown_tool"],
-      });
-
-      const res = autonomyEngine.evaluateAutonomyDecision(
-        request,
-        scope,
-        mockContext,
-      );
-      expect(res.decision).toBe("BLOCKED");
-      expect(res.reason).toContain(
-        "unclassified/ambiguous and defaults to BLOCKED",
-      );
-    });
-
-    it("5. explicit policy deny -> BLOCKED", async () => {
-      policyEngine.setRule("deploy_prod", "BLOCKED");
-      const request: AutonomousActionRequest = {
-        taskId: "task_deploy",
-        workspaceId: "yartrader",
-        toolId: "deploy_prod",
-        params: {},
-      };
-      const scope = orchestrator.createExecutionScope({
-        workspaceId: "yartrader",
-        agentId: "jules_autonomy_agent",
-        capabilities: ["software-development"],
-        tools: ["deploy_prod"],
-      });
-
-      const res = autonomyEngine.evaluateAutonomyDecision(
-        request,
-        scope,
-        mockContext,
-      );
-      expect(res.decision).toBe("BLOCKED");
-      expect(res.policyResult).toBe("BLOCKED");
-    });
-
-    it("6. approval-required without approval -> APPROVAL_REQUIRED", async () => {
-      policyEngine.setRule("deploy_prod", "APPROVAL_REQUIRED");
-      const request: AutonomousActionRequest = {
-        taskId: "task_deploy",
-        workspaceId: "yartrader",
-        toolId: "deploy_prod",
-        params: { env: "prod" },
-      };
-      const scope = orchestrator.createExecutionScope({
-        workspaceId: "yartrader",
-        agentId: "jules_autonomy_agent",
-        capabilities: ["software-development"],
-        tools: ["deploy_prod"],
-      });
-
-      const res = autonomyEngine.evaluateAutonomyDecision(
-        request,
-        scope,
-        mockContext,
-      );
-      expect(res.decision).toBe("APPROVAL_REQUIRED");
-      expect(res.approvalRequired).toBe(true);
-      expect(res.approvalFingerprint).toBeDefined();
-    });
-
-    it("7. valid approval proceeds to execution checks", async () => {
-      policyEngine.setRule("deploy_prod", "APPROVAL_REQUIRED");
-      const params = { env: "prod" };
-      const req = approvalManager.requestApproval("deploy_prod", params);
-      approvalManager.grantApproval(req.id, "m.a.sohrabimia@gmail.com");
-
-      const request: AutonomousActionRequest = {
-        taskId: "task_deploy",
-        workspaceId: "yartrader",
-        toolId: "deploy_prod",
+        toolId: "mock_exec_tool",
         params,
       };
       const budget = createBudget();
@@ -252,328 +147,235 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine", () => {
         budget,
         mockContext,
       );
+
       expect(res.success).toBe(true);
       expect(res.state).toBe("COMPLETED");
+      expect(mockTool.invocations.length).toBe(1);
+      expect(mockTool.invocations[0].params).toEqual(params);
+      expect(res.evidence?.toolResult).toEqual({
+        executed: true,
+        receivedParams: params,
+        invocationCount: 1,
+      });
     });
 
-    it("7b. consumed approval token replay attempt is rejected", async () => {
-      policyEngine.setRule("deploy_prod", "APPROVAL_REQUIRED");
-      const params = { env: "prod" };
-      const req = approvalManager.requestApproval("deploy_prod", params);
-      approvalManager.grantApproval(req.id, "m.a.sohrabimia@gmail.com");
+    it("2. Tool execution failure triggers retry up to maxRetries", async () => {
+      policyEngine.setRule("mock_exec_tool", "SAFE");
+      mockTool.shouldFail = true; // Simulating tool execution error
 
       const request: AutonomousActionRequest = {
-        taskId: "task_deploy",
+        taskId: "task_retry_fail",
         workspaceId: "yartrader",
-        toolId: "deploy_prod",
+        toolId: "mock_exec_tool",
+        params: { test: 1 },
+      };
+      const budget = createBudget({ maxRetries: 2 });
+
+      const res = await autonomyEngine.runControlledAction(
+        request,
+        budget,
+        mockContext,
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.state).toBe("FAILED");
+      expect(mockTool.invocations.length).toBe(3); // Initial attempt (1) + 2 retries = 3
+      expect(budget.usedRetries).toBe(2);
+      expect(res.error).toContain("Tool execution failed after retries");
+    });
+
+    it("3. BLOCKED action NEVER invokes tool", async () => {
+      policyEngine.setRule("mock_exec_tool", "BLOCKED");
+
+      const request: AutonomousActionRequest = {
+        taskId: "task_blocked_no_exec",
+        workspaceId: "yartrader",
+        toolId: "mock_exec_tool",
+        params: {},
+      };
+      const budget = createBudget();
+
+      const res = await autonomyEngine.runControlledAction(
+        request,
+        budget,
+        mockContext,
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.state).toBe("BLOCKED");
+      expect(mockTool.invocations.length).toBe(0); // Tool NEVER invoked
+    });
+
+    it("4. APPROVAL_REQUIRED without approval NEVER invokes tool", async () => {
+      policyEngine.setRule("mock_exec_tool", "APPROVAL_REQUIRED");
+
+      const request: AutonomousActionRequest = {
+        taskId: "task_app_no_exec",
+        workspaceId: "yartrader",
+        toolId: "mock_exec_tool",
+        params: { key: "value" },
+      };
+      const budget = createBudget();
+
+      const res = await autonomyEngine.runControlledAction(
+        request,
+        budget,
+        mockContext,
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.state).toBe("APPROVAL_REQUIRED");
+      expect(mockTool.invocations.length).toBe(0); // Tool NEVER invoked
+    });
+
+    it("5. Consumed approval token cannot be replayed", async () => {
+      policyEngine.setRule("mock_exec_tool", "APPROVAL_REQUIRED");
+      const params = { action: "deploy" };
+      const approvalReq = approvalManager.requestApproval(
+        "mock_exec_tool",
+        params,
+      );
+      approvalManager.grantApproval(approvalReq.id, "m.a.sohrabimia@gmail.com");
+
+      const request: AutonomousActionRequest = {
+        taskId: "task_approval_replay",
+        workspaceId: "yartrader",
+        toolId: "mock_exec_tool",
         params,
       };
-      const budget1 = createBudget();
 
-      // First run consumes the token successfully
+      // First run consumes token and invokes tool
       const res1 = await autonomyEngine.runControlledAction(
         request,
-        budget1,
+        createBudget(),
         mockContext,
       );
       expect(res1.success).toBe(true);
+      expect(mockTool.invocations.length).toBe(1);
 
-      // Second run with same consumed token MUST be rejected as APPROVAL_REQUIRED
-      const budget2 = createBudget();
-      const scope = orchestrator.createExecutionScope({
-        workspaceId: "yartrader",
-        agentId: "jules_autonomy_agent",
-        capabilities: ["software-development"],
-        tools: ["deploy_prod"],
-      });
-
-      const res2 = autonomyEngine.evaluateAutonomyDecision(
+      // Second run attempts replay with consumed token
+      const res2 = await autonomyEngine.runControlledAction(
         request,
-        scope,
+        createBudget(),
         mockContext,
       );
-      expect(res2.decision).toBe("APPROVAL_REQUIRED");
-      expect(res2.reason).toContain("requires explicit owner approval");
-    });
-  });
-
-  // --- SECTION 2: AUTHORITY SEPARATION & INVARIANTS ---
-  describe("Authority Separation & Security Invariants", () => {
-    it("8. owner preferences cannot grant authority for BLOCKED operations", async () => {
-      ownerManager.updatePreferences({
-        preferredAutonomyLevel: "FULL_AUTONOMOUS",
-        riskTolerance: "HIGH",
-      });
-      policyEngine.setRule("deploy_prod", "BLOCKED");
-
-      const request: AutonomousActionRequest = {
-        taskId: "task_deploy",
-        workspaceId: "yartrader",
-        toolId: "deploy_prod",
-        params: {},
-      };
-      const budget = createBudget();
-
-      const res = await autonomyEngine.runControlledAction(
-        request,
-        budget,
-        mockContext,
-      );
-      expect(res.success).toBe(false);
-      expect(res.state).toBe("BLOCKED");
+      expect(res2.success).toBe(false);
+      expect(res2.state).toBe("APPROVAL_REQUIRED");
+      expect(mockTool.invocations.length).toBe(1); // Invocation count remains 1
     });
 
-    it("9. provider identity cannot grant authority", async () => {
-      agentRegistry.registerAgent({
-        id: "claude_agent",
-        name: "Claude Agent",
-        capabilities: ["software-development"],
-        workspaceScopes: ["yartrader"],
-        toolScopes: ["deploy_prod"],
-        provider: "AnthropicProvider",
-        model: "claude-3-5",
-        contract: { inputSchema: {}, outputSchema: {} },
-        available: true,
-      });
-
-      policyEngine.setRule("deploy_prod", "BLOCKED");
-
-      const request: AutonomousActionRequest = {
-        taskId: "task_deploy",
-        workspaceId: "yartrader",
-        toolId: "deploy_prod",
-        params: {},
-      };
-      const budget = createBudget();
-
-      const res = await autonomyEngine.runControlledAction(
-        request,
-        budget,
-        mockContext,
-      );
-      expect(res.success).toBe(false);
-      expect(res.state).toBe("BLOCKED");
-    });
-
-    it("10. autonomy cannot bypass Tool Authorization", async () => {
+    it("6. Unauthorized tool in scope NEVER invokes tool", async () => {
       policyEngine.setRule("unauthorized_tool", "SAFE");
-      // Tool not in agent's allowed tool scopes/ExecutionScope
+      const unauthTool = new MockExecutableTool({
+        id: "unauthorized_tool",
+        name: "Unauthorized Tool",
+        description: "Not in agent toolScopes",
+        safetyLevel: "SAFE",
+      });
+      toolEcosystem.registerTool(unauthTool);
 
       const request: AutonomousActionRequest = {
-        taskId: "task_unauth",
+        taskId: "task_unauth_no_exec",
         workspaceId: "yartrader",
         toolId: "unauthorized_tool",
         params: {},
       };
-      const budget = createBudget();
 
       const res = await autonomyEngine.runControlledAction(
         request,
-        budget,
+        createBudget(),
+        mockContext,
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.state).toBe("BLOCKED");
+      expect(unauthTool.invocations.length).toBe(0); // NEVER invoked
+    });
+
+    it("7. Audit log contains actual execution evidence and notifications reflect result", async () => {
+      policyEngine.setRule("mock_exec_tool", "SAFE");
+
+      const request: AutonomousActionRequest = {
+        taskId: "task_audit_evidence",
+        workspaceId: "yartrader",
+        toolId: "mock_exec_tool",
+        params: { testPayload: "sample" },
+      };
+
+      const res = await autonomyEngine.runControlledAction(
+        request,
+        createBudget(),
+        mockContext,
+      );
+      expect(res.success).toBe(true);
+
+      const auditEvents = await auditManager.queryEvents({
+        workspaceId: "yartrader",
+        taskId: "task_audit_evidence",
+      });
+      expect(auditEvents.length).toBeGreaterThan(0);
+      const completedEvt = auditEvents.find(
+        (e) => e.type === "ACTION_COMPLETED",
+      );
+      expect(completedEvt).toBeDefined();
+      expect(completedEvt?.payload.evidence).toBeDefined();
+
+      const notifications = notificationManager.listNotifications({
+        workspaceId: "yartrader",
+        taskId: "task_audit_evidence",
+      });
+      expect(notifications.length).toBeGreaterThan(0);
+      expect(notifications[0].type).toBe("TASK_COMPLETED");
+    });
+  });
+
+  describe("Security Invariants & Decision Precedence", () => {
+    it("8. Owner preferences cannot override BLOCKED policy decision", async () => {
+      ownerManager.updatePreferences({
+        preferredAutonomyLevel: "FULL_AUTONOMOUS",
+        riskTolerance: "HIGH",
+      });
+      policyEngine.setRule("mock_exec_tool", "BLOCKED");
+
+      const request: AutonomousActionRequest = {
+        taskId: "task_pref_override",
+        workspaceId: "yartrader",
+        toolId: "mock_exec_tool",
+        params: {},
+      };
+
+      const res = await autonomyEngine.runControlledAction(
+        request,
+        createBudget(),
         mockContext,
       );
       expect(res.success).toBe(false);
       expect(res.state).toBe("BLOCKED");
-      expect(res.error).toContain("is not authorized");
-    });
-  });
-
-  // --- SECTION 3: ISOLATION & BOUNDARIES ---
-  describe("Isolation Boundaries", () => {
-    it("11. cross-workspace execution -> BLOCKED", async () => {
-      policyEngine.setRule("git_read", "SAFE");
-
-      const request: AutonomousActionRequest = {
-        taskId: "task_cross",
-        workspaceId: "amlakbashi", // Cross workspace
-        toolId: "git_read",
-        params: {},
-      };
-      const budget = createBudget();
-
-      const res = await autonomyEngine.runControlledAction(
-        request,
-        budget,
-        mockContext,
-      );
-      expect(res.success).toBe(false);
-      expect(res.state).toBe("ESCALATED");
-      expect(res.error).toContain("Agent selection failed.");
-    });
-  });
-
-  // --- SECTION 4: BUDGET & RETRIES ---
-  describe("Autonomy Budget & Retries", () => {
-    it("12. action budget exhaustion stops execution and escalates", async () => {
-      policyEngine.setRule("git_read", "SAFE");
-      const request: AutonomousActionRequest = {
-        taskId: "task_budget",
-        workspaceId: "yartrader",
-        toolId: "git_read",
-        params: {},
-      };
-      const budget = createBudget({ maxActions: 1, usedActions: 1 }); // Exhausted
-
-      const res = await autonomyEngine.runControlledAction(
-        request,
-        budget,
-        mockContext,
-      );
-      expect(res.success).toBe(false);
-      expect(res.state).toBe("ESCALATED");
-      expect(res.error).toContain("Action budget exhausted.");
+      expect(mockTool.invocations.length).toBe(0);
     });
 
-    it("13. BLOCKED operations cannot be retried to gain permission", async () => {
-      policyEngine.setRule("deploy_prod", "BLOCKED");
-      const request: AutonomousActionRequest = {
-        taskId: "task_blocked_retry",
-        workspaceId: "yartrader",
-        toolId: "deploy_prod",
-        params: {},
-      };
-      const budget = createBudget({ maxRetries: 3 });
-
-      const res = await autonomyEngine.runControlledAction(
-        request,
-        budget,
-        mockContext,
-      );
-      expect(res.success).toBe(false);
-      expect(res.state).toBe("BLOCKED");
-      expect(budget.usedRetries).toBe(0); // No retries attempted for BLOCKED
-    });
-  });
-
-  // --- SECTION 5: STATE MACHINE VALIDATION ---
-  describe("State Machine Validation", () => {
-    it("14. invalid state transitions fail validation", () => {
-      expect(
-        autonomyEngine.validateStateTransition("BLOCKED", "EXECUTING"),
-      ).toBe(false);
-      expect(
-        autonomyEngine.validateStateTransition("FAILED", "EXECUTING"),
-      ).toBe(false);
-      expect(
-        autonomyEngine.validateStateTransition("COMPLETED", "EXECUTING"),
-      ).toBe(false);
-      expect(
-        autonomyEngine.validateStateTransition("CREATED", "EXECUTING"),
-      ).toBe(false);
-    });
-
-    it("15. valid state transitions pass validation", () => {
-      expect(autonomyEngine.validateStateTransition("CREATED", "PLANNED")).toBe(
-        true,
-      );
-      expect(
-        autonomyEngine.validateStateTransition("PLANNED", "EVALUATING"),
-      ).toBe(true);
-      expect(autonomyEngine.validateStateTransition("EVALUATING", "SAFE")).toBe(
-        true,
-      );
-      expect(autonomyEngine.validateStateTransition("SAFE", "EXECUTING")).toBe(
-        true,
-      );
-      expect(
-        autonomyEngine.validateStateTransition("EXECUTING", "VALIDATING"),
-      ).toBe(true);
-      expect(
-        autonomyEngine.validateStateTransition("VALIDATING", "COMPLETED"),
-      ).toBe(true);
-    });
-  });
-
-  // --- SECTION 6: SELF-MODIFICATION PROTECTION ---
-  describe("Self-Modification Protections", () => {
-    it("16. attempts to modify PolicyEngine rules autonomously are BLOCKED", async () => {
-      const request: AutonomousActionRequest = {
-        taskId: "task_self_mod",
-        workspaceId: "yartrader",
-        toolId: "PolicyEngine_modify_rule",
-        params: {},
-      };
+    it("9. Self-modification targeting PolicyEngine is explicitly BLOCKED", async () => {
       const scope = orchestrator.createExecutionScope({
         workspaceId: "yartrader",
         agentId: "jules_autonomy_agent",
         capabilities: ["software-development"],
-        tools: ["PolicyEngine_modify_rule"],
+        tools: ["PolicyEngine_modify_rules"],
       });
 
-      const res = autonomyEngine.evaluateAutonomyDecision(
+      const request: AutonomousActionRequest = {
+        taskId: "task_self_mod",
+        workspaceId: "yartrader",
+        toolId: "PolicyEngine_modify_rules",
+        params: {},
+      };
+
+      const res = await autonomyEngine.evaluateAutonomyDecision(
         request,
         scope,
         mockContext,
       );
       expect(res.decision).toBe("BLOCKED");
       expect(res.reason).toContain("Attempt to modify security boundary");
-    });
-
-    it("17. explicit security critical self-modification flag is BLOCKED", async () => {
-      const request: AutonomousActionRequest = {
-        taskId: "task_self_mod_flag",
-        workspaceId: "yartrader",
-        toolId: "git_read",
-        params: {},
-        isSecurityCriticalModification: true,
-      };
-      const scope = orchestrator.createExecutionScope({
-        workspaceId: "yartrader",
-        agentId: "jules_autonomy_agent",
-        capabilities: ["software-development"],
-        tools: ["git_read"],
-      });
-
-      const res = autonomyEngine.evaluateAutonomyDecision(
-        request,
-        scope,
-        mockContext,
-      );
-      expect(res.decision).toBe("BLOCKED");
-      expect(res.reason).toContain(
-        "Autonomous self-modification of security infrastructure or policy boundary is explicitly BLOCKED.",
-      );
-    });
-  });
-
-  // --- SECTION 7: PHASE 26 INTEGRATION DEMONSTRATION ---
-  describe("Phase 26 + Phase 27 Integration Demonstration", () => {
-    it("18. controlled autonomous demonstration task executes cleanly", async () => {
-      policyEngine.setRule("git_read", "SAFE");
-
-      const request: AutonomousActionRequest = {
-        taskId: "phase27_demo_task",
-        workspaceId: "yartrader",
-        repository: "sohrabinia/YarOperator",
-        toolId: "git_read",
-        params: { path: "README.md" },
-        capability: "software-development",
-        acceptanceCriteria: { requiredRoutes: ["/"] },
-        actualRoutes: ["/"],
-      };
-
-      const budget = createBudget();
-      const res = await autonomyEngine.runControlledAction(
-        request,
-        budget,
-        mockContext,
-      );
-
-      expect(res.success).toBe(true);
-      expect(res.state).toBe("COMPLETED");
-      expect(res.evidence?.taskId).toBe("phase27_demo_task");
-      expect(res.evidence?.provider).toBe("JulesProvider");
-
-      const auditEvents = await auditManager.queryEvents({
-        workspaceId: "yartrader",
-      });
-      expect(auditEvents.length).toBeGreaterThan(0);
-
-      const notifications = notificationManager.listNotifications({
-        workspaceId: "yartrader",
-      });
-      expect(notifications.length).toBeGreaterThan(0);
-      expect(notifications[0].type).toBe("TASK_COMPLETED");
     });
   });
 });

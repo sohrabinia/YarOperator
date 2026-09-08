@@ -5,7 +5,11 @@ import { AgentOrchestrator, ExecutionScope } from "../orchestrator/index.js";
 import { AuditManager } from "../audit/index.js";
 import { NotificationManager } from "../notification/index.js";
 import { AcceptanceEngine, AcceptanceCriteria } from "../acceptance/index.js";
-import { ExecutionContext, ActionSafetyLevel } from "../contracts/index.js";
+import {
+  ExecutionContext,
+  ActionSafetyLevel,
+  ToolResult,
+} from "../contracts/index.js";
 
 export type AutonomyDecisionLevel = "SAFE" | "APPROVAL_REQUIRED" | "BLOCKED";
 
@@ -203,11 +207,11 @@ export class ControlledAutonomyEngine {
     return true;
   }
 
-  evaluateAutonomyDecision(
+  async evaluateAutonomyDecision(
     request: AutonomousActionRequest,
     scope: ExecutionScope,
     context: ExecutionContext,
-  ): AutonomyDecision {
+  ): Promise<AutonomyDecision> {
     const now = new Date();
 
     // 1. Missing scope or workspace mismatch -> BLOCKED (Fail closed)
@@ -299,7 +303,6 @@ export class ControlledAutonomyEngine {
       request.params,
     );
 
-    // Precedence Evaluation: BLOCKED > APPROVAL_REQUIRED > SAFE
     const rule = this.policyEngine.getRule(request.toolId);
 
     if (rule === "BLOCKED") {
@@ -318,7 +321,6 @@ export class ControlledAutonomyEngine {
     }
 
     if (rule === "APPROVAL_REQUIRED") {
-      // Check if valid active approved token exists (MUST be 'APPROVED' status)
       const approvalReq = this.approvalManager.get(fingerprint);
       if (!approvalReq || approvalReq.status !== "APPROVED") {
         return {
@@ -335,15 +337,26 @@ export class ControlledAutonomyEngine {
           timestamp: now,
         };
       }
+    }
 
-      // Consume token for single-use protection
-      this.approvalManager.consumeApproval(request.toolId, request.params);
+    // Delegate evaluation directly to PolicyEngine (which handles single-use token consumption)
+    const policyEval = await this.policyEngine.evaluate({
+      toolId: request.toolId,
+      params: request.params,
+      context,
+    });
 
+    if (!policyEval.allowed) {
       return {
-        decision: "SAFE",
-        reason: `Tool '${request.toolId}' owner approval consumed successfully.`,
-        policyResult: "SAFE",
-        approvalRequired: false,
+        decision: "BLOCKED",
+        reason:
+          policyEval.reason ||
+          `Tool '${request.toolId}' blocked by PolicyEngine.`,
+        policyResult: (rule || "UNCLASSIFIED") as
+          ActionSafetyLevel | "UNCLASSIFIED",
+        approvalRequired: rule === "APPROVAL_REQUIRED",
+        approvalFingerprint:
+          rule === "APPROVAL_REQUIRED" ? fingerprint : undefined,
         scopeValid: true,
         toolAuthorized: true,
         workspaceId: request.workspaceId,
@@ -353,26 +366,10 @@ export class ControlledAutonomyEngine {
       };
     }
 
-    if (rule === "SAFE") {
-      return {
-        decision: "SAFE",
-        reason: `Tool '${request.toolId}' is classified as SAFE by PolicyEngine.`,
-        policyResult: "SAFE",
-        approvalRequired: false,
-        scopeValid: true,
-        toolAuthorized: true,
-        workspaceId: request.workspaceId,
-        environmentId: request.environmentId,
-        actionToolId: request.toolId,
-        timestamp: now,
-      };
-    }
-
-    // Default Fallback: Unknown / Ambiguous -> BLOCKED (Fail-closed)
     return {
-      decision: "BLOCKED",
-      reason: `Tool '${request.toolId}' is unclassified/ambiguous and defaults to BLOCKED.`,
-      policyResult: "UNCLASSIFIED",
+      decision: "SAFE",
+      reason: `Tool '${request.toolId}' is authorized by PolicyEngine.`,
+      policyResult: (rule || "SAFE") as ActionSafetyLevel | "UNCLASSIFIED",
       approvalRequired: false,
       scopeValid: true,
       toolAuthorized: true,
@@ -481,7 +478,11 @@ export class ControlledAutonomyEngine {
     }
 
     // Evaluate Autonomy Decision
-    const decision = this.evaluateAutonomyDecision(request, scope, context);
+    const decision = await this.evaluateAutonomyDecision(
+      request,
+      scope,
+      context,
+    );
 
     if (decision.decision === "BLOCKED") {
       currentState = "BLOCKED";
@@ -549,6 +550,44 @@ export class ControlledAutonomyEngine {
 
     currentState = "EXECUTING";
 
+    // ACTUALLY EXECUTE TOOL VIA SECURE TOOL ECOSYSTEM
+    const executionResult = await this.toolEcosystem.execute(
+      request.toolId,
+      request.params,
+      scope,
+      context,
+    );
+
+    if (!executionResult.success) {
+      if (budget.usedRetries < budget.maxRetries) {
+        budget.usedRetries++;
+        currentState = "RETRYING";
+        await this.auditManager.recordEvent(
+          "ACTION_FAILED",
+          {
+            error: `Tool execution failed: ${executionResult.error}. Retrying (${budget.usedRetries}/${budget.maxRetries})...`,
+          },
+          {
+            workspaceId: request.workspaceId,
+            taskId: request.taskId,
+            severity: "MEDIUM",
+          },
+        );
+        return this.runControlledAction(request, budget, context);
+      } else {
+        currentState = "FAILED";
+        const err = `Tool execution failed after retries: ${executionResult.error}`;
+        const esc = await this.escalate(request, currentState, err);
+        return {
+          success: false,
+          state: "FAILED",
+          decision,
+          escalation: esc,
+          error: err,
+        };
+      }
+    }
+
     // Transition EXECUTING -> VALIDATING
     if (this.validateStateTransition(currentState, "VALIDATING")) {
       currentState = "VALIDATING";
@@ -581,7 +620,6 @@ export class ControlledAutonomyEngine {
             severity: "MEDIUM",
           },
         );
-        // Retry execution
         return this.runControlledAction(request, budget, context);
       } else {
         currentState = "FAILED";
@@ -609,6 +647,7 @@ export class ControlledAutonomyEngine {
       provider: selectedAgent.provider,
       toolId: request.toolId,
       decision: decision.decision,
+      toolResult: executionResult.output || executionResult,
       acceptancePassed: true,
       timestamp: new Date().toISOString(),
     };
