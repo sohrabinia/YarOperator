@@ -11,29 +11,25 @@ export interface AcceptanceResult {
 export class AcceptanceEngine {
   evaluate(
     criteria: AcceptanceCriteria,
-    actualRoutesOrEvidence: string[] | Record<string, unknown> | unknown,
+    executionOutput: unknown,
   ): AcceptanceResult {
     let actualRoutes: string[] = [];
 
-    if (Array.isArray(actualRoutesOrEvidence)) {
-      actualRoutes = actualRoutesOrEvidence as string[];
-    } else if (
-      actualRoutesOrEvidence &&
-      typeof actualRoutesOrEvidence === "object"
-    ) {
-      const obj = actualRoutesOrEvidence as Record<string, unknown>;
+    if (Array.isArray(executionOutput)) {
+      actualRoutes = executionOutput as string[];
+    } else if (executionOutput && typeof executionOutput === "object") {
+      const obj = executionOutput as Record<string, unknown>;
       if (Array.isArray(obj.routes)) {
         actualRoutes = obj.routes as string[];
       } else if (Array.isArray(obj.actualRoutes)) {
         actualRoutes = obj.actualRoutes as string[];
-      } else if (obj.executed === true) {
-        actualRoutes = criteria.requiredRoutes;
       } else if (
         obj.toolResult &&
         typeof obj.toolResult === "object" &&
-        (obj.toolResult as Record<string, unknown>).executed === true
+        Array.isArray((obj.toolResult as Record<string, unknown>).routes)
       ) {
-        actualRoutes = criteria.requiredRoutes;
+        actualRoutes = (obj.toolResult as Record<string, unknown>)
+          .routes as string[];
       }
     }
 
@@ -44,7 +40,7 @@ export class AcceptanceEngine {
       return {
         passed: false,
         reasons: [
-          `Missing required acceptance routes in actual tool execution evidence: ${missing.join(", ")}`,
+          `Missing required acceptance routes in actual tool execution output: ${missing.join(", ")}`,
         ],
       };
     }

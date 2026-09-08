@@ -371,7 +371,7 @@ export class ControlledAutonomyEngine {
       reason: `Tool '${request.toolId}' is authorized by PolicyEngine.`,
       policyResult: (rule || "SAFE") as ActionSafetyLevel | "UNCLASSIFIED",
       approvalRequired: false,
-      scopeValid: true,
+      scopeValid: false,
       toolAuthorized: true,
       workspaceId: request.workspaceId,
       environmentId: request.environmentId,
@@ -597,13 +597,9 @@ export class ControlledAutonomyEngine {
     let acceptanceReasons: string[] = [];
 
     if (request.acceptanceCriteria) {
-      const executionEvidence = {
-        toolResult: executionResult.output,
-        actualRoutes: request.actualRoutes,
-      };
       const evalRes = this.acceptanceEngine.evaluate(
         request.acceptanceCriteria,
-        executionEvidence,
+        executionResult.output,
       );
       acceptancePassed = evalRes.passed;
       acceptanceReasons = evalRes.reasons;

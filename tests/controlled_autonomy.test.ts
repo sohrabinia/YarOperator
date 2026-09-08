@@ -43,12 +43,18 @@ class MockExecutableTool implements Tool {
         error: this.failureErrorMessage,
       };
     }
+    const route =
+      params && typeof params === "object" && "route" in params
+        ? String((params as Record<string, unknown>).route)
+        : undefined;
+
     return {
       success: true,
       output: {
         executed: true,
         receivedParams: params,
         invocationCount: this.invocations.length,
+        routes: route ? [route] : [],
       },
     };
   }
@@ -157,6 +163,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
         executed: true,
         receivedParams: params,
         invocationCount: 1,
+        routes: [],
       });
     });
 
@@ -358,9 +365,10 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       expect(failedEvt).toBeDefined();
     });
 
-    it("9. Acceptance criteria evaluation inspects actual tool execution evidence", async () => {
+    it("9. Acceptance criteria evaluation strictly inspects actual tool execution output", async () => {
       policyEngine.setRule("mock_exec_tool", "SAFE");
 
+      // Tool output produces /api/v1
       const request: AutonomousActionRequest = {
         taskId: "task_acceptance_evidence",
         workspaceId: "yartrader",
@@ -379,10 +387,34 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       expect(res.state).toBe("COMPLETED");
       expect(res.evidence?.toolResult).toBeDefined();
     });
+
+    it("10. Pre-supplied actualRoutes without supporting tool execution output fails acceptance", async () => {
+      policyEngine.setRule("mock_exec_tool", "SAFE");
+
+      // Request pre-supplies /fake_route in actualRoutes, but tool execution output does NOT produce it
+      const request: AutonomousActionRequest = {
+        taskId: "task_fake_routes_fail",
+        workspaceId: "yartrader",
+        toolId: "mock_exec_tool",
+        params: { route: "/real_route" }, // Tool output will produce /real_route, NOT /fake_route
+        acceptanceCriteria: { requiredRoutes: ["/fake_route"] },
+        actualRoutes: ["/fake_route"], // Fake pre-supplied routes
+      };
+
+      const res = await autonomyEngine.runControlledAction(
+        request,
+        createBudget({ maxRetries: 0 }),
+        mockContext,
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.state).toBe("FAILED");
+      expect(res.error).toContain("Missing required acceptance routes");
+    });
   });
 
   describe("Security Invariants & Decision Precedence", () => {
-    it("10. Owner preferences cannot override BLOCKED policy decision", async () => {
+    it("11. Owner preferences cannot override BLOCKED policy decision", async () => {
       ownerManager.updatePreferences({
         preferredAutonomyLevel: "FULL_AUTONOMOUS",
         riskTolerance: "HIGH",
@@ -406,7 +438,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       expect(mockTool.invocations.length).toBe(0);
     });
 
-    it("11. Self-modification targeting PolicyEngine is explicitly BLOCKED", async () => {
+    it("12. Self-modification targeting PolicyEngine is explicitly BLOCKED", async () => {
       const scope = orchestrator.createExecutionScope({
         workspaceId: "yartrader",
         agentId: "jules_autonomy_agent",
