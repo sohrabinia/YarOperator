@@ -98,3 +98,5 @@ export class MemoryManager {
     return this.store.query(scope);
   }
 }
+
+export * from "./operational.js";
