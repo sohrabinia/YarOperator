@@ -83,6 +83,9 @@ export interface OwnerCommandResult {
 
 export class OwnerManager {
   private profile?: OwnerProfile;
+  private authorizedEmailMap = new Map<string, string>([
+    ["m.a.sohrabinia@gmail.com", "owner_sohrab"],
+  ]);
   private preferences: PreferenceModel = {
     communication: {
       notificationPreference: "BATCHED",
@@ -153,6 +156,18 @@ export class OwnerManager {
 
   requiresApproval(category: OperationCategory): boolean {
     return this.approvalRules.get(category) ?? true;
+  }
+
+  registerAuthorizedEmail(email: string, ownerId: string): void {
+    this.authorizedEmailMap.set(email.toLowerCase(), ownerId);
+  }
+
+  getOwnerIdForEmail(email: string): string | undefined {
+    return this.authorizedEmailMap.get(email.toLowerCase());
+  }
+
+  isEmailAuthorized(email: string): boolean {
+    return this.authorizedEmailMap.has(email.toLowerCase());
   }
 }
 

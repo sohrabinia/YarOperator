@@ -4,7 +4,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const chatForm = document.getElementById("chatForm");
   const chatInput = document.getElementById("chatInput");
   const sendBtn = document.getElementById("sendBtn");
-  const tokenInput = document.getElementById("tokenInput");
+  const loginBtn = document.getElementById("loginBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+  const userBadge = document.getElementById("userBadge");
+  const userEmail = document.getElementById("userEmail");
   const messagesList = document.getElementById("messagesList");
   const welcomeBanner = document.getElementById("welcomeBanner");
   const thinkingBar = document.getElementById("thinkingBar");
@@ -12,6 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const statusLabel = document.getElementById("statusLabel");
 
   let isSubmitting = false;
+  let currentUser = null;
 
   // Auto-resize textarea
   chatInput.addEventListener("input", () => {
@@ -29,17 +33,45 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // Check auth session on page load
+  checkAuthSession();
+
+  async function checkAuthSession() {
+    try {
+      const res = await fetch("/auth/me", { method: "GET" });
+      const data = await res.json();
+
+      if (data.authenticated && data.user) {
+        currentUser = data.user;
+        if (loginBtn) loginBtn.classList.add("hidden");
+        if (userBadge) userBadge.classList.remove("hidden");
+        if (userEmail) userEmail.textContent = currentUser.email;
+      } else {
+        currentUser = null;
+        if (loginBtn) loginBtn.classList.remove("hidden");
+        if (userBadge) userBadge.classList.add("hidden");
+      }
+    } catch (err) {
+      console.error("Auth session check failed:", err);
+    }
+  }
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        await fetch("/auth/logout", { method: "POST" });
+        window.location.reload();
+      } catch (err) {
+        alert("خطا در خروج از حساب کاربری.");
+      }
+    });
+  }
+
   chatForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const messageText = chatInput.value.trim();
-    const token = tokenInput.value.trim();
 
     if (!messageText || isSubmitting) return;
-
-    if (!token) {
-      alert("لطفاً کلید دسترسی (Bearer Token) را وارد کنید.");
-      return;
-    }
 
     // Hide welcome banner on first message
     if (welcomeBanner) {
@@ -55,12 +87,11 @@ document.addEventListener("DOMContentLoaded", () => {
     setSubmittingState(true);
 
     try {
-      // 2. Submit request to POST /api/v1/operator/chat
+      // 2. Submit request to POST /api/v1/operator/chat (authenticated via session cookie)
       const response = await fetch("/api/v1/operator/chat", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           workspaceId: "default",

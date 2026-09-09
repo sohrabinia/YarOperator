@@ -18,3 +18,4 @@ The Development Assistant Mode allows YarOperator to coordinate, structure, and 
 
 - YarOperator structures tasks, suggests candidate agent assignments, and checks test/build results.
 - YarOperator CANNOT autonomously grant security approvals, attach unverified external AI agents with direct privileges, or perform sensitive remote merges without owner approval.
+- AI worker agents (e.g., Jules) must strictly observe the **Explicit Implementation Stop Conditions** defined in `AGENTS.md` and immediately halt execution upon triggering any stop condition.

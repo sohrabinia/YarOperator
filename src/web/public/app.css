@@ -116,9 +116,65 @@ body {
   transition: border-color 0.2s;
 }
 
-.token-input:focus {
-  outline: none;
-  border-color: var(--accent-gold);
+.auth-section {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.google-login-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-gold);
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  text-decoration: none;
+  font-weight: 500;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.google-login-btn:hover {
+  background-color: rgba(212, 175, 55, 0.15);
+  box-shadow: 0 0 10px var(--accent-gold-glow);
+}
+
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.user-email {
+  color: var(--accent-gold);
+  direction: ltr;
+}
+
+.logout-btn {
+  background: transparent;
+  border: 1px solid var(--state-blocked);
+  color: var(--state-blocked);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.logout-btn:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+}
+
+.hidden {
+  display: none !important;
 }
 
 .connection-pill {

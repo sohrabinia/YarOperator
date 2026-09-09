@@ -7,6 +7,11 @@ export async function createProductionServer(options?: {
   host?: string;
   bearerToken?: string;
   ownerId?: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRedirectUri?: string;
+  authorizedOwnerEmail?: string;
+  mockJwksPublicKeyPem?: string;
 }): Promise<{ server: OperatorWebServer; port: number }> {
   const apiHandler = bootstrapOperatorApplication({
     bearerToken: options?.bearerToken,
@@ -24,6 +29,11 @@ export async function createProductionServer(options?: {
     port: targetPort,
     host: targetHost,
     apiHandler,
+    googleClientId: options?.googleClientId,
+    googleClientSecret: options?.googleClientSecret,
+    googleRedirectUri: options?.googleRedirectUri,
+    authorizedOwnerEmail: options?.authorizedOwnerEmail,
+    mockJwksPublicKeyPem: options?.mockJwksPublicKeyPem,
   });
 
   const actualPort = await server.start();
