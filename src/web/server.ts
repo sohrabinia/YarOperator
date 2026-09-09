@@ -9,6 +9,9 @@ const __dirname = path.dirname(__filename);
 
 export interface OperatorServerOptions {
   port?: number;
+  host?: string;
+  maxBodySizeBytes?: number;
+  corsOrigin?: string;
   apiHandler: OperatorApiHandler;
   publicDir?: string;
 }
@@ -16,11 +19,17 @@ export interface OperatorServerOptions {
 export class OperatorWebServer {
   private server: http.Server | null = null;
   private port: number;
+  private host: string;
+  private maxBodySizeBytes: number;
+  private corsOrigin: string;
   private apiHandler: OperatorApiHandler;
   private publicDir: string;
 
   constructor(options: OperatorServerOptions) {
     this.port = options.port || 3000;
+    this.host = options.host || "127.0.0.1";
+    this.maxBodySizeBytes = options.maxBodySizeBytes || 1024 * 1024; // 1 MiB default
+    this.corsOrigin = options.corsOrigin || "http://127.0.0.1:3000";
     this.apiHandler = options.apiHandler;
     this.publicDir =
       options.publicDir || path.resolve(__dirname, "../../src/web/public");
@@ -30,20 +39,22 @@ export class OperatorWebServer {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
         this.handleRequest(req, res).catch((err) => {
-          console.error("SERVER ERROR:", err);
+          console.error("SERVER UNHANDLED ERROR:", err);
           if (!res.headersSent) {
-            res.writeHead(500, { "Content-Type": "application/json" });
+            res.writeHead(500, {
+              "Content-Type": "application/json; charset=utf-8",
+            });
             res.end(
               JSON.stringify({
                 success: false,
-                error: `Internal Server Error: ${err.message}`,
+                error: "Internal Server Error",
               }),
             );
           }
         });
       });
 
-      this.server.listen(this.port, () => {
+      this.server.listen(this.port, this.host, () => {
         const address = this.server?.address();
         const actualPort =
           typeof address === "object" && address ? address.port : this.port;
@@ -74,18 +85,20 @@ export class OperatorWebServer {
     return this.port;
   }
 
+  public getHost(): string {
+    return this.host;
+  }
+
   private async handleRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ): Promise<void> {
-    const url = new URL(
-      req.url || "/",
-      `http://${req.headers.host || "localhost"}`,
-    );
+    const hostHeader = req.headers.host || "127.0.0.1";
+    const url = new URL(req.url || "/", `http://${hostHeader}`);
     const pathname = url.pathname;
 
-    // CORS headers for local execution
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    // Configured CORS origin handling
+    res.setHeader("Access-Control-Allow-Origin", this.corsOrigin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader(
       "Access-Control-Allow-Headers",
@@ -100,64 +113,121 @@ export class OperatorWebServer {
 
     // 1. API Route: POST /api/v1/operator/chat
     if (pathname === "/api/v1/operator/chat" && req.method === "POST") {
-      try {
-        const bodyStr = await new Promise<string>((resolve, reject) => {
-          const chunks: Buffer[] = [];
-          req.on("data", (chunk) => {
-            chunks.push(chunk);
-          });
-          req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-          req.on("error", (err) => reject(err));
-        });
-
-        let body: any = {};
-        if (bodyStr) {
-          try {
-            body = JSON.parse(bodyStr);
-          } catch (jsonErr: any) {
-            res.writeHead(400, {
-              "Content-Type": "application/json; charset=utf-8",
-            });
-            res.end(
-              JSON.stringify({
-                success: false,
-                error: `Invalid JSON payload: ${jsonErr.message}`,
-              }),
-            );
-            return;
-          }
-        }
-
-        const apiReq: OperatorApiRequest = {
-          headers: {
-            authorization: req.headers.authorization,
-          },
-          body,
-        };
-
-        const apiRes = await this.apiHandler.handleChatRequest(apiReq);
-        const payloadBuf = Buffer.from(JSON.stringify(apiRes.body), "utf-8");
-
-        if (!res.headersSent) {
-          res.writeHead(apiRes.statusCode, {
+      // Early Content-Length check
+      const contentLengthHeader = req.headers["content-length"];
+      if (contentLengthHeader) {
+        const contentLength = parseInt(contentLengthHeader, 10);
+        if (!isNaN(contentLength) && contentLength > this.maxBodySizeBytes) {
+          res.writeHead(413, {
             "Content-Type": "application/json; charset=utf-8",
-            "Content-Length": payloadBuf.length.toString(),
             Connection: "close",
-          });
-          res.end(payloadBuf);
-        }
-      } catch (err: any) {
-        if (!res.headersSent) {
-          res.writeHead(500, {
-            "Content-Type": "application/json; charset=utf-8",
           });
           res.end(
             JSON.stringify({
               success: false,
-              error: err.message || "Server Error",
+              error:
+                "Payload Too Large: Request body exceeds maximum allowed size.",
+            }),
+          );
+          return;
+        }
+      }
+
+      // Streaming request body accumulation with size enforcement
+      let bodyStr = "";
+      let accumulatedBytes = 0;
+      let bodyExceeded = false;
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          req.on("data", (chunk: Buffer) => {
+            if (bodyExceeded) return;
+            accumulatedBytes += chunk.length;
+            if (accumulatedBytes > this.maxBodySizeBytes) {
+              bodyExceeded = true;
+              req.destroy(); // Stop receiving data
+              reject(new Error("PAYLOAD_TOO_LARGE"));
+              return;
+            }
+            bodyStr += chunk.toString("utf-8");
+          });
+
+          req.on("end", () => {
+            if (!bodyExceeded) resolve();
+          });
+
+          req.on("error", (err) => {
+            reject(err);
+          });
+        });
+      } catch (err: any) {
+        if (err.message === "PAYLOAD_TOO_LARGE" || bodyExceeded) {
+          if (!res.headersSent) {
+            res.writeHead(413, {
+              "Content-Type": "application/json; charset=utf-8",
+              Connection: "close",
+            });
+            res.end(
+              JSON.stringify({
+                success: false,
+                error:
+                  "Payload Too Large: Request body exceeds maximum allowed size.",
+              }),
+            );
+          }
+          return;
+        }
+        if (!res.headersSent) {
+          res.writeHead(400, {
+            "Content-Type": "application/json; charset=utf-8",
+            Connection: "close",
+          });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: "Bad Request: Unable to read request stream.",
             }),
           );
         }
+        return;
+      }
+
+      let body: any = {};
+      if (bodyStr) {
+        try {
+          body = JSON.parse(bodyStr);
+        } catch (jsonErr: any) {
+          res.writeHead(400, {
+            "Content-Type": "application/json; charset=utf-8",
+            Connection: "close",
+          });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: `Bad Request: Invalid JSON payload.`,
+            }),
+          );
+          return;
+        }
+      }
+
+      const apiReq: OperatorApiRequest = {
+        headers: {
+          authorization: req.headers.authorization,
+        },
+        body,
+      };
+
+      const apiRes = await this.apiHandler.handleChatRequest(apiReq);
+      const payloadBuf = Buffer.from(JSON.stringify(apiRes.body), "utf-8");
+
+      if (!res.headersSent) {
+        res.writeHead(apiRes.statusCode, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Length": payloadBuf.length.toString(),
+          Connection: "close",
+        });
+        res.end(payloadBuf);
       }
       return;
     }
@@ -173,31 +243,56 @@ export class OperatorWebServer {
       return;
     }
 
-    // 3. Static Assets: GET /app.css, /app.js, /favicon.ico, etc.
+    // 3. Static Assets: GET /app.css, /app.js, etc.
     if (req.method === "GET") {
-      const safeRelativePath = path
-        .normalize(pathname)
-        .replace(/^(\.\.[\/\\])+/, "");
-      const fileName = path.basename(safeRelativePath);
-      this.serveStaticFile(res, fileName);
+      this.serveStaticFile(res, pathname);
       return;
     }
 
     // 4. Not Found
-    res.writeHead(404, { "Content-Type": "application/json" });
+    res.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({ success: false, error: "Not Found" }));
   }
 
-  private serveStaticFile(res: http.ServerResponse, fileName: string): void {
-    const filePath = path.join(this.publicDir, fileName);
+  private serveStaticFile(
+    res: http.ServerResponse,
+    requestedPath: string,
+  ): void {
+    // Strict path traversal prevention
+    const safeBasename = path.basename(requestedPath);
+    const targetPath = path.join(this.publicDir, safeBasename);
 
-    if (!fs.existsSync(filePath)) {
-      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("404 Not Found");
+    // Verify resolved path stays strictly within publicDir
+    const resolvedPublicDir = path.resolve(this.publicDir);
+    const resolvedTargetPath = path.resolve(targetPath);
+
+    if (!resolvedTargetPath.startsWith(resolvedPublicDir)) {
+      res.writeHead(403, {
+        "Content-Type": "application/json; charset=utf-8",
+        Connection: "close",
+      });
+      res.end(
+        JSON.stringify({
+          success: false,
+          error: "Forbidden: Path traversal blocked.",
+        }),
+      );
       return;
     }
 
-    const ext = path.extname(filePath).toLowerCase();
+    if (
+      !fs.existsSync(resolvedTargetPath) ||
+      fs.statSync(resolvedTargetPath).isDirectory()
+    ) {
+      res.writeHead(404, {
+        "Content-Type": "application/json; charset=utf-8",
+        Connection: "close",
+      });
+      res.end(JSON.stringify({ success: false, error: "Not Found" }));
+      return;
+    }
+
+    const ext = path.extname(resolvedTargetPath).toLowerCase();
     const contentTypeMap: Record<string, string> = {
       ".html": "text/html; charset=utf-8",
       ".css": "text/css; charset=utf-8",
@@ -207,8 +302,22 @@ export class OperatorWebServer {
       ".png": "image/png",
     };
 
-    const contentType = contentTypeMap[ext] || "application/octet-stream";
-    const fileContent = fs.readFileSync(filePath);
+    const contentType = contentTypeMap[ext];
+    if (!contentType) {
+      res.writeHead(403, {
+        "Content-Type": "application/json; charset=utf-8",
+        Connection: "close",
+      });
+      res.end(
+        JSON.stringify({
+          success: false,
+          error: "Forbidden: Asset type not allowed.",
+        }),
+      );
+      return;
+    }
+
+    const fileContent = fs.readFileSync(resolvedTargetPath);
 
     res.writeHead(200, {
       "Content-Type": contentType,
