@@ -5,11 +5,8 @@ import { AgentOrchestrator, ExecutionScope } from "../orchestrator/index.js";
 import { AuditManager } from "../audit/index.js";
 import { NotificationManager } from "../notification/index.js";
 import { AcceptanceEngine, AcceptanceCriteria } from "../acceptance/index.js";
-import {
-  ExecutionContext,
-  ActionSafetyLevel,
-  ToolResult,
-} from "../contracts/index.js";
+import { DurableOperationalMemory } from "../memory/index.js";
+import { ExecutionContext, ActionSafetyLevel } from "../contracts/index.js";
 
 export type AutonomyDecisionLevel = "SAFE" | "APPROVAL_REQUIRED" | "BLOCKED";
 
@@ -28,6 +25,8 @@ export type AutonomyLifecycleState =
   | "COMPLETED"
   | "FAILED";
 
+export type FailureClassification = "RETRYABLE" | "NON_RETRYABLE" | "INTERNAL";
+
 export interface AutonomyBudget {
   maxActions: number;
   maxRetries: number;
@@ -35,6 +34,19 @@ export interface AutonomyBudget {
   usedActions: number;
   usedRetries: number;
   usedReplans: number;
+}
+
+export interface DurableRetryState {
+  [key: string]: unknown;
+  taskId: string;
+  workspaceId: string;
+  attemptNumber: number;
+  maxRetries: number;
+  failureClassification: FailureClassification;
+  failureReason: string;
+  nextRetryAtIso: string;
+  status: "RETRYING" | "EXHAUSTED" | "COMPLETED" | "CANCELLED";
+  updatedAtIso: string;
 }
 
 export interface AutonomyDecision {
@@ -194,6 +206,7 @@ export class ControlledAutonomyEngine {
     private acceptanceEngine: AcceptanceEngine,
     private auditManager: AuditManager,
     private notificationManager: NotificationManager,
+    private memory: DurableOperationalMemory = new DurableOperationalMemory(),
   ) {}
 
   validateStateTransition(
@@ -207,6 +220,57 @@ export class ControlledAutonomyEngine {
     return true;
   }
 
+  classifyFailure(reason: string): FailureClassification {
+    const lower = (reason || "").toLowerCase();
+    if (
+      lower.includes("security") ||
+      lower.includes("blocked") ||
+      lower.includes("unauthorized") ||
+      lower.includes("permission")
+    ) {
+      return "NON_RETRYABLE";
+    }
+    if (
+      lower.includes("crash") ||
+      lower.includes("bug") ||
+      lower.includes("internal") ||
+      lower.includes("fatal")
+    ) {
+      return "INTERNAL";
+    }
+    return "RETRYABLE";
+  }
+
+  getRetryState(taskId: string): DurableRetryState | null {
+    const entry = this.memory.getState<DurableRetryState>(
+      `task_retry:${taskId}`,
+    );
+    return entry ? entry.value : null;
+  }
+
+  recoverInterruptedTasks(atTime: Date = new Date()): {
+    recoveredCount: number;
+    resumedTasks: string[];
+  } {
+    const keys = this.memory.listKeys("task_retry:");
+    const resumedTasks: string[] = [];
+    const nowIso = atTime.toISOString();
+
+    for (const key of keys) {
+      const entry = this.memory.getState<DurableRetryState>(key);
+      if (entry && entry.value && entry.value.status === "RETRYING") {
+        if (entry.value.nextRetryAtIso <= nowIso) {
+          resumedTasks.push(entry.value.taskId);
+        }
+      }
+    }
+
+    return {
+      recoveredCount: resumedTasks.length,
+      resumedTasks,
+    };
+  }
+
   async evaluateAutonomyDecision(
     request: AutonomousActionRequest,
     scope: ExecutionScope,
@@ -214,7 +278,6 @@ export class ControlledAutonomyEngine {
   ): Promise<AutonomyDecision> {
     const now = new Date();
 
-    // 1. Missing scope or workspace mismatch -> BLOCKED (Fail closed)
     if (
       !request.workspaceId ||
       !request.toolId ||
@@ -235,7 +298,6 @@ export class ControlledAutonomyEngine {
       };
     }
 
-    // 2. Protected Security Infrastructure Self-Modification Protection
     if (request.isSecurityCriticalModification) {
       return {
         decision: "BLOCKED",
@@ -276,7 +338,6 @@ export class ControlledAutonomyEngine {
       }
     }
 
-    // 3. Tool Authorization Check in ExecutionScope
     const isAuthorizedTool = this.toolEcosystem.isToolAuthorized(
       request.toolId,
       scope,
@@ -297,7 +358,6 @@ export class ControlledAutonomyEngine {
       };
     }
 
-    // 4. PolicyEngine Evaluation (Authoritative Security Gate)
     const fingerprint = this.approvalManager.createFingerprint(
       request.toolId,
       request.params,
@@ -339,7 +399,6 @@ export class ControlledAutonomyEngine {
       }
     }
 
-    // Delegate evaluation directly to PolicyEngine (which handles single-use token consumption)
     const policyEval = await this.policyEngine.evaluate({
       toolId: request.toolId,
       params: request.params,
@@ -390,11 +449,11 @@ export class ControlledAutonomyEngine {
     decision: AutonomyDecision;
     escalation?: EscalationRecord;
     evidence?: Record<string, unknown>;
+    retryState?: DurableRetryState;
     error?: string;
   }> {
     let currentState: AutonomyLifecycleState = "CREATED";
 
-    // Check Budget Limits
     if (budget.usedActions >= budget.maxActions) {
       const esc = await this.escalate(
         request,
@@ -422,12 +481,10 @@ export class ControlledAutonomyEngine {
 
     budget.usedActions++;
 
-    // Transition CREATED -> PLANNED
     if (this.validateStateTransition(currentState, "PLANNED")) {
       currentState = "PLANNED";
     }
 
-    // Resolve Agent & Execution Scope
     const capability = request.capability || "software-development";
     const selectedAgent = this.orchestrator.selectAgentForCapability(
       capability,
@@ -472,12 +529,10 @@ export class ControlledAutonomyEngine {
       tools: allowedToolsForScope,
     });
 
-    // Transition PLANNED -> EVALUATING
     if (this.validateStateTransition(currentState, "EVALUATING")) {
       currentState = "EVALUATING";
     }
 
-    // Evaluate Autonomy Decision
     const decision = await this.evaluateAutonomyDecision(
       request,
       scope,
@@ -533,12 +588,10 @@ export class ControlledAutonomyEngine {
       };
     }
 
-    // State is SAFE
     if (this.validateStateTransition(currentState, "SAFE")) {
       currentState = "SAFE";
     }
 
-    // Revalidate Runtime Authorization before execution: SAFE -> EXECUTING
     if (!this.validateStateTransition(currentState, "EXECUTING")) {
       return {
         success: false,
@@ -550,7 +603,6 @@ export class ControlledAutonomyEngine {
 
     currentState = "EXECUTING";
 
-    // ACTUALLY EXECUTE TOOL VIA SECURE TOOL ECOSYSTEM
     const executionResult = await this.toolEcosystem.execute(
       request.toolId,
       request.params,
@@ -559,13 +611,41 @@ export class ControlledAutonomyEngine {
     );
 
     if (!executionResult.success) {
-      if (budget.usedRetries < budget.maxRetries) {
+      const reason = executionResult.error || "Tool execution failed";
+      const classification = this.classifyFailure(reason);
+
+      if (
+        budget.usedRetries < budget.maxRetries &&
+        classification === "RETRYABLE"
+      ) {
         budget.usedRetries++;
         currentState = "RETRYING";
+
+        const backoffMs = Math.min(
+          1000 * Math.pow(2, budget.usedRetries - 1),
+          30000,
+        );
+        const nextRetryIso = new Date(Date.now() + backoffMs).toISOString();
+
+        const retryState: DurableRetryState = {
+          taskId: request.taskId,
+          workspaceId: request.workspaceId,
+          attemptNumber: budget.usedRetries,
+          maxRetries: budget.maxRetries,
+          failureClassification: classification,
+          failureReason: reason,
+          nextRetryAtIso: nextRetryIso,
+          status: "RETRYING",
+          updatedAtIso: new Date().toISOString(),
+        };
+
+        this.memory.saveState(`task_retry:${request.taskId}`, retryState);
+
         await this.auditManager.recordEvent(
           "ACTION_FAILED",
           {
-            error: `Tool execution failed: ${executionResult.error}. Retrying (${budget.usedRetries}/${budget.maxRetries})...`,
+            error: `Tool execution failed: ${reason}. Durable retry recorded (${budget.usedRetries}/${budget.maxRetries}).`,
+            retryState,
           },
           {
             workspaceId: request.workspaceId,
@@ -573,22 +653,37 @@ export class ControlledAutonomyEngine {
             severity: "MEDIUM",
           },
         );
+
         return this.runControlledAction(request, budget, context);
       } else {
         currentState = "FAILED";
-        const err = `Tool execution failed after retries: ${executionResult.error}`;
+        const err = `Tool execution failed after retries: ${reason}`;
+
+        const retryState: DurableRetryState = {
+          taskId: request.taskId,
+          workspaceId: request.workspaceId,
+          attemptNumber: budget.usedRetries,
+          maxRetries: budget.maxRetries,
+          failureClassification: classification,
+          failureReason: reason,
+          nextRetryAtIso: new Date().toISOString(),
+          status: "EXHAUSTED",
+          updatedAtIso: new Date().toISOString(),
+        };
+        this.memory.saveState(`task_retry:${request.taskId}`, retryState);
+
         const esc = await this.escalate(request, currentState, err);
         return {
           success: false,
           state: "FAILED",
           decision,
           escalation: esc,
+          retryState,
           error: err,
         };
       }
     }
 
-    // Transition EXECUTING -> VALIDATING
     if (this.validateStateTransition(currentState, "VALIDATING")) {
       currentState = "VALIDATING";
     }
@@ -606,13 +701,41 @@ export class ControlledAutonomyEngine {
     }
 
     if (!acceptancePassed) {
-      if (budget.usedRetries < budget.maxRetries) {
+      const reason = `Acceptance check failed: ${acceptanceReasons.join("; ")}`;
+      const classification = this.classifyFailure(reason);
+
+      if (
+        budget.usedRetries < budget.maxRetries &&
+        classification === "RETRYABLE"
+      ) {
         budget.usedRetries++;
         currentState = "RETRYING";
+
+        const backoffMs = Math.min(
+          1000 * Math.pow(2, budget.usedRetries - 1),
+          30000,
+        );
+        const nextRetryIso = new Date(Date.now() + backoffMs).toISOString();
+
+        const retryState: DurableRetryState = {
+          taskId: request.taskId,
+          workspaceId: request.workspaceId,
+          attemptNumber: budget.usedRetries,
+          maxRetries: budget.maxRetries,
+          failureClassification: classification,
+          failureReason: reason,
+          nextRetryAtIso: nextRetryIso,
+          status: "RETRYING",
+          updatedAtIso: new Date().toISOString(),
+        };
+
+        this.memory.saveState(`task_retry:${request.taskId}`, retryState);
+
         await this.auditManager.recordEvent(
           "ACTION_FAILED",
           {
-            error: `Acceptance check failed: ${acceptanceReasons.join("; ")}. Retrying...`,
+            error: `${reason}. Durable retry recorded (${budget.usedRetries}/${budget.maxRetries}).`,
+            retryState,
           },
           {
             workspaceId: request.workspaceId,
@@ -620,25 +743,53 @@ export class ControlledAutonomyEngine {
             severity: "MEDIUM",
           },
         );
+
         return this.runControlledAction(request, budget, context);
       } else {
         currentState = "FAILED";
         const err = `Acceptance failed after retries: ${acceptanceReasons.join("; ")}`;
+
+        const retryState: DurableRetryState = {
+          taskId: request.taskId,
+          workspaceId: request.workspaceId,
+          attemptNumber: budget.usedRetries,
+          maxRetries: budget.maxRetries,
+          failureClassification: classification,
+          failureReason: reason,
+          nextRetryAtIso: new Date().toISOString(),
+          status: "EXHAUSTED",
+          updatedAtIso: new Date().toISOString(),
+        };
+        this.memory.saveState(`task_retry:${request.taskId}`, retryState);
+
         const esc = await this.escalate(request, currentState, err);
         return {
           success: false,
           state: "FAILED",
           decision,
           escalation: esc,
+          retryState,
           error: err,
         };
       }
     }
 
-    // Transition VALIDATING -> COMPLETED
     if (this.validateStateTransition(currentState, "COMPLETED")) {
       currentState = "COMPLETED";
     }
+
+    const completedRetryState: DurableRetryState = {
+      taskId: request.taskId,
+      workspaceId: request.workspaceId,
+      attemptNumber: budget.usedRetries,
+      maxRetries: budget.maxRetries,
+      failureClassification: "RETRYABLE",
+      failureReason: "",
+      nextRetryAtIso: new Date().toISOString(),
+      status: "COMPLETED",
+      updatedAtIso: new Date().toISOString(),
+    };
+    this.memory.saveState(`task_retry:${request.taskId}`, completedRetryState);
 
     const evidence = {
       taskId: request.taskId,

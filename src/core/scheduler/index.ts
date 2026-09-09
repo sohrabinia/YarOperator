@@ -8,6 +8,14 @@ const require = createRequire(import.meta.url);
 const cronParser = require("cron-parser");
 
 export type ScheduleType = "INTERVAL" | "ONCE" | "CRON";
+export type ScheduleStatus = "SCHEDULED" | "DUE" | "COMPLETED" | "CANCELLED";
+
+export class SchedulerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SchedulerError";
+  }
+}
 
 export interface ScheduleDefinition {
   id: string;
@@ -15,9 +23,26 @@ export interface ScheduleDefinition {
   cronExpression?: string;
   intervalMs?: number;
   runAtUtc?: string;
+  timezone?: string;
+  payload?: Record<string, unknown>;
+  workflow?: WorkflowDefinition;
+  enabled?: boolean;
+}
+
+export interface ScheduleRecord {
+  id: string;
+  type: ScheduleType;
+  cronExpression?: string;
+  intervalMs?: number;
+  runAtUtc?: string;
+  nextRunAtUtc: string;
   timezone: string;
-  workflow: WorkflowDefinition;
+  payload?: Record<string, unknown>;
+  workflow?: WorkflowDefinition;
+  status: ScheduleStatus;
   enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface OccurrenceRecord {
@@ -45,7 +70,7 @@ export class DurableScheduler {
 
   constructor(
     dbPath: string = ":memory:",
-    private workflowEngine: WorkflowEngine,
+    private workflowEngine?: WorkflowEngine,
     private clock: Clock = new SystemClock(),
   ) {
     if (dbPath !== ":memory:") {
@@ -67,9 +92,14 @@ export class DurableScheduler {
         cron_expression TEXT,
         interval_ms INTEGER,
         run_at_utc TEXT,
+        next_run_at_utc TEXT NOT NULL,
         timezone TEXT NOT NULL,
-        workflow_json TEXT NOT NULL,
-        enabled INTEGER NOT NULL
+        payload_json TEXT,
+        workflow_json TEXT,
+        status TEXT NOT NULL,
+        enabled INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS occurrences (
@@ -85,33 +115,54 @@ export class DurableScheduler {
     `);
   }
 
-  registerSchedule(schedule: ScheduleDefinition): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO schedules (id, type, cron_expression, interval_ms, run_at_utc, timezone, workflow_json, enabled)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+  private validateScheduleInput(schedule: ScheduleDefinition): void {
+    if (
+      !schedule.id ||
+      typeof schedule.id !== "string" ||
+      schedule.id.trim().length === 0
+    ) {
+      throw new SchedulerError("Schedule ID must be a non-empty string.");
+    }
 
-    stmt.run(
-      schedule.id,
-      schedule.type,
-      schedule.cronExpression || null,
-      schedule.intervalMs || null,
-      schedule.runAtUtc || null,
-      schedule.timezone,
-      JSON.stringify(schedule.workflow),
-      schedule.enabled ? 1 : 0,
-    );
+    if (!["ONCE", "INTERVAL", "CRON"].includes(schedule.type)) {
+      throw new SchedulerError(`Invalid schedule type '${schedule.type}'.`);
+    }
 
-    this.scheduleNextOccurrence(schedule.id);
+    if (schedule.type === "ONCE") {
+      if (!schedule.runAtUtc) {
+        throw new SchedulerError("ONCE schedule requires runAtUtc timestamp.");
+      }
+      const runDate = new Date(schedule.runAtUtc);
+      if (isNaN(runDate.getTime())) {
+        throw new SchedulerError("Invalid runAtUtc timestamp.");
+      }
+    } else if (schedule.type === "INTERVAL") {
+      if (
+        !schedule.intervalMs ||
+        typeof schedule.intervalMs !== "number" ||
+        schedule.intervalMs <= 0
+      ) {
+        throw new SchedulerError(
+          "INTERVAL schedule requires positive intervalMs.",
+        );
+      }
+    } else if (schedule.type === "CRON") {
+      if (!schedule.cronExpression) {
+        throw new SchedulerError("CRON schedule requires cronExpression.");
+      }
+    }
   }
 
-  calculateNextDue(schedule: ScheduleDefinition, afterDate: Date): Date | null {
-    if (!schedule.enabled) return null;
+  public calculateNextDue(
+    schedule: ScheduleDefinition,
+    afterDate: Date,
+  ): Date | null {
+    if (schedule.enabled === false) return null;
 
     if (schedule.type === "ONCE") {
       if (!schedule.runAtUtc) return null;
       const target = new Date(schedule.runAtUtc);
-      return target > afterDate ? target : null;
+      return target >= afterDate ? target : null;
     }
 
     if (schedule.type === "INTERVAL") {
@@ -136,37 +187,159 @@ export class DurableScheduler {
     return null;
   }
 
+  createSchedule(schedule: ScheduleDefinition): ScheduleRecord {
+    this.validateScheduleInput(schedule);
+
+    const now = this.clock.now();
+    const nextDue =
+      this.calculateNextDue(schedule, now) ||
+      (schedule.runAtUtc ? new Date(schedule.runAtUtc) : now);
+    const timezone = schedule.timezone || "UTC";
+    const status: ScheduleStatus = "SCHEDULED";
+    const enabled = schedule.enabled !== false;
+    const nowIso = now.toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO schedules (
+        id, type, cron_expression, interval_ms, run_at_utc, next_run_at_utc,
+        timezone, payload_json, workflow_json, status, enabled, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      schedule.id,
+      schedule.type,
+      schedule.cronExpression || null,
+      schedule.intervalMs || null,
+      schedule.runAtUtc || null,
+      nextDue.toISOString(),
+      timezone,
+      schedule.payload ? JSON.stringify(schedule.payload) : null,
+      schedule.workflow ? JSON.stringify(schedule.workflow) : null,
+      status,
+      enabled ? 1 : 0,
+      nowIso,
+      nowIso,
+    );
+
+    return this.getSchedule(schedule.id)!;
+  }
+
+  registerSchedule(schedule: ScheduleDefinition): void {
+    this.createSchedule(schedule);
+    this.scheduleNextOccurrence(schedule.id);
+  }
+
+  getSchedule(id: string): ScheduleRecord | null {
+    if (!id || typeof id !== "string") return null;
+
+    const stmt = this.db.prepare(`SELECT * FROM schedules WHERE id = ?`);
+    const row = stmt.get(id) as any;
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      type: row.type as ScheduleType,
+      cronExpression: row.cron_expression || undefined,
+      intervalMs: row.interval_ms || undefined,
+      runAtUtc: row.run_at_utc || undefined,
+      nextRunAtUtc: row.next_run_at_utc,
+      timezone: row.timezone,
+      payload: row.payload_json ? JSON.parse(row.payload_json) : undefined,
+      workflow: row.workflow_json ? JSON.parse(row.workflow_json) : undefined,
+      status: row.status as ScheduleStatus,
+      enabled: row.enabled === 1,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  listSchedules(status?: ScheduleStatus): ScheduleRecord[] {
+    let stmt;
+    if (status) {
+      stmt = this.db.prepare(
+        `SELECT id FROM schedules WHERE status = ? ORDER BY next_run_at_utc ASC, created_at ASC, id ASC`,
+      );
+      const rows = stmt.all(status) as { id: string }[];
+      return rows.map((r) => this.getSchedule(r.id)!);
+    } else {
+      stmt = this.db.prepare(
+        `SELECT id FROM schedules ORDER BY next_run_at_utc ASC, created_at ASC, id ASC`,
+      );
+      const rows = stmt.all() as { id: string }[];
+      return rows.map((r) => this.getSchedule(r.id)!);
+    }
+  }
+
+  getDueSchedules(atTime?: Date): ScheduleRecord[] {
+    const checkTimeIso = (atTime || this.clock.now()).toISOString();
+    const stmt = this.db.prepare(`
+      SELECT id FROM schedules
+      WHERE status = 'SCHEDULED' AND enabled = 1 AND next_run_at_utc <= ?
+      ORDER BY next_run_at_utc ASC, created_at ASC, id ASC
+    `);
+
+    const rows = stmt.all(checkTimeIso) as { id: string }[];
+    return rows.map((r) => this.getSchedule(r.id)!);
+  }
+
+  completeSchedule(id: string): boolean {
+    const schedule = this.getSchedule(id);
+    if (!schedule) return false;
+
+    const nowIso = this.clock.now().toISOString();
+    const stmt = this.db.prepare(`
+      UPDATE schedules
+      SET status = 'COMPLETED', updated_at = ?
+      WHERE id = ?
+    `);
+
+    stmt.run(nowIso, id);
+    return true;
+  }
+
+  cancelSchedule(id: string): boolean {
+    const schedule = this.getSchedule(id);
+    if (!schedule) return false;
+
+    const nowIso = this.clock.now().toISOString();
+    const stmt = this.db.prepare(`
+      UPDATE schedules
+      SET status = 'CANCELLED', updated_at = ?
+      WHERE id = ?
+    `);
+
+    stmt.run(nowIso, id);
+    return true;
+  }
+
+  deleteSchedule(id: string): boolean {
+    const stmt = this.db.prepare(`DELETE FROM schedules WHERE id = ?`);
+    const res = stmt.run(id);
+    return typeof res.changes === "bigint"
+      ? res.changes > 0n
+      : (res.changes ?? 0) > 0;
+  }
+
   scheduleNextOccurrence(
     scheduleId: string,
     fromDate?: Date,
   ): OccurrenceRecord | null {
-    const schedStmt = this.db.prepare(`SELECT * FROM schedules WHERE id = ?`);
-    const s = schedStmt.get(scheduleId);
+    const s = this.getSchedule(scheduleId);
     if (!s || !s.enabled) return null;
 
-    const schedule: ScheduleDefinition = {
-      id: s.id,
-      type: s.type,
-      cronExpression: s.cron_expression,
-      intervalMs: s.interval_ms,
-      runAtUtc: s.run_at_utc,
-      timezone: s.timezone,
-      workflow: JSON.parse(s.workflow_json),
-      enabled: s.enabled === 1,
-    };
-
     const baseTime = fromDate || this.clock.now();
-    const dueAt = this.calculateNextDue(schedule, baseTime);
+    const dueAt = this.calculateNextDue(s, baseTime);
     if (!dueAt) return null;
 
-    const occId = `occ_${schedule.id}_${dueAt.getTime()}`;
+    const occId = `occ_${s.id}_${dueAt.getTime()}`;
 
     const stmt = this.db.prepare(`
       INSERT OR IGNORE INTO occurrences (id, schedule_id, due_at_utc, status)
       VALUES (?, ?, ?, 'PENDING')
     `);
 
-    stmt.run(occId, schedule.id, dueAt.toISOString());
+    stmt.run(occId, s.id, dueAt.toISOString());
 
     return this.getOccurrence(occId);
   }
@@ -213,24 +386,46 @@ export class DurableScheduler {
     }
   }
 
+  reconcileStaleClaims(staleThresholdMs: number = 300000): number {
+    const thresholdIso = new Date(
+      this.clock.now().getTime() - staleThresholdMs,
+    ).toISOString();
+    const stmt = this.db.prepare(`
+      UPDATE occurrences
+      SET status = 'PENDING', claimed_at_utc = NULL, claimed_by = NULL
+      WHERE status = 'CLAIMED' AND claimed_at_utc <= ?
+    `);
+    const res = stmt.run(thresholdIso);
+    return typeof res.changes === "bigint"
+      ? Number(res.changes)
+      : (res.changes ?? 0);
+  }
+
   async executeOccurrence(
     occurrenceId: string,
     executionId: string,
   ): Promise<boolean> {
+    if (!this.workflowEngine) {
+      throw new SchedulerError(
+        "WorkflowEngine is required to execute occurrences.",
+      );
+    }
+
     const occ = this.getOccurrence(occurrenceId);
     if (!occ || occ.status !== "CLAIMED") return false;
 
-    const schedStmt = this.db.prepare(`SELECT * FROM schedules WHERE id = ?`);
-    const s = schedStmt.get(occ.scheduleId);
-    if (!s) return false;
+    const s = this.getSchedule(occ.scheduleId);
+    if (!s || !s.workflow) return false;
 
-    const workflow: WorkflowDefinition = JSON.parse(s.workflow_json);
     const context: ExecutionContext = {
       executionId,
       timestamp: this.clock.now(),
     };
 
-    const result = await this.workflowEngine.executeWorkflow(workflow, context);
+    const result = await this.workflowEngine.executeWorkflow(
+      s.workflow,
+      context,
+    );
 
     const status = result.success ? "EXECUTED" : "FAILED";
     const nowIso = this.clock.now().toISOString();
@@ -243,7 +438,7 @@ export class DurableScheduler {
 
     updateStmt.run(status, nowIso, occurrenceId);
 
-    if (s.enabled === 1 && (s.type === "INTERVAL" || s.type === "CRON")) {
+    if (s.enabled && (s.type === "INTERVAL" || s.type === "CRON")) {
       this.scheduleNextOccurrence(s.id, new Date(occ.dueAtUtc));
     }
 
