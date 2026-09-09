@@ -162,7 +162,7 @@ export class DurableScheduler {
     if (schedule.type === "ONCE") {
       if (!schedule.runAtUtc) return null;
       const target = new Date(schedule.runAtUtc);
-      return target > afterDate ? target : null;
+      return target >= afterDate ? target : null;
     }
 
     if (schedule.type === "INTERVAL") {
@@ -384,6 +384,21 @@ export class DurableScheduler {
       this.db.exec("ROLLBACK;");
       throw err;
     }
+  }
+
+  reconcileStaleClaims(staleThresholdMs: number = 300000): number {
+    const thresholdIso = new Date(
+      this.clock.now().getTime() - staleThresholdMs,
+    ).toISOString();
+    const stmt = this.db.prepare(`
+      UPDATE occurrences
+      SET status = 'PENDING', claimed_at_utc = NULL, claimed_by = NULL
+      WHERE status = 'CLAIMED' AND claimed_at_utc <= ?
+    `);
+    const res = stmt.run(thresholdIso);
+    return typeof res.changes === "bigint"
+      ? Number(res.changes)
+      : (res.changes ?? 0);
   }
 
   async executeOccurrence(
