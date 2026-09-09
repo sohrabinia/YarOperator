@@ -6,6 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
+    "start": "node ./dist/web/index.js",
     "build": "tsc",
     "test": "vitest run",
     "lint": "tsc --noEmit",
