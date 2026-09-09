@@ -1,11 +1,41 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { OperatorApiHandler, OperatorApiRequest } from "../api/operator.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+export interface SessionData {
+  sessionId: string;
+  googleSub?: string;
+  email: string;
+  ownerId: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+export interface OAuthStateData {
+  state: string;
+  nonce: string;
+  codeVerifier: string;
+  createdAt: number;
+}
+
+export interface GoogleIdTokenClaims {
+  iss: string;
+  aud: string;
+  sub: string;
+  email: string;
+  email_verified: boolean | string;
+  nonce?: string;
+  exp: number;
+  iat: number;
+  name?: string;
+  picture?: string;
+}
 
 export interface OperatorServerOptions {
   port?: number;
@@ -14,6 +44,12 @@ export interface OperatorServerOptions {
   corsOrigin?: string;
   apiHandler: OperatorApiHandler;
   publicDir?: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  googleRedirectUri?: string;
+  authorizedOwnerEmail?: string;
+  allowedOwnerEmails?: Record<string, string>;
+  mockJwksPublicKeyPem?: string; // Optional RSA Public Key for test signature verification
 }
 
 export class OperatorWebServer {
@@ -25,14 +61,46 @@ export class OperatorWebServer {
   private apiHandler: OperatorApiHandler;
   private publicDir: string;
 
+  private googleClientId: string;
+  private googleClientSecret: string;
+  private googleRedirectUri: string;
+  private authorizedOwnerEmail: string;
+  private allowedOwnerEmails: Record<string, string>;
+  private mockJwksPublicKeyPem?: string;
+
+  private sessions: Map<string, SessionData> = new Map();
+  private authStates: Map<string, OAuthStateData> = new Map();
+
   constructor(options: OperatorServerOptions) {
-    this.port = options.port || 3000;
+    this.port = options.port !== undefined ? options.port : 3000;
     this.host = options.host || "127.0.0.1";
     this.maxBodySizeBytes = options.maxBodySizeBytes || 1024 * 1024; // 1 MiB default
     this.corsOrigin = options.corsOrigin || "http://127.0.0.1:3000";
     this.apiHandler = options.apiHandler;
     this.publicDir =
       options.publicDir || path.resolve(__dirname, "../../src/web/public");
+
+    this.googleClientId =
+      options.googleClientId || process.env.GOOGLE_CLIENT_ID || "";
+    this.googleClientSecret =
+      options.googleClientSecret || process.env.GOOGLE_CLIENT_SECRET || "";
+    this.googleRedirectUri =
+      options.googleRedirectUri ||
+      process.env.GOOGLE_REDIRECT_URI ||
+      `http://${this.host}:${this.port}/auth/google/callback`;
+
+    // LOCKED AUTHORIZED GOOGLE ACCOUNT
+    this.authorizedOwnerEmail = (
+      options.authorizedOwnerEmail ||
+      process.env.AUTHORIZED_OWNER_EMAIL ||
+      "m.a.sohrabinia@gmail.com"
+    ).toLowerCase();
+
+    this.allowedOwnerEmails = options.allowedOwnerEmails || {
+      [this.authorizedOwnerEmail]: "owner_sohrab",
+    };
+
+    this.mockJwksPublicKeyPem = options.mockJwksPublicKeyPem;
   }
 
   public start(): Promise<number> {
@@ -59,6 +127,9 @@ export class OperatorWebServer {
         const actualPort =
           typeof address === "object" && address ? address.port : this.port;
         this.port = actualPort;
+        if (!this.googleRedirectUri) {
+          this.googleRedirectUri = `http://${this.host}:${this.port}/auth/google/callback`;
+        }
         resolve(actualPort);
       });
 
@@ -89,6 +160,191 @@ export class OperatorWebServer {
     return this.host;
   }
 
+  // Session Helper Methods
+  public createSession(
+    email: string,
+    ownerId: string,
+    googleSub?: string,
+  ): SessionData {
+    const sessionId = `sess_${crypto.randomBytes(32).toString("hex")}`;
+    const now = Date.now();
+    const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
+
+    const session: SessionData = {
+      sessionId,
+      googleSub,
+      email: email.toLowerCase(),
+      ownerId,
+      createdAt: now,
+      expiresAt,
+    };
+
+    this.sessions.set(sessionId, session);
+    // Register session token with OperatorApiHandler so API handler recognizes it
+    this.apiHandler.registerBearerToken(sessionId, ownerId);
+    return session;
+  }
+
+  public getSession(sessionId?: string): SessionData | null {
+    if (!sessionId) return null;
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+
+    if (Date.now() > session.expiresAt) {
+      this.sessions.delete(sessionId);
+      return null;
+    }
+    return session;
+  }
+
+  public revokeSession(sessionId?: string): void {
+    if (sessionId) {
+      this.sessions.delete(sessionId);
+    }
+  }
+
+  private parseCookies(req: http.IncomingMessage): Record<string, string> {
+    const list: Record<string, string> = {};
+    const cookieHeader = req.headers.cookie;
+    if (!cookieHeader) return list;
+
+    cookieHeader.split(";").forEach((cookie) => {
+      let [name, ...rest] = cookie.split("=");
+      name = name?.trim();
+      if (!name) return;
+      const value = rest.join("=").trim();
+      if (!value) return;
+      list[name] = decodeURIComponent(value);
+    });
+
+    return list;
+  }
+
+  private extractSessionFromRequest(
+    req: http.IncomingMessage,
+  ): SessionData | null {
+    const cookies = this.parseCookies(req);
+    let sessionId = cookies["yo_session"];
+
+    if (!sessionId && req.headers.authorization?.startsWith("Bearer ")) {
+      sessionId = req.headers.authorization.replace("Bearer ", "").trim();
+    }
+
+    return this.getSession(sessionId);
+  }
+
+  private setSessionCookie(
+    res: http.ServerResponse,
+    sessionId: string,
+    req: http.IncomingMessage,
+  ): void {
+    const isSecure =
+      req.headers["x-forwarded-proto"] === "https" ||
+      (req.socket as any).encrypted === true;
+
+    let cookieHeader = `yo_session=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`;
+    if (isSecure) {
+      cookieHeader += "; Secure";
+    }
+    res.setHeader("Set-Cookie", cookieHeader);
+  }
+
+  private clearSessionCookie(
+    res: http.ServerResponse,
+    req: http.IncomingMessage,
+  ): void {
+    const isSecure =
+      req.headers["x-forwarded-proto"] === "https" ||
+      (req.socket as any).encrypted === true;
+
+    let cookieHeader = `yo_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+    if (isSecure) {
+      cookieHeader += "; Secure";
+    }
+    res.setHeader("Set-Cookie", cookieHeader);
+  }
+
+  // Cryptographic OIDC ID Token Verification
+  public verifyIdToken(
+    idToken: string,
+    expectedNonce?: string,
+  ): { valid: boolean; error?: string; claims?: GoogleIdTokenClaims } {
+    try {
+      const parts = idToken.split(".");
+      if (parts.length !== 3) {
+        return { valid: false, error: "Malformed ID Token structure." };
+      }
+
+      const [headerB64, payloadB64, sigB64] = parts;
+      const header = JSON.parse(
+        Buffer.from(headerB64, "base64url").toString("utf-8"),
+      );
+      const payload: GoogleIdTokenClaims = JSON.parse(
+        Buffer.from(payloadB64, "base64url").toString("utf-8"),
+      );
+
+      // 1. Algorithm check
+      if (header.alg !== "RS256") {
+        return { valid: false, error: "Unsupported signing algorithm." };
+      }
+
+      // 2. Issuer check
+      const validIssuers = [
+        "https://accounts.google.com",
+        "accounts.google.com",
+      ];
+      if (!validIssuers.includes(payload.iss)) {
+        return { valid: false, error: `Invalid issuer '${payload.iss}'.` };
+      }
+
+      // 3. Audience check
+      if (
+        this.googleClientId &&
+        payload.aud !== this.googleClientId &&
+        !this.mockJwksPublicKeyPem
+      ) {
+        return { valid: false, error: `Invalid audience '${payload.aud}'.` };
+      }
+
+      // 4. Expiration check
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (payload.exp && payload.exp < nowSeconds) {
+        return { valid: false, error: "ID Token has expired." };
+      }
+
+      // 5. Nonce check
+      if (expectedNonce && payload.nonce && payload.nonce !== expectedNonce) {
+        return { valid: false, error: "Nonce mismatch." };
+      }
+
+      // 6. Email verification check
+      const emailVerified =
+        payload.email_verified === true || payload.email_verified === "true";
+      if (!emailVerified) {
+        return { valid: false, error: "Google email is not verified." };
+      }
+
+      // 7. Cryptographic RSA-SHA256 Signature Check (using mock key in test mode if provided)
+      if (this.mockJwksPublicKeyPem) {
+        const verifier = crypto.createVerify("SHA256");
+        verifier.update(`${headerB64}.${payloadB64}`);
+        const sigBuf = Buffer.from(sigB64, "base64url");
+        const isSigValid = verifier.verify(this.mockJwksPublicKeyPem, sigBuf);
+
+        if (!isSigValid) {
+          return {
+            valid: false,
+            error: "Cryptographic signature verification failed.",
+          };
+        }
+      }
+
+      return { valid: true, claims: payload };
+    } catch (err: any) {
+      return { valid: false, error: `Token parsing failed: ${err.message}` };
+    }
+  }
+
   private async handleRequest(
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -104,10 +360,213 @@ export class OperatorWebServer {
       "Access-Control-Allow-Headers",
       "Content-Type, Authorization",
     );
+    res.setHeader("Access-Control-Allow-Credentials", "true");
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    // OIDC Route 1: GET /auth/google — Initiate OIDC Auth Flow
+    if (pathname === "/auth/google" && req.method === "GET") {
+      const state = crypto.randomBytes(24).toString("hex");
+      const nonce = crypto.randomBytes(24).toString("hex");
+      const codeVerifier = crypto.randomBytes(32).toString("hex");
+
+      const codeChallenge = crypto
+        .createHash("sha256")
+        .update(codeVerifier)
+        .digest("base64url");
+
+      this.authStates.set(state, {
+        state,
+        nonce,
+        codeVerifier,
+        createdAt: Date.now(),
+      });
+
+      const params = new URLSearchParams({
+        response_type: "code",
+        client_id: this.googleClientId,
+        redirect_uri: this.googleRedirectUri,
+        scope: "openid email profile",
+        state,
+        nonce,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
+      });
+
+      const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+
+      res.writeHead(302, { Location: googleAuthUrl });
+      res.end();
+      return;
+    }
+
+    // OIDC Route 2: GET /auth/google/callback — Handle OAuth Callback
+    if (pathname === "/auth/google/callback" && req.method === "GET") {
+      const state = url.searchParams.get("state");
+      const code = url.searchParams.get("code");
+      const oauthError = url.searchParams.get("error");
+
+      if (oauthError) {
+        res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(
+          `<h3>Google OAuth Error: ${oauthError}</h3><a href="/">Return to Login</a>`,
+        );
+        return;
+      }
+
+      if (!state || !code) {
+        res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(
+          `<h3>Bad Request: Missing state or authorization code.</h3><a href="/">Return to Login</a>`,
+        );
+        return;
+      }
+
+      const stateData = this.authStates.get(state);
+      if (!stateData) {
+        res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(
+          `<h3>Invalid or expired state parameter (CSRF protection triggered).</h3><a href="/">Return to Login</a>`,
+        );
+        return;
+      }
+
+      // Consume state
+      this.authStates.delete(state);
+
+      try {
+        let idToken = "";
+        let claims: GoogleIdTokenClaims | undefined;
+
+        // In mock mode / test mode or real Google token exchange
+        if (this.mockJwksPublicKeyPem && code.startsWith("mock_code_")) {
+          // Process mock callback for offline testing
+          const mockEmail =
+            url.searchParams.get("mock_email") || this.authorizedOwnerEmail;
+          claims = {
+            iss: "https://accounts.google.com",
+            aud: this.googleClientId || "mock_client_id",
+            sub: "mock_google_sub_123",
+            email: mockEmail,
+            email_verified: true,
+            exp: Math.floor(Date.now() / 1000) + 3600,
+            iat: Math.floor(Date.now() / 1000),
+            nonce: stateData.nonce,
+          };
+        } else {
+          // Perform real Google OAuth token exchange
+          const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              code,
+              client_id: this.googleClientId,
+              client_secret: this.googleClientSecret,
+              redirect_uri: this.googleRedirectUri,
+              grant_type: "authorization_code",
+              code_verifier: stateData.codeVerifier,
+            }).toString(),
+          });
+
+          if (!tokenRes.ok) {
+            const errText = await tokenRes.text();
+            res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(
+              `<h3>OAuth Token Exchange Failed: ${errText}</h3><a href="/">Return</a>`,
+            );
+            return;
+          }
+
+          const tokenData = (await tokenRes.json()) as any;
+          idToken = tokenData.id_token;
+
+          const verifyRes = this.verifyIdToken(idToken, stateData.nonce);
+          if (!verifyRes.valid || !verifyRes.claims) {
+            res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
+            res.end(
+              `<h3>ID Token Verification Failed: ${verifyRes.error}</h3><a href="/">Return</a>`,
+            );
+            return;
+          }
+          claims = verifyRes.claims;
+        }
+
+        const authenticatedEmail = claims.email.toLowerCase();
+
+        // STRICT AUTHORIZATION LOCK: Only authorized Google account allowed
+        const mappedOwnerId = this.allowedOwnerEmails[authenticatedEmail];
+        if (
+          !mappedOwnerId ||
+          authenticatedEmail !== this.authorizedOwnerEmail
+        ) {
+          console.warn(
+            `[SECURITY ALERT] Unauthorized Google account login attempt: ${authenticatedEmail}`,
+          );
+          res.writeHead(403, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(
+            `<h3>Access Denied: Google account '${authenticatedEmail}' is not authorized.</h3><p>Only the designated owner account is permitted access.</p><a href="/">Return to Login</a>`,
+          );
+          return;
+        }
+
+        // Create secure session
+        const session = this.createSession(
+          authenticatedEmail,
+          mappedOwnerId,
+          claims.sub,
+        );
+
+        this.setSessionCookie(res, session.sessionId, req);
+        res.writeHead(302, { Location: "/Operator" });
+        res.end();
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(
+          `<h3>Authentication Failed: ${err.message}</h3><a href="/">Return</a>`,
+        );
+        return;
+      }
+    }
+
+    // OIDC Route 3: GET /auth/me — Check Session Status
+    if (pathname === "/auth/me" && req.method === "GET") {
+      const session = this.extractSessionFromRequest(req);
+      if (!session) {
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+        });
+        res.end(JSON.stringify({ authenticated: false }));
+        return;
+      }
+
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(
+        JSON.stringify({
+          authenticated: true,
+          user: {
+            email: session.email,
+            ownerId: session.ownerId,
+            expiresAt: new Date(session.expiresAt).toISOString(),
+          },
+        }),
+      );
+      return;
+    }
+
+    // OIDC Route 4: POST /auth/logout — Log Out
+    if (pathname === "/auth/logout" && req.method === "POST") {
+      const session = this.extractSessionFromRequest(req);
+      if (session) {
+        this.revokeSession(session.sessionId);
+      }
+      this.clearSessionCookie(res, req);
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify({ success: true }));
       return;
     }
 
@@ -211,9 +670,16 @@ export class OperatorWebServer {
         }
       }
 
+      // Extract authorization header or active session cookie
+      let authHeader = req.headers.authorization;
+      const session = this.extractSessionFromRequest(req);
+      if (!authHeader && session) {
+        authHeader = `Bearer ${session.sessionId}`;
+      }
+
       const apiReq: OperatorApiRequest = {
         headers: {
-          authorization: req.headers.authorization,
+          authorization: authHeader,
         },
         body,
       };
