@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { createProductionServer } from "../src/web/index.js";
 import { OperatorWebServer } from "../src/web/server.js";
 
-describe("YarOperator Production Web Runtime Entrypoint Test Suite", () => {
+describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
   let server: OperatorWebServer | null = null;
 
   afterEach(async () => {
@@ -12,11 +12,12 @@ describe("YarOperator Production Web Runtime Entrypoint Test Suite", () => {
     }
   });
 
-  it("should initialize and start production web server instance on localhost", async () => {
+  it("1. Production server initializes and starts on localhost without hard-coded production secrets", async () => {
     const res = await createProductionServer({
       port: 0,
       host: "127.0.0.1",
       bearerToken: "test-runtime-token",
+      ownerId: "owner_sohrab",
     });
 
     server = res.server;
@@ -26,14 +27,14 @@ describe("YarOperator Production Web Runtime Entrypoint Test Suite", () => {
     expect(port).toBeGreaterThan(0);
     expect(server.getHost()).toBe("127.0.0.1");
 
-    // Verify GET /Operator UI Health
+    // Verify GET /Operator UI Endpoint
     const uiRes = await fetch(`http://127.0.0.1:${port}/Operator`);
     expect(uiRes.status).toBe(200);
     const htmlText = await uiRes.text();
     expect(htmlText).toContain("YarOperator");
     expect(htmlText).toContain("Executive Assistant");
 
-    // Verify POST /api/v1/operator/chat Authenticated API
+    // Verify POST /api/v1/operator/chat with provided Bearer token
     const apiRes = await fetch(
       `http://127.0.0.1:${port}/api/v1/operator/chat`,
       {
@@ -56,7 +57,7 @@ describe("YarOperator Production Web Runtime Entrypoint Test Suite", () => {
     expect(apiData.result.accepted).toBe(true);
   });
 
-  it("should stop web server cleanly when stopped", async () => {
+  it("2. Server stops cleanly when stop() is invoked", async () => {
     const res = await createProductionServer({
       port: 0,
       host: "127.0.0.1",
@@ -68,7 +69,7 @@ describe("YarOperator Production Web Runtime Entrypoint Test Suite", () => {
     await server.stop();
     server = null;
 
-    // Subsequent request should fail because server stopped
+    // Requests fail after clean stop
     await expect(fetch(`http://127.0.0.1:${port}/Operator`)).rejects.toThrow();
   });
 });
