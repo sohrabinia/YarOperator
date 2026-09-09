@@ -8,15 +8,27 @@ import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
+function safelyRemoveDbFile(filePath: string): void {
+  try {
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+  } catch (err: any) {
+    if (err && err.code !== "EBUSY" && err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+}
+
 describe("Phase 8.2 — Durable Scheduler Primitive", () => {
   const dbFile = join(tmpdir(), "test_durable_scheduler_p82.db");
 
   beforeEach(() => {
-    if (existsSync(dbFile)) unlinkSync(dbFile);
+    safelyRemoveDbFile(dbFile);
   });
 
   afterEach(() => {
-    if (existsSync(dbFile)) unlinkSync(dbFile);
+    safelyRemoveDbFile(dbFile);
   });
 
   it("should create, persist, retrieve, list, and delete schedule definitions", () => {
