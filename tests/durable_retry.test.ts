@@ -20,6 +20,18 @@ import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
+function safelyRemoveDbFile(filePath: string): void {
+  try {
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+  } catch (err: any) {
+    if (err && err.code !== "EBUSY" && err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+}
+
 describe("Phase 8.3 — Durable Retry & Failure Semantics", () => {
   const dbFile = join(tmpdir(), "test_phase_8_3_durable_retry.db");
   let memory: DurableOperationalMemory;
@@ -34,7 +46,7 @@ describe("Phase 8.3 — Durable Retry & Failure Semantics", () => {
   let engine: ControlledAutonomyEngine;
 
   beforeEach(() => {
-    if (existsSync(dbFile)) unlinkSync(dbFile);
+    safelyRemoveDbFile(dbFile);
 
     memory = new DurableOperationalMemory(dbFile);
     agentRegistry = new AgentRegistry();
@@ -92,7 +104,7 @@ describe("Phase 8.3 — Durable Retry & Failure Semantics", () => {
 
   afterEach(() => {
     if (memory) memory.close();
-    if (existsSync(dbFile)) unlinkSync(dbFile);
+    safelyRemoveDbFile(dbFile);
   });
 
   it("should classify failure types correctly", () => {

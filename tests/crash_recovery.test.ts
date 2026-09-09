@@ -19,18 +19,30 @@ import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
+function safelyRemoveDbFile(filePath: string): void {
+  try {
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+  } catch (err: any) {
+    if (err && err.code !== "EBUSY" && err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+}
+
 describe("Phase 8.4 — Crash Recovery & Resume", () => {
   const dbScheduler = join(tmpdir(), "test_phase_8_4_scheduler.db");
   const dbMemory = join(tmpdir(), "test_phase_8_4_memory.db");
 
   beforeEach(() => {
-    if (existsSync(dbScheduler)) unlinkSync(dbScheduler);
-    if (existsSync(dbMemory)) unlinkSync(dbMemory);
+    safelyRemoveDbFile(dbScheduler);
+    safelyRemoveDbFile(dbMemory);
   });
 
   afterEach(() => {
-    if (existsSync(dbScheduler)) unlinkSync(dbScheduler);
-    if (existsSync(dbMemory)) unlinkSync(dbMemory);
+    safelyRemoveDbFile(dbScheduler);
+    safelyRemoveDbFile(dbMemory);
   });
 
   it("should reconcile stale claimed occurrences after worker crash/restart", () => {

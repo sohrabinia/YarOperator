@@ -11,19 +11,27 @@ import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
 
+function safelyRemoveDbFile(filePath: string): void {
+  try {
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
+    }
+  } catch (err: any) {
+    if (err && err.code !== "EBUSY" && err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+}
+
 describe("Phase 8.1 — Durable Operational Memory", () => {
   const dbFile = join(tmpdir(), "test_phase_8_1_operational_memory.db");
 
   beforeEach(() => {
-    if (existsSync(dbFile)) {
-      unlinkSync(dbFile);
-    }
+    safelyRemoveDbFile(dbFile);
   });
 
   afterEach(() => {
-    if (existsSync(dbFile)) {
-      unlinkSync(dbFile);
-    }
+    safelyRemoveDbFile(dbFile);
   });
 
   it("should create, read, update, list, and delete operational memory state entries", () => {
@@ -114,9 +122,7 @@ describe("Phase 8.1 — Durable Operational Memory", () => {
 
   it("should handle corrupt persisted representation safely without process crash", () => {
     const rawStore = new OperationalStateStore(dbFile);
-    rawStore.saveRaw
-      ? rawStore.saveRaw("corrupt_key", "INVALID_NON_JSON")
-      : null;
+    rawStore.close();
 
     // Direct corrupt injection into DB table to simulate storage corruption
     const { DatabaseSync } = require("node:sqlite");
