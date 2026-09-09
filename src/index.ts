@@ -28,3 +28,7 @@ export * from "./core/baseline/index.js";
 export * from "./core/regression/index.js";
 export * from "./core/acceptance/index.js";
 export * from "./core/autonomous/index.js";
+export * from "./core/autonomy/index.js";
+export * from "./core/monitoring/index.js";
+export * from "./core/assistant/index.js";
+export * from "./core/improvement/index.js";
