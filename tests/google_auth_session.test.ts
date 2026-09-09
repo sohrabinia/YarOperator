@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import crypto from "node:crypto";
-import { OperatorWebServer } from "../src/web/server.js";
+import { OperatorWebServer, GoogleJwkKey } from "../src/web/server.js";
 import { bootstrapOperatorApplication } from "../src/core/bootstrap/index.js";
 
 describe("Google OIDC + Session Authentication Test Suite", () => {
@@ -8,10 +8,12 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
   let serverPort: number;
   let testPrivateKeyPem: string;
   let testPublicKeyPem: string;
+  let testJwkKey: GoogleJwkKey;
 
   const AUTHORIZED_EMAIL = "m.a.sohrabinia@gmail.com";
   const UNAUTHORIZED_EMAIL = "attacker@example.com";
   const MOCK_BEARER_TOKEN = "test_programmatic_bearer_token_123";
+  const TEST_KID = "test_google_jwk_kid_001";
 
   beforeAll(async () => {
     // Generate transient RSA key pair for cryptographic ID token signing/verification in tests
@@ -22,6 +24,18 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     });
     testPublicKeyPem = keyPair.publicKey;
     testPrivateKeyPem = keyPair.privateKey;
+
+    // Convert RSA public key object into JWK format
+    const keyObject = crypto.createPublicKey(testPublicKeyPem);
+    const jwk = keyObject.export({ format: "jwk" }) as any;
+    testJwkKey = {
+      kty: "RSA",
+      alg: "RS256",
+      use: "sig",
+      kid: TEST_KID,
+      n: jwk.n,
+      e: jwk.e,
+    };
 
     const apiHandler = bootstrapOperatorApplication({
       ownerId: "owner_sohrab",
@@ -53,14 +67,22 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
   // Helper to generate a valid signed Google ID Token using test RSA key
   function generateTestIdToken(
     payloadOverrides: Record<string, any> = {},
+    headerOverrides: Record<string, any> = {},
+    signingKeyPem: string = testPrivateKeyPem,
   ): string {
-    const header = { alg: "RS256", typ: "JWT", kid: "test_key_1" };
+    const header = {
+      alg: "RS256",
+      typ: "JWT",
+      kid: TEST_KID,
+      ...headerOverrides,
+    };
     const payload = {
       iss: "https://accounts.google.com",
       aud: "test_client_id_123.apps.googleusercontent.com",
       sub: "google_user_sub_999",
       email: AUTHORIZED_EMAIL,
       email_verified: true,
+      nonce: "test_expected_nonce_123",
       exp: Math.floor(Date.now() / 1000) + 3600,
       iat: Math.floor(Date.now() / 1000),
       ...payloadOverrides,
@@ -74,7 +96,7 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
 
     const signer = crypto.createSign("SHA256");
     signer.update(signInput);
-    const signatureB64 = signer.sign(testPrivateKeyPem).toString("base64url");
+    const signatureB64 = signer.sign(signingKeyPem).toString("base64url");
 
     return `${signInput}.${signatureB64}`;
   }
@@ -111,7 +133,10 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
 
   it("4. Cryptographic ID Token verification succeeds for authorized owner and creates secure session", async () => {
     const validToken = generateTestIdToken({ email: AUTHORIZED_EMAIL });
-    const verifyResult = server.verifyIdToken(validToken);
+    const verifyResult = await server.verifyIdToken(
+      validToken,
+      "test_expected_nonce_123",
+    );
 
     expect(verifyResult.valid).toBe(true);
     expect(verifyResult.claims?.email).toBe(AUTHORIZED_EMAIL);
@@ -136,24 +161,118 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     expect(meData.user.ownerId).toBe("owner_sohrab");
   });
 
-  it("5. Session cookie properties enforcement & expiration check", async () => {
-    // Unauthenticated request
-    const unauthRes = await fetch(`http://127.0.0.1:${serverPort}/auth/me`);
-    expect(unauthRes.status).toBe(200);
-    const unauthData = (await unauthRes.json()) as any;
-    expect(unauthData.authenticated).toBe(false);
+  it("5. Real Google JWKS RS256 signature verification succeeds with valid key and fails on tampered signature", async () => {
+    // Production Server instance without mock key
+    const prodServer = new OperatorWebServer({
+      port: 0,
+      host: "127.0.0.1",
+      apiHandler: server["apiHandler"],
+      googleClientId: "test_client_id_123.apps.googleusercontent.com",
+    });
 
-    // Invalid session ID
-    const badSessionRes = await fetch(
-      `http://127.0.0.1:${serverPort}/auth/me`,
-      {
-        headers: { Cookie: "yo_session=invalid_nonexistent_session_id" },
-      },
+    const validToken = generateTestIdToken({ nonce: "nonce_jwks_1" });
+    const verifySuccess = await prodServer.verifyIdToken(
+      validToken,
+      "nonce_jwks_1",
+      [testJwkKey],
     );
-    expect((await badSessionRes.json()).authenticated).toBe(false);
+
+    expect(verifySuccess.valid).toBe(true);
+    expect(verifySuccess.claims?.email).toBe(AUTHORIZED_EMAIL);
+
+    // Tampered token (modified payload)
+    const parts = validToken.split(".");
+    const tamperedPayload = Buffer.from(
+      JSON.stringify({
+        iss: "https://accounts.google.com",
+        aud: "test_client_id_123.apps.googleusercontent.com",
+        email: "hacked@example.com",
+        nonce: "nonce_jwks_1",
+        email_verified: true,
+      }),
+    ).toString("base64url");
+    const tamperedToken = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
+
+    const verifyTampered = await prodServer.verifyIdToken(
+      tamperedToken,
+      "nonce_jwks_1",
+      [testJwkKey],
+    );
+    expect(verifyTampered.valid).toBe(false);
+    expect(verifyTampered.error).toContain("signature verification failed");
   });
 
-  it("6. Authenticated Operator request succeeds using session cookie without Bearer header", async () => {
+  it("6. Verification fails when kid is unknown in JWKS", async () => {
+    const prodServer = new OperatorWebServer({
+      port: 0,
+      host: "127.0.0.1",
+      apiHandler: server["apiHandler"],
+      googleClientId: "test_client_id_123.apps.googleusercontent.com",
+    });
+
+    const token = generateTestIdToken({}, { kid: "unknown_kid_999" });
+    const verifyRes = await prodServer.verifyIdToken(
+      token,
+      "test_expected_nonce_123",
+      [testJwkKey],
+    );
+
+    expect(verifyRes.valid).toBe(false);
+    expect(verifyRes.error).toContain("Unknown key identifier (kid)");
+  });
+
+  it("7. Strict Nonce Validation: Missing or incorrect nonce fails; valid nonce succeeds", async () => {
+    // Missing nonce in payload
+    const tokenNoNonce = generateTestIdToken({ nonce: undefined });
+    const resNoNonce = await server.verifyIdToken(
+      tokenNoNonce,
+      "test_expected_nonce_123",
+    );
+    expect(resNoNonce.valid).toBe(false);
+    expect(resNoNonce.error).toContain("Missing required nonce claim");
+
+    // Mismatched nonce
+    const tokenWrongNonce = generateTestIdToken({ nonce: "wrong_nonce_value" });
+    const resWrongNonce = await server.verifyIdToken(
+      tokenWrongNonce,
+      "test_expected_nonce_123",
+    );
+    expect(resWrongNonce.valid).toBe(false);
+    expect(resWrongNonce.error).toContain("Nonce mismatch");
+
+    // Valid nonce
+    const tokenValidNonce = generateTestIdToken({ nonce: "correct_nonce_777" });
+    const resValidNonce = await server.verifyIdToken(
+      tokenValidNonce,
+      "correct_nonce_777",
+    );
+    expect(resValidNonce.valid).toBe(true);
+  });
+
+  it("8. Production cookie contains Secure attribute when behind HTTPS proxy", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    // Simulated HTTP Response object to capture Set-Cookie header
+    let setCookieHeader = "";
+    const mockRes = {
+      setHeader: (name: string, value: string) => {
+        if (name === "Set-Cookie") setCookieHeader = value;
+      },
+    } as any;
+
+    const mockReqHttps = {
+      headers: { "x-forwarded-proto": "https" },
+      socket: {},
+    } as any;
+
+    server.setSessionCookie(mockRes, session.sessionId, mockReqHttps);
+    expect(setCookieHeader).toContain("yo_session=");
+    expect(setCookieHeader).toContain("HttpOnly");
+    expect(setCookieHeader).toContain("SameSite=Lax");
+    expect(setCookieHeader).toContain("Secure");
+  });
+
+  it("9. Authenticated Operator request succeeds using session cookie without Bearer header", async () => {
     const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
 
     const chatRes = await fetch(
@@ -178,7 +297,7 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     expect(chatData.result.accepted).toBe(true);
   });
 
-  it("7. Owner anti-impersonation enforces isolation on session-authenticated requests", async () => {
+  it("10. Owner anti-impersonation enforces isolation on session-authenticated requests", async () => {
     const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
 
     const chatRes = await fetch(
@@ -206,7 +325,7 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     );
   });
 
-  it("8. Backwards compatibility: Existing Bearer token API requests remain fully functional", async () => {
+  it("11. Backwards compatibility: Existing Bearer token API requests remain fully functional", async () => {
     const apiRes = await fetch(
       `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
       {

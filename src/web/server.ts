@@ -30,11 +30,20 @@ export interface GoogleIdTokenClaims {
   sub: string;
   email: string;
   email_verified: boolean | string;
-  nonce?: string;
+  nonce: string;
   exp: number;
   iat: number;
   name?: string;
   picture?: string;
+}
+
+export interface GoogleJwkKey {
+  kty: string;
+  alg: string;
+  use?: string;
+  kid: string;
+  n: string;
+  e: string;
 }
 
 export interface OperatorServerOptions {
@@ -68,6 +77,7 @@ export class OperatorWebServer {
   private allowedOwnerEmails: Record<string, string>;
   private mockJwksPublicKeyPem?: string;
 
+  private jwksCache: { keys: GoogleJwkKey[]; fetchedAt: number } | null = null;
   private sessions: Map<string, SessionData> = new Map();
   private authStates: Map<string, OAuthStateData> = new Map();
 
@@ -233,14 +243,16 @@ export class OperatorWebServer {
     return this.getSession(sessionId);
   }
 
-  private setSessionCookie(
+  public setSessionCookie(
     res: http.ServerResponse,
     sessionId: string,
     req: http.IncomingMessage,
   ): void {
     const isSecure =
       req.headers["x-forwarded-proto"] === "https" ||
-      (req.socket as any).encrypted === true;
+      req.headers["x-forwarded-ssl"] === "on" ||
+      (req.socket as any).encrypted === true ||
+      process.env.NODE_ENV === "production";
 
     let cookieHeader = `yo_session=${encodeURIComponent(sessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`;
     if (isSecure) {
@@ -249,13 +261,15 @@ export class OperatorWebServer {
     res.setHeader("Set-Cookie", cookieHeader);
   }
 
-  private clearSessionCookie(
+  public clearSessionCookie(
     res: http.ServerResponse,
     req: http.IncomingMessage,
   ): void {
     const isSecure =
       req.headers["x-forwarded-proto"] === "https" ||
-      (req.socket as any).encrypted === true;
+      req.headers["x-forwarded-ssl"] === "on" ||
+      (req.socket as any).encrypted === true ||
+      process.env.NODE_ENV === "production";
 
     let cookieHeader = `yo_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
     if (isSecure) {
@@ -264,12 +278,42 @@ export class OperatorWebServer {
     res.setHeader("Set-Cookie", cookieHeader);
   }
 
+  // Google OIDC Public Key Fetching & Caching
+  public async getGoogleJwksKeys(
+    customJwksKeys?: GoogleJwkKey[],
+  ): Promise<GoogleJwkKey[]> {
+    if (customJwksKeys) {
+      return customJwksKeys;
+    }
+    const now = Date.now();
+    if (this.jwksCache && now - this.jwksCache.fetchedAt < 3600 * 1000) {
+      return this.jwksCache.keys;
+    }
+
+    const response = await fetch("https://www.googleapis.com/oauth2/v3/certs");
+    if (!response.ok) {
+      throw new Error(`Failed to fetch Google JWKS: ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as { keys: GoogleJwkKey[] };
+    this.jwksCache = { keys: data.keys, fetchedAt: now };
+    return data.keys;
+  }
+
   // Cryptographic OIDC ID Token Verification
-  public verifyIdToken(
+  public async verifyIdToken(
     idToken: string,
-    expectedNonce?: string,
-  ): { valid: boolean; error?: string; claims?: GoogleIdTokenClaims } {
+    expectedNonce: string,
+    customJwksKeys?: GoogleJwkKey[],
+  ): Promise<{ valid: boolean; error?: string; claims?: GoogleIdTokenClaims }> {
     try {
+      if (!expectedNonce || typeof expectedNonce !== "string") {
+        return {
+          valid: false,
+          error: "Expected nonce is required for verification.",
+        };
+      }
+
       const parts = idToken.split(".");
       if (parts.length !== 3) {
         return { valid: false, error: "Malformed ID Token structure." };
@@ -312,9 +356,19 @@ export class OperatorWebServer {
         return { valid: false, error: "ID Token has expired." };
       }
 
-      // 5. Nonce check
-      if (expectedNonce && payload.nonce && payload.nonce !== expectedNonce) {
-        return { valid: false, error: "Nonce mismatch." };
+      // 5. MANDATORY NONCE CHECK
+      if (!payload.nonce || typeof payload.nonce !== "string") {
+        return {
+          valid: false,
+          error: "Missing required nonce claim in ID Token.",
+        };
+      }
+
+      if (payload.nonce !== expectedNonce) {
+        return {
+          valid: false,
+          error: `Nonce mismatch: expected '${expectedNonce}', got '${payload.nonce}'.`,
+        };
       }
 
       // 6. Email verification check
@@ -324,8 +378,9 @@ export class OperatorWebServer {
         return { valid: false, error: "Google email is not verified." };
       }
 
-      // 7. Cryptographic RSA-SHA256 Signature Check (using mock key in test mode if provided)
+      // 7. REAL CRYPTOGRAPHIC RSA-SHA256 SIGNATURE VERIFICATION
       if (this.mockJwksPublicKeyPem) {
+        // Test Mock Key Path
         const verifier = crypto.createVerify("SHA256");
         verifier.update(`${headerB64}.${payloadB64}`);
         const sigBuf = Buffer.from(sigB64, "base64url");
@@ -337,11 +392,54 @@ export class OperatorWebServer {
             error: "Cryptographic signature verification failed.",
           };
         }
+      } else {
+        // Production Real Google JWKS Key Matching
+        if (!header.kid) {
+          return { valid: false, error: "Missing 'kid' in ID token header." };
+        }
+
+        const jwksKeys = await this.getGoogleJwksKeys(customJwksKeys);
+        const matchingKey = jwksKeys.find((k) => k.kid === header.kid);
+
+        if (!matchingKey) {
+          return {
+            valid: false,
+            error: `Unknown key identifier (kid) '${header.kid}'.`,
+          };
+        }
+
+        // Native Node.js crypto.createPublicKey convert JWK -> KeyObject
+        const publicKey = crypto.createPublicKey({
+          key: {
+            kty: "RSA",
+            n: matchingKey.n,
+            e: matchingKey.e,
+            alg: "RS256",
+            use: "sig",
+          },
+          format: "jwk",
+        });
+
+        const verifier = crypto.createVerify("SHA256");
+        verifier.update(`${headerB64}.${payloadB64}`);
+        const sigBuf = Buffer.from(sigB64, "base64url");
+        const isSigValid = verifier.verify(publicKey, sigBuf);
+
+        if (!isSigValid) {
+          return {
+            valid: false,
+            error:
+              "Cryptographic signature verification failed against Google JWKS key.",
+          };
+        }
       }
 
       return { valid: true, claims: payload };
     } catch (err: any) {
-      return { valid: false, error: `Token parsing failed: ${err.message}` };
+      return {
+        valid: false,
+        error: `Token verification failed: ${err.message}`,
+      };
     }
   }
 
@@ -484,7 +582,7 @@ export class OperatorWebServer {
           const tokenData = (await tokenRes.json()) as any;
           idToken = tokenData.id_token;
 
-          const verifyRes = this.verifyIdToken(idToken, stateData.nonce);
+          const verifyRes = await this.verifyIdToken(idToken, stateData.nonce);
           if (!verifyRes.valid || !verifyRes.claims) {
             res.writeHead(401, { "Content-Type": "text/html; charset=utf-8" });
             res.end(
