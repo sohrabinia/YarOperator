@@ -26,7 +26,7 @@ export class OperatorWebServer {
   private publicDir: string;
 
   constructor(options: OperatorServerOptions) {
-    this.port = options.port !== undefined ? options.port : 3000;
+    this.port = options.port || 3000;
     this.host = options.host || "127.0.0.1";
     this.maxBodySizeBytes = options.maxBodySizeBytes || 1024 * 1024; // 1 MiB default
     this.corsOrigin = options.corsOrigin || "http://127.0.0.1:3000";
