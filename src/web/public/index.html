@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YarOperator — Executive Assistant</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header Navigation -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="yo-logo" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M 20 20 L 50 50 L 50 85" stroke="#D4AF37" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M 80 20 L 50 50" stroke="#D4AF37" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="50" cy="50" r="38" stroke="#D4AF37" stroke-width="4" stroke-dasharray="8 6" opacity="0.4"/>
+          </svg>
+        </div>
+        <div class="brand-titles">
+          <span class="brand-name">YarOperator</span>
+          <span class="brand-tagline">Executive Assistant</span>
+        </div>
+      </div>
+
+      <div class="header-status">
+        <div class="token-input-wrapper">
+          <label for="tokenInput" class="visually-hidden">کلید دسترسی (Bearer Token)</label>
+          <input type="password" id="tokenInput" class="token-input" placeholder="Bearer Token" value="test-owner-token" dir="ltr" />
+        </div>
+        <div class="connection-pill" id="connectionPill">
+          <span class="status-dot"></span>
+          <span class="status-label" id="statusLabel">آماده</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Executive Chat Area -->
+    <main class="chat-main" id="chatMain" aria-live="polite">
+      <div class="welcome-banner" id="welcomeBanner">
+        <div class="hero-yo-mark">
+          <svg width="64" height="64" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M 20 20 L 50 50 L 50 85" stroke="#D4AF37" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M 80 20 L 50 50" stroke="#D4AF37" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="50" cy="50" r="42" stroke="#D4AF37" stroke-width="2" opacity="0.3"/>
+          </svg>
+        </div>
+        <h1 class="welcome-title">سلام. در خدمتم.</h1>
+        <p class="welcome-sub">دستور یا هدف مورد نظر خود را بنویسید.</p>
+      </div>
+
+      <div class="messages-list" id="messagesList" role="log"></div>
+    </main>
+
+    <!-- Floating Thinking Indicator -->
+    <div class="thinking-bar hidden" id="thinkingBar">
+      <div class="y-pulse"></div>
+      <span class="thinking-text">در حال تفکر...</span>
+    </div>
+
+    <!-- Executive Input Boundary -->
+    <footer class="input-footer">
+      <form class="input-form" id="chatForm">
+        <div class="input-wrapper">
+          <textarea
+            id="chatInput"
+            class="chat-textarea"
+            placeholder="دستور خود را بنویسید..."
+            rows="1"
+            aria-label="پیام یا دستور مالک"
+            required
+          ></textarea>
+          <button type="submit" id="sendBtn" class="send-button" aria-label="ارسال دستور">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M 22 2 L 11 13"></path>
+              <path d="M 22 2 L 15 22 L 11 13 L 2 9 L 22 2 Z"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="input-footer-hint">
+          <span>Enter = ارسال | Shift + Enter = خط جدید</span>
+        </div>
+      </form>
+    </footer>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -72,12 +72,25 @@ export class OperationalStateStore {
 
     if (!row) return null;
 
-    return {
-      key: row.key,
-      value: JSON.parse(row.value),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    };
+    try {
+      return {
+        key: row.key,
+        value: JSON.parse(row.value),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    } catch {
+      throw new Error(`Corrupt operational state JSON for key '${key}'`);
+    }
+  }
+
+  listKeys(prefix: string = ""): string[] {
+    const stmt = this.db.prepare(`
+      SELECT key FROM operational_state WHERE key LIKE ? ORDER BY key ASC
+    `);
+
+    const rows = stmt.all(`${prefix}%`) as { key: string }[];
+    return rows.map((r) => r.key);
   }
 
   delete(key: string): boolean {
