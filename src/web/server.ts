@@ -466,8 +466,13 @@ export class OperatorWebServer {
       return;
     }
 
-    // OIDC Route 1: GET /auth/google — Initiate OIDC Auth Flow
-    if (pathname === "/auth/google" && req.method === "GET") {
+    // OIDC Route 1: GET /auth/google — Initiate OIDC Auth Flow (with proxy path aliases)
+    if (
+      (pathname === "/auth/google" ||
+        pathname === "/Operator/auth/google" ||
+        pathname === "/api/v1/operator/auth/google") &&
+      req.method === "GET"
+    ) {
       const state = crypto.randomBytes(24).toString("hex");
       const nonce = crypto.randomBytes(24).toString("hex");
       const codeVerifier = crypto.randomBytes(32).toString("hex");
@@ -502,8 +507,13 @@ export class OperatorWebServer {
       return;
     }
 
-    // OIDC Route 2: GET /auth/google/callback — Handle OAuth Callback
-    if (pathname === "/auth/google/callback" && req.method === "GET") {
+    // OIDC Route 2: GET /auth/google/callback — Handle OAuth Callback (with proxy path aliases)
+    if (
+      (pathname === "/auth/google/callback" ||
+        pathname === "/Operator/auth/google/callback" ||
+        pathname === "/api/v1/operator/auth/google/callback") &&
+      req.method === "GET"
+    ) {
       const state = url.searchParams.get("state");
       const code = url.searchParams.get("code");
       const oauthError = url.searchParams.get("error");
@@ -631,8 +641,13 @@ export class OperatorWebServer {
       }
     }
 
-    // OIDC Route 3: GET /auth/me — Check Session Status
-    if (pathname === "/auth/me" && req.method === "GET") {
+    // OIDC Route 3: GET /auth/me — Check Session Status (with proxy path aliases)
+    if (
+      (pathname === "/auth/me" ||
+        pathname === "/Operator/auth/me" ||
+        pathname === "/api/v1/operator/auth/me") &&
+      req.method === "GET"
+    ) {
       const session = this.extractSessionFromRequest(req);
       if (!session) {
         res.writeHead(200, {
@@ -656,8 +671,13 @@ export class OperatorWebServer {
       return;
     }
 
-    // OIDC Route 4: POST /auth/logout — Log Out
-    if (pathname === "/auth/logout" && req.method === "POST") {
+    // OIDC Route 4: POST /auth/logout — Log Out (with proxy path aliases)
+    if (
+      (pathname === "/auth/logout" ||
+        pathname === "/Operator/auth/logout" ||
+        pathname === "/api/v1/operator/auth/logout") &&
+      req.method === "POST"
+    ) {
       const session = this.extractSessionFromRequest(req);
       if (session) {
         this.revokeSession(session.sessionId);
