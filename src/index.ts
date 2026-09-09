@@ -1,4 +1,3 @@
-```ts
 export const OPERATOR_NAME = "YarOperator";
 export const OPERATOR_VERSION = "0.1.0";
 
@@ -33,4 +32,3 @@ export * from "./core/autonomy/index.js";
 export * from "./core/monitoring/index.js";
 export * from "./core/assistant/index.js";
 export * from "./core/improvement/index.js";
-```
