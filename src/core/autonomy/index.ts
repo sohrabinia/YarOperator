@@ -250,11 +250,11 @@ export class ControlledAutonomyEngine {
     return entry ? entry.value : null;
   }
 
-  recoverInterruptedTasks(atTime: Date = new Date()): {
+  async recoverInterruptedTasks(atTime: Date = new Date()): Promise<{
     recoveredCount: number;
     resumedTasks: string[];
     failedRecoveryTasks: string[];
-  } {
+  }> {
     const keys = this.memory.listKeys("task_retry:");
     const resumedTasks: string[] = [];
     const failedRecoveryTasks: string[] = [];
@@ -276,7 +276,7 @@ export class ControlledAutonomyEngine {
           rState.updatedAtIso = nowIso;
           this.memory.saveState(key, rState);
 
-          this.auditManager.recordEvent(
+          await this.auditManager.recordEvent(
             "ACTION_FAILED",
             {
               error: `Crash recovery blocked: Task '${rState.taskId || key}' lacks required durable context for safe reconstruction.`,
@@ -298,7 +298,7 @@ export class ControlledAutonomyEngine {
           rState.updatedAtIso = nowIso;
           this.memory.saveState(key, rState);
 
-          this.auditManager.recordEvent(
+          await this.auditManager.recordEvent(
             "ACTION_FAILED",
             {
               error: `Crash recovery blocked for task '${rState.taskId}': Missing environmentId in durable retry state.`,
@@ -324,7 +324,7 @@ export class ControlledAutonomyEngine {
           rState.updatedAtIso = nowIso;
           this.memory.saveState(key, rState);
 
-          this.auditManager.recordEvent(
+          await this.auditManager.recordEvent(
             "ACTION_FAILED",
             {
               error: `Crash recovery blocked for task '${rState.taskId}': Environment validation failed (${envCheck.reason}).`,
@@ -348,7 +348,7 @@ export class ControlledAutonomyEngine {
             rState.updatedAtIso = nowIso;
             this.memory.saveState(key, rState);
 
-            this.auditManager.recordEvent(
+            await this.auditManager.recordEvent(
               "ACTION_FAILED",
               {
                 error: `Crash recovery blocked for task '${rState.taskId}': Tool '${rState.toolId}' is explicitly BLOCKED by policy.`,
@@ -366,7 +366,39 @@ export class ControlledAutonomyEngine {
         }
 
         if (rState.nextRetryAtIso <= nowIso) {
-          resumedTasks.push(rState.taskId);
+          // Perform real execution re-entry through runControlledAction
+          const req: AutonomousActionRequest = {
+            taskId: rState.taskId,
+            workspaceId: rState.workspaceId,
+            environmentId: rState.environmentId,
+            toolId: (rState.toolId as string) || "git_operate",
+            params: rState.params || {},
+          };
+
+          const budget: AutonomyBudget = {
+            maxActions: 5,
+            maxRetries: rState.maxRetries,
+            maxReplans: 1,
+            usedActions: 0,
+            usedRetries: rState.attemptNumber,
+            usedReplans: 0,
+          };
+
+          const execContext: ExecutionContext = {
+            executionId: `recovery_exec_${rState.taskId}_${Date.now()}`,
+            timestamp: atTime,
+          };
+
+          const runRes = await this.runControlledAction(
+            req,
+            budget,
+            execContext,
+          );
+          if (runRes.success) {
+            resumedTasks.push(rState.taskId);
+          } else {
+            failedRecoveryTasks.push(rState.taskId);
+          }
         }
       }
     }

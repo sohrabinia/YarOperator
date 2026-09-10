@@ -98,7 +98,7 @@ export class AutonomousExecutionLoop {
     pendingRetriesRecovered: number;
   }> {
     const staleClaims = this.scheduler.reconcileStaleClaims(300000);
-    const retryRecovery = this.autonomyEngine.recoverInterruptedTasks();
+    const retryRecovery = await this.autonomyEngine.recoverInterruptedTasks();
 
     return {
       staleClaimsReconciled: staleClaims,

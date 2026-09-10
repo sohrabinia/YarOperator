@@ -69,7 +69,11 @@ export function bootstrapOperatorApplication(
   const agentRegistry = new AgentRegistry();
   const orchestrator = new AgentOrchestrator(agentRegistry);
 
-  // Register default production tools
+  // Register default production tools and policy rules
+  policyEngine.setRule("git_operate", "SAFE");
+  policyEngine.setRule("browser_navigate", "SAFE");
+  policyEngine.setRule("web_research", "SAFE");
+
   const defaultTools = [
     new TerminalTool(),
     new GitTool(),

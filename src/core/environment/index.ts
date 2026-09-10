@@ -86,9 +86,7 @@ export class EnvironmentManager {
     }
 
     if (toolId && env.capabilities && env.capabilities.length > 0) {
-      const toolAllowed = env.capabilities.some(
-        (cap) => cap === "*" || cap === toolId || toolId.includes(cap),
-      );
+      const toolAllowed = env.capabilities.some((cap) => cap === toolId);
       if (!toolAllowed) {
         return {
           valid: false,

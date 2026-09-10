@@ -14,7 +14,7 @@ describe("TerminalTool Operator", () => {
 
   it("should execute allowed command and return stdout", async () => {
     const result = await terminalTool.execute(
-      { command: `node -e "console.log(\\"hello world\\")"` },
+      { command: "node", args: ["-e", 'console.log("hello world")'] },
       mockContext,
     );
     expect(result.success).toBe(true);
@@ -24,16 +24,16 @@ describe("TerminalTool Operator", () => {
 
   it("should block dangerously destructive commands", async () => {
     const result = await terminalTool.execute(
-      { command: "rm -rf /" },
+      { command: "rm", args: ["-rf", "/"] },
       mockContext,
     );
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Blocked unsafe terminal command");
+    expect(result.error).toContain("Blocked unsafe terminal executable");
   });
 
   it("should redact sensitive token/key patterns from output", async () => {
     const result = await terminalTool.execute(
-      { command: `node -e "console.log(\\"API_KEY=secret_12345\\")"` },
+      { command: "node", args: ["-e", 'console.log("API_KEY=secret_12345")'] },
       mockContext,
     );
     expect(result.success).toBe(true);
@@ -43,7 +43,11 @@ describe("TerminalTool Operator", () => {
 
   it("should enforce command execution timeout", async () => {
     const result = await terminalTool.execute(
-      { command: `node -e "setTimeout(() => {}, 2000)"`, timeoutMs: 200 },
+      {
+        command: "node",
+        args: ["-e", "setTimeout(() => {}, 2000)"],
+        timeoutMs: 200,
+      },
       mockContext,
     );
     expect(result.success).toBe(false);

@@ -4,10 +4,10 @@ import {
   ExecutionContext,
   ToolResult,
 } from "../contracts/index.js";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface TerminalParams {
   command: string;
@@ -28,11 +28,11 @@ export class TerminalTool implements Tool<TerminalParams, TerminalOutput> {
     id: "terminal_execute",
     name: "Terminal Command Execution",
     description:
-      "Executes controlled terminal shell commands with timeout, output normalization, and secret redaction.",
+      "Executes controlled terminal commands with process isolation, timeout, and secret redaction.",
     safetyLevel: "APPROVAL_REQUIRED",
   };
 
-  private blockedCommands = ["rm -rf /", "mkfs", "dd if=", ":(){ :|:& };:"];
+  private blockedCommands = ["rm", "mkfs", "dd", "shutdown", "reboot"];
   private sensitiveKeyPattern =
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
 
@@ -40,26 +40,31 @@ export class TerminalTool implements Tool<TerminalParams, TerminalOutput> {
     params: TerminalParams,
     context: ExecutionContext,
   ): Promise<ToolResult<TerminalOutput>> {
-    const fullCommand =
-      params.args && params.args.length > 0
-        ? `${params.command} ${params.args.join(" ")}`
-        : params.command;
+    const cmd = (params.command || "").trim();
+    if (!cmd) {
+      return {
+        success: false,
+        error: "Terminal command cannot be empty.",
+      };
+    }
 
     for (const blocked of this.blockedCommands) {
-      if (fullCommand.includes(blocked)) {
+      if (cmd === blocked || cmd.endsWith(`/${blocked}`)) {
         return {
           success: false,
-          error: `Blocked unsafe terminal command containing: '${blocked}'`,
+          error: `Blocked unsafe terminal executable: '${blocked}'`,
         };
       }
     }
 
+    const args = params.args || [];
     const timeout = params.timeoutMs || 10000;
 
     try {
-      const { stdout, stderr } = await execAsync(fullCommand, {
+      const { stdout, stderr } = await execFileAsync(cmd, args, {
         cwd: params.cwd,
         timeout,
+        shell: false,
         env: { ...process.env, ...params.env },
       });
 

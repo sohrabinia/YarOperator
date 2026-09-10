@@ -56,7 +56,7 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
 
     const chatUrl = `http://127.0.0.1:${serverPort}/api/v1/operator/chat`;
 
-    // 1. Positive E2E Conversational Route Proof
+    // 1. Positive E2E Real Tool Execution Route Proof (Git Tool Execution)
     const response = await fetch(chatUrl, {
       method: "POST",
       headers: {
@@ -65,7 +65,10 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
       },
       body: JSON.stringify({
         workspaceId: "yartrader",
-        rawCommandText: "hello",
+        environmentId: "env_yartrader",
+        rawCommandText: "Check git status",
+        requestedToolId: "git_operate",
+        params: { action: "status" },
       }),
     });
 
@@ -73,6 +76,9 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
     const body = (await response.json()) as any;
     expect(body.success).toBe(true);
     expect(body.result.status).toBe("COMPLETED");
+    expect(body.result.resolvedToolId).toBe("git_operate");
+    expect(body.result.details?.executedSteps[0].status).toBe("EXECUTED");
+    expect(body.result.details?.executedSteps[0].result).toBeDefined();
   });
 
   it("should enforce negative E2E security boundaries: unauthorized token, workspace mismatch, environment boundary, and policy gates", async () => {
