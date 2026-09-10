@@ -581,6 +581,21 @@ export class OperatorWebServer {
             nonce: stateData.nonce,
           };
         } else {
+          // Dynamic public redirect URI resolution for token exchange matching initiation
+          let effectiveRedirectUri = this.googleRedirectUri;
+          const xProto = req.headers["x-forwarded-proto"] as string;
+          const xHost = req.headers["x-forwarded-host"] as string;
+
+          if (
+            !process.env.GOOGLE_REDIRECT_URI &&
+            xHost &&
+            !xHost.includes("127.0.0.1") &&
+            !xHost.includes("localhost")
+          ) {
+            const proto = xProto || "https";
+            effectiveRedirectUri = `${proto}://${xHost}/auth/google/callback`;
+          }
+
           // Perform real Google OAuth token exchange
           const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
             method: "POST",
@@ -589,7 +604,7 @@ export class OperatorWebServer {
               code,
               client_id: this.googleClientId,
               client_secret: this.googleClientSecret,
-              redirect_uri: this.googleRedirectUri,
+              redirect_uri: effectiveRedirectUri,
               grant_type: "authorization_code",
               code_verifier: stateData.codeVerifier,
             }).toString(),
