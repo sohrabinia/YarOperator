@@ -166,6 +166,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       commandId: "cmd_handoff_safe",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       rawCommandText: realPersianCommand,
       targetCapability: "software-development",
       requestedToolId: "mock_command_tool",
@@ -328,6 +329,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       commandId: "cmd_operational_check",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       rawCommandText: "وضعیت repository YarTrader را بررسی کن",
       timestamp: new Date().toISOString(),
     };

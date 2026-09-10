@@ -175,6 +175,7 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
       headers: { authorization: `Bearer ${bearerToken}` },
       body: {
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         rawCommandText: realPersianPrompt, // NO requestedToolId provided!
       },
     };

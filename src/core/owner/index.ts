@@ -361,7 +361,7 @@ export class OwnerCommandReceiver {
       const goal: AssistantGoal = {
         id: input.commandId,
         workspaceId: input.workspaceId,
-        environmentId: input.environmentId || `env_${input.workspaceId}`,
+        environmentId: input.environmentId,
         description: preservedText,
         targetCapability: resolvedCapability,
         requestedToolId: resolvedToolId,
