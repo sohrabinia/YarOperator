@@ -2,13 +2,27 @@ import { ExecutionScope } from "../orchestrator/index.js";
 import { Tool, ToolResult, ExecutionContext } from "../contracts/index.js";
 import { ToolRegistry } from "../registry/index.js";
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
+import { EnvironmentManager } from "../environment/index.js";
+import { WorkspacePolicyManager } from "../workspace/policy.js";
 
 export class SecureToolEcosystem {
   constructor(
     private registry: ToolRegistry = new ToolRegistry(),
     private policyEngine?: PolicyEngine,
     private approvalManager?: ApprovalManager,
+    private environmentManager?: EnvironmentManager,
+    private workspacePolicyManager?: WorkspacePolicyManager,
   ) {}
+
+  public setEnvironmentManager(envManager: EnvironmentManager): void {
+    this.environmentManager = envManager;
+  }
+
+  public setWorkspacePolicyManager(
+    wsPolicyManager: WorkspacePolicyManager,
+  ): void {
+    this.workspacePolicyManager = wsPolicyManager;
+  }
 
   getRegistry(): ToolRegistry {
     return this.registry;
@@ -49,6 +63,51 @@ export class SecureToolEcosystem {
         success: false,
         error: `Tool '${toolId}' is not registered in ToolRegistry (unregistered tool is not executable).`,
       };
+    }
+
+    // 1. Environment Manager Boundary Validation before Tool.execute()
+    const envId = context.environmentId;
+    const wsId = context.workspaceId || scope.workspaceId;
+
+    if (this.environmentManager) {
+      if (!envId || typeof envId !== "string" || envId.trim().length === 0) {
+        return {
+          success: false,
+          error:
+            "Missing mandatory environment context: environmentId is required for tool execution.",
+        };
+      }
+
+      const envCheck = this.environmentManager.validateEnvironmentAccess(
+        envId,
+        wsId,
+        toolId,
+      );
+
+      if (!envCheck.valid) {
+        return {
+          success: false,
+          error:
+            envCheck.reason ||
+            `Environment boundary check failed for environment '${envId}'.`,
+        };
+      }
+    }
+
+    // 2. Workspace Policy Tool Validation before Tool.execute()
+    if (this.workspacePolicyManager && wsId) {
+      const toolCheck = this.workspacePolicyManager.validateToolAccess(
+        wsId,
+        toolId,
+      );
+      if (!toolCheck.allowed) {
+        return {
+          success: false,
+          error:
+            toolCheck.reason ||
+            `Tool '${toolId}' is blocked by WorkspacePolicy for workspace '${wsId}'.`,
+        };
+      }
     }
 
     try {

@@ -10,6 +10,9 @@ export interface ToolMetadata {
 export interface ExecutionContext {
   executionId: string;
   timestamp: Date;
+  ownerId?: string;
+  workspaceId?: string;
+  environmentId?: string;
   metadata?: Record<string, unknown>;
 }
 

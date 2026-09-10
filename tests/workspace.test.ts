@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   WorkspaceManager,
+  WorkspacePolicy,
+  WorkspacePolicyManager,
   RuntimeContext,
   WorkspaceConfig,
+  GitTool,
+  ExecutionContext,
 } from "../src/index.js";
+import { resolve, join } from "path";
 
 describe("WorkspaceManager and RuntimeContext Foundation", () => {
   let workspaceManager: WorkspaceManager;
@@ -54,5 +59,83 @@ describe("WorkspaceManager and RuntimeContext Foundation", () => {
     expect(context.workspace.workspaceId).toBe("yartrader");
     expect(context.mode).toBe("development");
     expect(context.priority).toBe("high");
+  });
+
+  describe("WorkspacePolicy Enforcement Boundaries", () => {
+    it("Positive: yartrader workspace can execute git status", async () => {
+      const gitTool = new GitTool();
+      const mockContext: ExecutionContext = {
+        executionId: "exec_ws_pos_1",
+        timestamp: new Date(),
+        workspaceId: "yartrader",
+        environmentId: "env_yartrader",
+      };
+
+      const result = await gitTool.execute(
+        { action: "status", cwd: process.cwd() },
+        mockContext,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.output?.exitCode).toBe(0);
+    });
+
+    it("Negative: git cwd outside workspace root is blocked", async () => {
+      const gitTool = new GitTool();
+      const mockContext: ExecutionContext = {
+        executionId: "exec_ws_neg_1",
+        timestamp: new Date(),
+        workspaceId: "yartrader",
+        environmentId: "env_yartrader",
+      };
+
+      const outsidePath = resolve(join(process.cwd(), ".."));
+      const result = await gitTool.execute(
+        { action: "status", cwd: outsidePath },
+        mockContext,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("escapes authorized workspace root");
+    });
+
+    it("Negative: path escaping policy root is rejected by WorkspacePolicy", () => {
+      const policy = new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedRoots: ["./src"],
+        allowedTools: ["git_operate"],
+      });
+
+      const insideCheck = policy.validateRoot("./src/index.ts");
+      expect(insideCheck.allowed).toBe(true);
+
+      const outsideCheck = policy.validateRoot("/etc/passwd");
+      expect(outsideCheck.allowed).toBe(false);
+      expect(outsideCheck.reason).toContain(
+        "outside authorized workspace roots",
+      );
+    });
+
+    it("Negative: unauthorized tool is blocked by WorkspacePolicyManager", () => {
+      const manager = new WorkspacePolicyManager();
+      const policy = new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedRoots: [process.cwd()],
+        allowedTools: ["git_operate"],
+      });
+      manager.registerPolicy(policy);
+
+      const allowedRes = manager.validateToolAccess("yartrader", "git_operate");
+      expect(allowedRes.allowed).toBe(true);
+
+      const blockedRes = manager.validateToolAccess(
+        "yartrader",
+        "unauthorized_tool",
+      );
+      expect(blockedRes.allowed).toBe(false);
+      expect(blockedRes.reason).toContain(
+        "is not permitted by WorkspacePolicy",
+      );
+    });
   });
 });
