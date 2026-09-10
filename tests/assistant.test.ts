@@ -14,6 +14,7 @@ import {
 } from "../src/core/tools/index.js";
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
+import { EnvironmentManager } from "../src/core/environment/index.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class MockAssistantTool implements Tool {
@@ -62,6 +63,18 @@ describe("Phase 29 — Real World Assistant", () => {
     mockTool = new MockAssistantTool();
     toolEcosystem.registerTool(mockTool);
 
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["mock_assistant_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -70,6 +83,8 @@ describe("Phase 29 — Real World Assistant", () => {
       undefined,
       auditManager,
       notificationManager,
+      undefined,
+      environmentManager,
     );
 
     assistant = new RealWorldAssistant(
@@ -104,6 +119,7 @@ describe("Phase 29 — Real World Assistant", () => {
     const goal: AssistantGoal = {
       id: "goal_1",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       description: "Search web and summarize findings",
       targetCapability: "web-automation",
       requestedToolId: "mock_assistant_tool",
@@ -136,6 +152,7 @@ describe("Phase 29 — Real World Assistant", () => {
     const goal: AssistantGoal = {
       id: "goal_2",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       description: "Publish blog post to production site",
       targetCapability: "web-automation",
       requestedToolId: "mock_assistant_tool",
@@ -163,6 +180,7 @@ describe("Phase 29 — Real World Assistant", () => {
     const goal: AssistantGoal = {
       id: "goal_3",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       description: "Attempt prohibited action",
       targetCapability: "web-automation",
       requestedToolId: "mock_assistant_tool",

@@ -13,6 +13,7 @@ import {
   AutonomousActionRequest,
   ExecutionContext,
   OwnerManager,
+  EnvironmentManager,
   Tool,
   ToolResult,
 } from "../src/index.js";
@@ -104,6 +105,27 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
     mockTool = new MockExecutableTool();
     toolEcosystem.registerTool(mockTool);
 
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: [
+        "mock_exec_tool",
+        "unregistered_tool_id",
+        "git_read",
+        "run_test",
+        "run_build",
+        "report_generate",
+        "deploy_prod",
+        "PolicyEngine_modify_rules",
+      ],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -112,6 +134,8 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       acceptanceEngine,
       auditManager,
       notificationManager,
+      undefined,
+      environmentManager,
     );
 
     // Register a valid dev agent
@@ -144,6 +168,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_real_exec",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params,
       };
@@ -175,6 +200,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_retry_fail",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params: { test: 1 },
       };
@@ -199,6 +225,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_blocked_no_exec",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params: {},
       };
@@ -221,6 +248,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_app_no_exec",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params: { key: "value" },
       };
@@ -249,6 +277,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_approval_replay",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params,
       };
@@ -286,6 +315,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_unauth_no_exec",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "unauthorized_tool",
         params: {},
       };
@@ -307,6 +337,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_audit_evidence",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params: { testPayload: "sample" },
       };
@@ -343,6 +374,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_unregistered_fail",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "unregistered_tool_id",
         params: { data: "test" },
       };
@@ -373,6 +405,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_acceptance_evidence",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params: { route: "/api/v1" },
         acceptanceCriteria: { requiredRoutes: ["/api/v1"] },
@@ -396,6 +429,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_fake_routes_fail",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params: { route: "/real_route" }, // Tool output will produce /real_route, NOT /fake_route
         acceptanceCriteria: { requiredRoutes: ["/fake_route"] },
@@ -425,6 +459,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_pref_override",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params: {},
       };
@@ -450,6 +485,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_self_mod",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "PolicyEngine_modify_rules",
         params: {},
       };
@@ -475,6 +511,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       const request: AutonomousActionRequest = {
         taskId: "task_safe_scope_check",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "mock_exec_tool",
         params: {},
       };

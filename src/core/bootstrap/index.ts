@@ -59,26 +59,6 @@ export function bootstrapOperatorApplication(
     process.env.OPERATOR_WORKSPACE_ID ||
     "yartrader";
 
-  const environmentManager = new EnvironmentManager();
-
-  // Register default production environments bound to authorized workspaces
-  const defaultWorkspaces = Array.from(
-    new Set([activeWorkspaceId, "yartrader", "ws_default"]),
-  );
-
-  for (const wsId of defaultWorkspaces) {
-    environmentManager.registerEnvironment({
-      id: `env_${wsId}`,
-      name: `Production Environment (${wsId})`,
-      type: "PRODUCTION",
-      capabilities: ["*"],
-      accessScope: "workspace",
-      riskLevel: "SAFE",
-      healthy: true,
-      metadata: { workspaceId: wsId },
-    });
-  }
-
   const notificationManager = new NotificationManager();
   const toolEcosystem = new SecureToolEcosystem(
     undefined,
@@ -90,12 +70,40 @@ export function bootstrapOperatorApplication(
   const orchestrator = new AgentOrchestrator(agentRegistry);
 
   // Register default production tools
-  toolEcosystem.registerTool(new TerminalTool());
-  toolEcosystem.registerTool(new GitTool());
-  toolEcosystem.registerTool(new GitHubTool());
-  toolEcosystem.registerTool(new JulesWorkerAdapter());
-  toolEcosystem.registerTool(new BrowserTool());
-  toolEcosystem.registerTool(new WebResearchTool());
+  const defaultTools = [
+    new TerminalTool(),
+    new GitTool(),
+    new GitHubTool(),
+    new JulesWorkerAdapter(),
+    new BrowserTool(),
+    new WebResearchTool(),
+  ];
+
+  const registeredToolIds: string[] = [];
+  for (const t of defaultTools) {
+    toolEcosystem.registerTool(t);
+    registeredToolIds.push(t.metadata.id);
+  }
+
+  const environmentManager = new EnvironmentManager();
+
+  // Register default production environments bound to authorized workspaces with concrete tool capabilities
+  const defaultWorkspaces = Array.from(
+    new Set([activeWorkspaceId, "yartrader", "ws_default"]),
+  );
+
+  for (const wsId of defaultWorkspaces) {
+    environmentManager.registerEnvironment({
+      id: `env_${wsId}`,
+      name: `Production Environment (${wsId})`,
+      type: "PRODUCTION",
+      capabilities: registeredToolIds,
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: wsId },
+    });
+  }
 
   // Register default assistant agent
   agentRegistry.registerAgent({

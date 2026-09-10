@@ -13,6 +13,7 @@ import {
 } from "../src/core/tools/index.js";
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
+import { EnvironmentManager } from "../src/core/environment/index.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class MockChatTool implements Tool {
@@ -68,6 +69,18 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
     mockTool = new MockChatTool();
     toolEcosystem.registerTool(mockTool);
 
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["mock_chat_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -76,6 +89,8 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
       undefined,
       auditManager,
       notificationManager,
+      undefined,
+      environmentManager,
     );
 
     assistant = new RealWorldAssistant(

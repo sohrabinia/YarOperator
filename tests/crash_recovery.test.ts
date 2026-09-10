@@ -14,6 +14,7 @@ import {
   ToolRegistry,
   ScheduleDefinition,
   DurableRetryState,
+  EnvironmentManager,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
@@ -88,6 +89,7 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
     const pendingRetry: DurableRetryState = {
       taskId: "task_interrupted_777",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       attemptNumber: 1,
       maxRetries: 3,
       failureClassification: "RETRYABLE",
@@ -116,6 +118,18 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
     const auditManager = new AuditManager();
     const notificationManager = new NotificationManager();
 
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["*"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     const engine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -125,6 +139,7 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
       auditManager,
       notificationManager,
       memory2,
+      environmentManager,
     );
 
     const recovery = engine.recoverInterruptedTasks(new Date());

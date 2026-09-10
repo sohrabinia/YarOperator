@@ -293,11 +293,29 @@ export class ControlledAutonomyEngine {
         }
 
         // Revalidate environment boundary and health before resuming
-        const targetEnvId =
-          (rState.environmentId as string) || `env_${rState.workspaceId}`;
+        if (!rState.environmentId || typeof rState.environmentId !== "string") {
+          rState.status = "CANCELLED";
+          rState.updatedAtIso = nowIso;
+          this.memory.saveState(key, rState);
+
+          this.auditManager.recordEvent(
+            "ACTION_FAILED",
+            {
+              error: `Crash recovery blocked for task '${rState.taskId}': Missing environmentId in durable retry state.`,
+              retryState: rState,
+            },
+            {
+              workspaceId: rState.workspaceId,
+              taskId: rState.taskId,
+              severity: "CRITICAL",
+            },
+          );
+          failedRecoveryTasks.push(rState.taskId);
+          continue;
+        }
 
         const envCheck = this.environmentManager.validateEnvironmentAccess(
-          targetEnvId,
+          rState.environmentId,
           rState.workspaceId,
         );
 
@@ -387,12 +405,29 @@ export class ControlledAutonomyEngine {
       };
     }
 
-    // Mandatory Environment Boundary Validation
-    const effectiveEnvId =
-      request.environmentId || `env_${request.workspaceId}`;
+    // Explicit environmentId is strictly MANDATORY
+    if (
+      !request.environmentId ||
+      typeof request.environmentId !== "string" ||
+      request.environmentId.trim().length === 0
+    ) {
+      return {
+        decision: "BLOCKED",
+        reason:
+          "Missing mandatory environment context: environmentId is required for autonomous execution.",
+        policyResult: "BLOCKED",
+        approvalRequired: false,
+        scopeValid: false,
+        toolAuthorized: false,
+        workspaceId: request.workspaceId,
+        environmentId: "UNSPECIFIED",
+        actionToolId: request.toolId,
+        timestamp: now,
+      };
+    }
 
     const envCheck = this.environmentManager.validateEnvironmentAccess(
-      effectiveEnvId,
+      request.environmentId,
       request.workspaceId,
       request.toolId,
     );
@@ -402,13 +437,13 @@ export class ControlledAutonomyEngine {
         decision: "BLOCKED",
         reason:
           envCheck.reason ||
-          `Mandatory environment boundary validation failed for environment '${effectiveEnvId}'.`,
+          `Mandatory environment boundary validation failed for environment '${request.environmentId}'.`,
         policyResult: "BLOCKED",
         approvalRequired: false,
         scopeValid: false,
         toolAuthorized: false,
         workspaceId: request.workspaceId,
-        environmentId: effectiveEnvId,
+        environmentId: request.environmentId,
         actionToolId: request.toolId,
         timestamp: now,
       };

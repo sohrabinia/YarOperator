@@ -125,6 +125,7 @@ export class AutonomousExecutionLoop {
       const request: AutonomousActionRequest = {
         taskId,
         workspaceId,
+        environmentId: payload.environmentId as string,
         toolId,
         params: payload.params || {},
         capability: (payload.capability as string) || "software-development",
