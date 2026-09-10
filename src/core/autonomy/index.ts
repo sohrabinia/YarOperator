@@ -292,6 +292,61 @@ export class ControlledAutonomyEngine {
           continue;
         }
 
+        // Revalidate environment boundary and health before resuming
+        const targetEnvId =
+          (rState.environmentId as string) || `env_${rState.workspaceId}`;
+
+        const envCheck = this.environmentManager.validateEnvironmentAccess(
+          targetEnvId,
+          rState.workspaceId,
+        );
+
+        if (!envCheck.valid) {
+          rState.status = "CANCELLED";
+          rState.updatedAtIso = nowIso;
+          this.memory.saveState(key, rState);
+
+          this.auditManager.recordEvent(
+            "ACTION_FAILED",
+            {
+              error: `Crash recovery blocked for task '${rState.taskId}': Environment validation failed (${envCheck.reason}).`,
+              retryState: rState,
+            },
+            {
+              workspaceId: rState.workspaceId,
+              taskId: rState.taskId,
+              severity: "CRITICAL",
+            },
+          );
+          failedRecoveryTasks.push(rState.taskId);
+          continue;
+        }
+
+        // Revalidate policy rules if tool ID is present
+        if (rState.toolId && typeof rState.toolId === "string") {
+          const rule = this.policyEngine.getRule(rState.toolId);
+          if (rule === "BLOCKED") {
+            rState.status = "CANCELLED";
+            rState.updatedAtIso = nowIso;
+            this.memory.saveState(key, rState);
+
+            this.auditManager.recordEvent(
+              "ACTION_FAILED",
+              {
+                error: `Crash recovery blocked for task '${rState.taskId}': Tool '${rState.toolId}' is explicitly BLOCKED by policy.`,
+                retryState: rState,
+              },
+              {
+                workspaceId: rState.workspaceId,
+                taskId: rState.taskId,
+                severity: "CRITICAL",
+              },
+            );
+            failedRecoveryTasks.push(rState.taskId);
+            continue;
+          }
+        }
+
         if (rState.nextRetryAtIso <= nowIso) {
           resumedTasks.push(rState.taskId);
         }
@@ -332,29 +387,31 @@ export class ControlledAutonomyEngine {
       };
     }
 
-    if (request.environmentId) {
-      const envCheck = this.environmentManager.validateEnvironmentAccess(
-        request.environmentId,
-        request.workspaceId,
-        request.toolId,
-      );
+    // Mandatory Environment Boundary Validation
+    const effectiveEnvId =
+      request.environmentId || `env_${request.workspaceId}`;
 
-      if (!envCheck.valid) {
-        return {
-          decision: "BLOCKED",
-          reason:
-            envCheck.reason ||
-            `Environment boundary check failed for environment '${request.environmentId}'.`,
-          policyResult: "BLOCKED",
-          approvalRequired: false,
-          scopeValid: false,
-          toolAuthorized: false,
-          workspaceId: request.workspaceId,
-          environmentId: request.environmentId,
-          actionToolId: request.toolId,
-          timestamp: now,
-        };
-      }
+    const envCheck = this.environmentManager.validateEnvironmentAccess(
+      effectiveEnvId,
+      request.workspaceId,
+      request.toolId,
+    );
+
+    if (!envCheck.valid) {
+      return {
+        decision: "BLOCKED",
+        reason:
+          envCheck.reason ||
+          `Mandatory environment boundary validation failed for environment '${effectiveEnvId}'.`,
+        policyResult: "BLOCKED",
+        approvalRequired: false,
+        scopeValid: false,
+        toolAuthorized: false,
+        workspaceId: request.workspaceId,
+        environmentId: effectiveEnvId,
+        actionToolId: request.toolId,
+        timestamp: now,
+      };
     }
 
     if (request.isSecurityCriticalModification) {

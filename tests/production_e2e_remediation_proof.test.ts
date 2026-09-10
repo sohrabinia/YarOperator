@@ -20,11 +20,15 @@ function safelyRemoveDbFile(filePath: string): void {
 }
 
 describe("YarOperator Production Remediation E2E Proof Suite", () => {
-  const testDbPath = join(tmpdir(), "test_production_e2e_proof.db");
+  let testDbPath = "";
   let serverInstance: OperatorWebServer | null = null;
   let serverPort = 0;
 
   beforeEach(() => {
+    testDbPath = join(
+      tmpdir(),
+      `test_prod_e2e_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.db`,
+    );
     safelyRemoveDbFile(testDbPath);
   });
 
@@ -33,7 +37,9 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
       await serverInstance.stop();
       serverInstance = null;
     }
-    safelyRemoveDbFile(testDbPath);
+    if (testDbPath) {
+      safelyRemoveDbFile(testDbPath);
+    }
   });
 
   it("should prove real application composition across full HTTP -> Auth -> Owner -> Receiver -> Assistant -> SQLite Audit", async () => {
@@ -69,14 +75,14 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
     expect(body.result.status).toBe("COMPLETED");
   });
 
-  it("should enforce negative E2E security boundaries: unauthorized token, workspace mismatch, and unconfigured tool fail-closed", async () => {
+  it("should enforce negative E2E security boundaries: unauthorized token, workspace mismatch, environment boundary, and policy gates", async () => {
     const apiHandler = bootstrapOperatorApplication({
       bearerToken: "valid_owner_bearer_token_123",
       ownerId: "owner_sohrab",
       useInMemoryStores: true,
     });
 
-    // 1. Unauthorized Bearer Token
+    // 1. Unauthorized Bearer Token Gate
     const unauthRes = await apiHandler.handleChatRequest({
       headers: { authorization: "Bearer invalid_token" },
       body: { workspaceId: "yartrader", rawCommandText: "hello" },
@@ -96,7 +102,21 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
     expect(impersonateRes.statusCode).toBe(403);
     expect(impersonateRes.body.success).toBe(false);
 
-    // 3. Policy Enforcement Gate for Dangerous Actions
+    // 3. Environment Boundary Failure Gate (Unregistered / Mismatched Environment)
+    const envBlockRes = await apiHandler.handleChatRequest({
+      headers: { authorization: "Bearer valid_owner_bearer_token_123" },
+      body: {
+        workspaceId: "yartrader",
+        environmentId: "invalid_unregistered_environment_999",
+        rawCommandText: "Run command in invalid environment",
+        requestedToolId: "terminal_execute",
+        params: { command: "echo test" },
+      },
+    });
+    expect(envBlockRes.statusCode).toBe(200);
+    expect(envBlockRes.body.result?.status).toBe("BLOCKED");
+
+    // 4. Policy Enforcement Gate for Approval-Required / Blocked Actions
     const githubRes = await apiHandler.handleChatRequest({
       headers: { authorization: "Bearer valid_owner_bearer_token_123" },
       body: {

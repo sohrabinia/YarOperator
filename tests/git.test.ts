@@ -25,6 +25,23 @@ describe("Git, GitHub and Jules Worker Tools", () => {
     expect(pushRes.output?.branch).toBe("feature/test-branch");
   });
 
+  it("should prevent shell command injection when parameters contain metacharacters", async () => {
+    const gitTool = new GitTool();
+    // Attempt shell injection in branch name
+    const res = await gitTool.execute(
+      {
+        action: "push",
+        branch: "main; echo INJECTED_SHELL_COMMAND",
+      },
+      mockContext,
+    );
+
+    // Process execution passes branch as literal argument array, causing Git refspec rejection without shell execution
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("Git push failed");
+    expect(res.output?.exitCode).not.toBe(0);
+  });
+
   it("should fail closed as NOT_CONFIGURED when GitHub credentials are absent", async () => {
     const ghTool = new GitHubTool();
     const prRes = await ghTool.execute(

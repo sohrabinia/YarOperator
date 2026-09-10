@@ -4,10 +4,10 @@ import {
   ExecutionContext,
   ToolResult,
 } from "../contracts/index.js";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface GitOperationParams {
   action: "status" | "commit" | "push" | "checkout" | "diff" | "branch";
@@ -43,16 +43,16 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
     const cwd = params.cwd || process.cwd();
     const timeout = params.timeoutMs || 15000;
 
-    let command = "";
+    let gitArgs: string[] = [];
     switch (params.action) {
       case "status":
-        command = "git status";
+        gitArgs = ["status"];
         break;
       case "diff":
-        command = "git diff";
+        gitArgs = ["diff"];
         break;
       case "branch":
-        command = params.branch ? `git branch ${params.branch}` : "git branch";
+        gitArgs = params.branch ? ["branch", params.branch] : ["branch"];
         break;
       case "checkout":
         if (!params.branch) {
@@ -61,7 +61,7 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
             error: "Git checkout requires a valid branch parameter.",
           };
         }
-        command = `git checkout ${params.branch}`;
+        gitArgs = ["checkout", params.branch];
         break;
       case "commit":
         if (!params.message || params.message.trim().length === 0) {
@@ -70,12 +70,10 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
             error: "Git commit requires a non-empty commit message.",
           };
         }
-        command = `git commit -m ${JSON.stringify(params.message)}`;
+        gitArgs = ["commit", "-m", params.message];
         break;
       case "push":
-        command = params.branch
-          ? `git push origin ${params.branch}`
-          : "git push";
+        gitArgs = params.branch ? ["push", "origin", params.branch] : ["push"];
         break;
       default:
         return {
@@ -85,13 +83,17 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
     }
 
     try {
-      const { stdout, stderr } = await execAsync(command, { cwd, timeout });
+      const { stdout, stderr } = await execFileAsync("git", gitArgs, {
+        cwd,
+        timeout,
+      });
 
       let currentBranch = params.branch;
       if (!currentBranch) {
         try {
-          const { stdout: branchOut } = await execAsync(
-            "git rev-parse --abbrev-ref HEAD",
+          const { stdout: branchOut } = await execFileAsync(
+            "git",
+            ["rev-parse", "--abbrev-ref", "HEAD"],
             { cwd, timeout: 5000 },
           );
           currentBranch = branchOut.trim();

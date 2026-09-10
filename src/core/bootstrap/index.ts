@@ -54,7 +54,31 @@ export function bootstrapOperatorApplication(
     ? new DurableOperationalMemory(":memory:")
     : new DurableOperationalMemory(dbPath);
 
+  const activeWorkspaceId =
+    options?.defaultWorkspaceId ||
+    process.env.OPERATOR_WORKSPACE_ID ||
+    "yartrader";
+
   const environmentManager = new EnvironmentManager();
+
+  // Register default production environments bound to authorized workspaces
+  const defaultWorkspaces = Array.from(
+    new Set([activeWorkspaceId, "yartrader", "ws_default"]),
+  );
+
+  for (const wsId of defaultWorkspaces) {
+    environmentManager.registerEnvironment({
+      id: `env_${wsId}`,
+      name: `Production Environment (${wsId})`,
+      type: "PRODUCTION",
+      capabilities: ["*"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: wsId },
+    });
+  }
+
   const notificationManager = new NotificationManager();
   const toolEcosystem = new SecureToolEcosystem(
     undefined,
@@ -117,11 +141,6 @@ export function bootstrapOperatorApplication(
 
   const activeOwnerId =
     options?.ownerId || process.env.OPERATOR_OWNER_ID || "owner_default";
-
-  const activeWorkspaceId =
-    options?.defaultWorkspaceId ||
-    process.env.OPERATOR_WORKSPACE_ID ||
-    "yartrader";
 
   ownerManager.createProfile({
     id: activeOwnerId,
