@@ -101,18 +101,37 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     return `${signInput}.${signatureB64}`;
   }
 
-  it("1. GET /auth/google initiates OIDC PKCE redirect", async () => {
+  it("1. GET /auth/google initiates OIDC PKCE redirect pointing to accounts.google.com with production callback", async () => {
     const res = await fetch(`http://127.0.0.1:${serverPort}/auth/google`, {
       redirect: "manual",
+      headers: {
+        "x-forwarded-host": "yartrader.com",
+        "x-forwarded-proto": "https",
+      },
     });
 
     expect(res.status).toBe(302);
     const location = res.headers.get("location");
     expect(location).toBeDefined();
-    expect(location).toContain("accounts.google.com/o/oauth2/v2/auth");
-    expect(location).toContain("response_type=code");
-    expect(location).toContain("code_challenge_method=S256");
-    expect(location).toContain("scope=openid+email+profile");
+
+    const locationUrl = new URL(location!);
+    expect(locationUrl.host).toBe("accounts.google.com");
+    expect(locationUrl.pathname).toBe("/o/oauth2/v2/auth");
+
+    const searchParams = locationUrl.searchParams;
+    expect(searchParams.get("response_type")).toBe("code");
+    expect(searchParams.get("client_id")).toBe(
+      "test_client_id_123.apps.googleusercontent.com",
+    );
+    expect(searchParams.get("redirect_uri")).toBe(
+      "https://yartrader.com/auth/google/callback",
+    );
+    expect(searchParams.get("redirect_uri")).not.toContain("localhost");
+    expect(searchParams.get("redirect_uri")).not.toContain("127.0.0.1");
+    expect(searchParams.get("state")).toBeTruthy();
+    expect(searchParams.get("nonce")).toBeTruthy();
+    expect(searchParams.get("code_challenge")).toBeTruthy();
+    expect(searchParams.get("code_challenge_method")).toBe("S256");
   });
 
   it("2. Invalid OAuth callback (missing state or code) returns 400 Bad Request", async () => {

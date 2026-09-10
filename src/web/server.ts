@@ -489,10 +489,25 @@ export class OperatorWebServer {
         createdAt: Date.now(),
       });
 
+      // Dynamic public redirect URI resolution if not explicitly overridden
+      let effectiveRedirectUri = this.googleRedirectUri;
+      const xProto = req.headers["x-forwarded-proto"] as string;
+      const xHost = req.headers["x-forwarded-host"] as string;
+
+      if (
+        !process.env.GOOGLE_REDIRECT_URI &&
+        xHost &&
+        !xHost.includes("127.0.0.1") &&
+        !xHost.includes("localhost")
+      ) {
+        const proto = xProto || "https";
+        effectiveRedirectUri = `${proto}://${xHost}/auth/google/callback`;
+      }
+
       const params = new URLSearchParams({
         response_type: "code",
         client_id: this.googleClientId,
-        redirect_uri: this.googleRedirectUri,
+        redirect_uri: effectiveRedirectUri,
         scope: "openid email profile",
         state,
         nonce,
