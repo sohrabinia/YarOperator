@@ -228,10 +228,10 @@ export class OwnerCommandReceiver {
 
     // Preserved command text (Unicode & Persian text supported)
     const preservedText = input.rawCommandText;
+    const normalizedText = preservedText.trim().toLowerCase();
 
-    // Deterministic Conversational Greeting Detector
-    const lowerPrompt = preservedText.trim().toLowerCase();
-    const conversationalGreetings = [
+    // Deterministic conversational greeting router BEFORE tool selection
+    const conversationalGreetings = new Set([
       "سلام",
       "سلام علیکم",
       "درود",
@@ -241,9 +241,9 @@ export class OwnerCommandReceiver {
       "hi",
       "hey",
       "greetings",
-    ];
+    ]);
 
-    if (conversationalGreetings.includes(lowerPrompt)) {
+    if (conversationalGreetings.has(normalizedText)) {
       return {
         commandId: input.commandId,
         accepted: true,

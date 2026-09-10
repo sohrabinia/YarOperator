@@ -282,9 +282,9 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     expect(result.resolvedCapability).toBe("conversation");
     expect(result.resolvedToolId).toBeUndefined();
     expect(result.assistantResult?.success).toBe(true);
-    expect(result.assistantResult?.executedSteps.length).toBe(0); // ZERO tool steps executed
+    expect(result.assistantResult?.executedSteps.length).toBe(0);
     expect(result.assistantResult?.evidence?.summary).toContain("سلام");
-    expect(mockTool.invocations.length).toBe(0); // Tool NEVER invoked
+    expect(mockTool.invocations.length).toBe(0);
   });
 
   it("9. Conversational English greeting 'hello' handles conversationally without tool execution", async () => {
@@ -313,17 +313,18 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       commandId: "cmd_operational_check",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
-      rawCommandText: "وضعیت repository YarTrader را بررسی کن، branch فعلی، آخرین commit، working tree و PRهای باز را گزارش بده. هیچ تغییری ایجاد نکن.",
+      rawCommandText:
+        "وضعیت repository YarTrader را بررسی کن، branch فعلی، آخرین commit، working tree و PRهای باز را گزارش بده. هیچ تغییری ایجاد نکن.",
       timestamp: new Date().toISOString(),
     };
 
     const result = await receiver.receiveCommand(input, mockContext);
 
     expect(result.accepted).toBe(true);
-    expect(result.resolvedCapability).toBe("software-development"); // Operational capability
-    expect(result.resolvedToolId).toBe("mock_command_tool"); // Resolved tool
+    expect(result.resolvedCapability).toBe("software-development");
+    expect(result.resolvedToolId).toBe("mock_command_tool");
     expect(result.assistantResult?.executedSteps[0].status).toBe("EXECUTED");
-    expect(mockTool.invocations.length).toBe(1); // Executed through tool pipeline
+    expect(mockTool.invocations.length).toBe(1);
   });
 
   it("11. Unclassified/blocked tool in operational command fails closed under PolicyEngine", async () => {
@@ -333,7 +334,8 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       commandId: "cmd_operational_blocked",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
-      rawCommandText: "وضعیت repository YarTrader را بررسی کن، branch فعلی، آخرین commit، working tree و PRهای باز را گزارش بده. هیچ تغییری ایجاد نکن.",
+      rawCommandText:
+        "وضعیت repository YarTrader را بررسی کن، branch فعلی، آخرین commit، working tree و PRهای باز را گزارش بده. هیچ تغییری ایجاد نکن.",
       timestamp: new Date().toISOString(),
     };
 
@@ -343,7 +345,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     expect(result.resolvedCapability).toBe("software-development");
     expect(result.resolvedToolId).toBe("mock_command_tool");
     expect(result.assistantResult?.success).toBe(false);
-    expect(result.assistantResult?.executedSteps[0].status).toBe("BLOCKED"); // Fails closed
+    expect(result.assistantResult?.executedSteps[0].status).toBe("BLOCKED");
     expect(mockTool.invocations.length).toBe(0);
   });
 });
