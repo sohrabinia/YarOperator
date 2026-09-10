@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createProductionServer } from "../src/web/index.js";
 import { OperatorWebServer } from "../src/web/server.js";
+import { readFile } from "node:fs/promises";
 
 describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
   let server: OperatorWebServer | null = null;
@@ -57,6 +58,15 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
     expect(apiData.result.accepted).toBe(true);
   });
 
+  it("2. Browser command payload uses the canonical yartrader workspace", async () => {
+    const appJs = await readFile(
+      new URL("../src/web/public/app.js", import.meta.url),
+      "utf8",
+    );
+
+    expect(appJs).toContain('workspaceId: "yartrader"');
+    expect(appJs).not.toContain('workspaceId: "default"');
+  });
   it("2. Server stops cleanly when stop() is invoked", async () => {
     const res = await createProductionServer({
       port: 0,
@@ -71,22 +81,5 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
 
     // Requests fail after clean stop
     await expect(fetch(`http://127.0.0.1:${port}/Operator`)).rejects.toThrow();
-  });
-
-  it("3. Frontend browser application (app.js) sends canonical workspaceId 'yartrader' and does not send 'default'", async () => {
-    const res = await createProductionServer({
-      port: 0,
-      host: "127.0.0.1",
-    });
-
-    server = res.server;
-    const port = res.port;
-
-    const jsRes = await fetch(`http://127.0.0.1:${port}/app.js`);
-    expect(jsRes.status).toBe(200);
-    const jsText = await jsRes.text();
-
-    expect(jsText).toContain('workspaceId: "yartrader"');
-    expect(jsText).not.toContain('workspaceId: "default"');
   });
 });

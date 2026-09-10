@@ -169,7 +169,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Executive Assistant Personality-driven response formatting
     let textOutput = "";
 
-    if (status === "COMPLETED") {
+    if (result.details && result.details.evidence && result.details.evidence.summary) {
+      textOutput = result.details.evidence.summary;
+    } else if (status === "COMPLETED") {
       textOutput = "حتماً. اقدام درخواستی با موفقیت انجام شد.";
     } else if (status === "APPROVAL_REQUIRED") {
       textOutput = "برای این اقدام به تأیید شما نیاز دارم. فعلاً متوقف می‌مانم.";

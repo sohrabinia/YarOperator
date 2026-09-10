@@ -229,6 +229,39 @@ export class OwnerCommandReceiver {
     // Preserved command text (Unicode & Persian text supported)
     const preservedText = input.rawCommandText;
 
+    // Deterministic Conversational Greeting Detection
+    const lowerPrompt = preservedText.trim().toLowerCase();
+    const conversationalGreetings = [
+      "سلام",
+      "سلام علیکم",
+      "درود",
+      "روز بخیر",
+      "وقت بخیر",
+      "hello",
+      "hi",
+      "hey",
+      "greetings",
+    ];
+
+    if (conversationalGreetings.includes(lowerPrompt)) {
+      return {
+        commandId: input.commandId,
+        accepted: true,
+        commandTextPreserved: preservedText,
+        resolvedCapability: "conversation",
+        resolvedToolId: undefined,
+        assistantResult: {
+          goalId: input.commandId,
+          workspaceId: input.workspaceId,
+          success: true,
+          executedSteps: [],
+          evidence: {
+            summary: "سلام، در خدمتم. چه کاری برایت انجام بدهم؟",
+          },
+        },
+      };
+    }
+
     // Resolve capability & tool from natural language goal
     let resolvedCapability = input.targetCapability || "software-development";
     let resolvedToolId = input.requestedToolId;

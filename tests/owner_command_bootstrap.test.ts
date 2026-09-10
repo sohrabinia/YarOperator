@@ -266,4 +266,84 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     expect(result.accepted).toBe(false);
     expect(result.reason).toContain("Malformed or empty command text");
   });
+
+  it("8. Conversational Persian greeting 'سلام' handles conversationally without tool execution or PolicyEngine block", async () => {
+    const input: OwnerCommandInput = {
+      commandId: "cmd_greeting_persian",
+      ownerId: "owner_sohrab",
+      workspaceId: "yartrader",
+      rawCommandText: "سلام",
+      timestamp: new Date().toISOString(),
+    };
+
+    const result = await receiver.receiveCommand(input);
+
+    expect(result.accepted).toBe(true);
+    expect(result.resolvedCapability).toBe("conversation");
+    expect(result.resolvedToolId).toBeUndefined();
+    expect(result.assistantResult?.success).toBe(true);
+    expect(result.assistantResult?.executedSteps.length).toBe(0); // ZERO tool steps executed
+    expect(result.assistantResult?.evidence?.summary).toContain("سلام");
+    expect(mockTool.invocations.length).toBe(0); // Tool NEVER invoked
+  });
+
+  it("9. Conversational English greeting 'hello' handles conversationally without tool execution", async () => {
+    const input: OwnerCommandInput = {
+      commandId: "cmd_greeting_english",
+      ownerId: "owner_sohrab",
+      workspaceId: "yartrader",
+      rawCommandText: "hello",
+      timestamp: new Date().toISOString(),
+    };
+
+    const result = await receiver.receiveCommand(input);
+
+    expect(result.accepted).toBe(true);
+    expect(result.resolvedCapability).toBe("conversation");
+    expect(result.resolvedToolId).toBeUndefined();
+    expect(result.assistantResult?.success).toBe(true);
+    expect(result.assistantResult?.executedSteps.length).toBe(0);
+    expect(mockTool.invocations.length).toBe(0);
+  });
+
+  it("10. Operational natural-language command is NOT classified as conversational and routes through execution pipeline", async () => {
+    policyEngine.setRule("mock_command_tool", "SAFE");
+
+    const input: OwnerCommandInput = {
+      commandId: "cmd_operational_check",
+      ownerId: "owner_sohrab",
+      workspaceId: "yartrader",
+      rawCommandText: "وضعیت repository YarTrader را بررسی کن",
+      timestamp: new Date().toISOString(),
+    };
+
+    const result = await receiver.receiveCommand(input, mockContext);
+
+    expect(result.accepted).toBe(true);
+    expect(result.resolvedCapability).toBe("software-development"); // Operational capability
+    expect(result.resolvedToolId).toBe("mock_command_tool"); // Resolved tool
+    expect(result.assistantResult?.executedSteps[0].status).toBe("EXECUTED");
+    expect(mockTool.invocations.length).toBe(1); // Executed through tool pipeline
+  });
+
+  it("11. Unclassified/blocked tool in operational command fails closed under PolicyEngine", async () => {
+    policyEngine.setRule("mock_command_tool", "BLOCKED");
+
+    const input: OwnerCommandInput = {
+      commandId: "cmd_operational_blocked",
+      ownerId: "owner_sohrab",
+      workspaceId: "yartrader",
+      rawCommandText: "وضعیت repository YarTrader را بررسی کن",
+      timestamp: new Date().toISOString(),
+    };
+
+    const result = await receiver.receiveCommand(input, mockContext);
+
+    expect(result.accepted).toBe(true);
+    expect(result.resolvedCapability).toBe("software-development");
+    expect(result.resolvedToolId).toBe("mock_command_tool");
+    expect(result.assistantResult?.success).toBe(false);
+    expect(result.assistantResult?.executedSteps[0].status).toBe("BLOCKED"); // Fails closed
+    expect(mockTool.invocations.length).toBe(0);
+  });
 });
