@@ -313,7 +313,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       commandId: "cmd_operational_check",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
-      rawCommandText: "وضعیت repository YarTrader را بررسی کن",
+      rawCommandText: "وضعیت repository YarTrader را بررسی کن، branch فعلی، آخرین commit، working tree و PRهای باز را گزارش بده. هیچ تغییری ایجاد نکن.",
       timestamp: new Date().toISOString(),
     };
 
@@ -333,7 +333,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       commandId: "cmd_operational_blocked",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
-      rawCommandText: "وضعیت repository YarTrader را بررسی کن",
+      rawCommandText: "وضعیت repository YarTrader را بررسی کن، branch فعلی، آخرین commit، working tree و PRهای باز را گزارش بده. هیچ تغییری ایجاد نکن.",
       timestamp: new Date().toISOString(),
     };
 

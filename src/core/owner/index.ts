@@ -229,7 +229,7 @@ export class OwnerCommandReceiver {
     // Preserved command text (Unicode & Persian text supported)
     const preservedText = input.rawCommandText;
 
-    // Deterministic Conversational Greeting Detection
+    // Deterministic Conversational Greeting Detector
     const lowerPrompt = preservedText.trim().toLowerCase();
     const conversationalGreetings = [
       "سلام",
