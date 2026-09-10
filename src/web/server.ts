@@ -491,8 +491,10 @@ export class OperatorWebServer {
 
       // Dynamic public redirect URI resolution if not explicitly overridden
       let effectiveRedirectUri = this.googleRedirectUri;
-      const xProto = req.headers["x-forwarded-proto"] as string;
-      const xHost = req.headers["x-forwarded-host"] as string;
+      const xHost =
+        (req.headers["x-forwarded-host"] as string) ||
+        (req.headers["host"] as string);
+      const xProto = (req.headers["x-forwarded-proto"] as string) || "https";
 
       if (
         !process.env.GOOGLE_REDIRECT_URI &&
@@ -500,8 +502,7 @@ export class OperatorWebServer {
         !xHost.includes("127.0.0.1") &&
         !xHost.includes("localhost")
       ) {
-        const proto = xProto || "https";
-        effectiveRedirectUri = `${proto}://${xHost}/auth/google/callback`;
+        effectiveRedirectUri = `${xProto}://${xHost}/auth/google/callback`;
       }
 
       const params = new URLSearchParams({
@@ -583,8 +584,11 @@ export class OperatorWebServer {
         } else {
           // Dynamic public redirect URI resolution for token exchange matching initiation
           let effectiveRedirectUri = this.googleRedirectUri;
-          const xProto = req.headers["x-forwarded-proto"] as string;
-          const xHost = req.headers["x-forwarded-host"] as string;
+          const xHost =
+            (req.headers["x-forwarded-host"] as string) ||
+            (req.headers["host"] as string);
+          const xProto =
+            (req.headers["x-forwarded-proto"] as string) || "https";
 
           if (
             !process.env.GOOGLE_REDIRECT_URI &&
@@ -592,8 +596,7 @@ export class OperatorWebServer {
             !xHost.includes("127.0.0.1") &&
             !xHost.includes("localhost")
           ) {
-            const proto = xProto || "https";
-            effectiveRedirectUri = `${proto}://${xHost}/auth/google/callback`;
+            effectiveRedirectUri = `${xProto}://${xHost}/auth/google/callback`;
           }
 
           // Perform real Google OAuth token exchange
