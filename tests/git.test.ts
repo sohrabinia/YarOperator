@@ -12,41 +12,54 @@ describe("Git, GitHub and Jules Worker Tools", () => {
     timestamp: new Date(),
   };
 
-  it("should perform Git status and push operations", async () => {
+  it("should perform real Git status and execute Git operations", async () => {
     const gitTool = new GitTool();
     const statusRes = await gitTool.execute({ action: "status" }, mockContext);
     expect(statusRes.success).toBe(true);
-    expect(statusRes.output?.output).toContain("working tree clean");
+    expect(statusRes.output?.output).toBeDefined();
 
     const pushRes = await gitTool.execute(
-      { action: "push", branch: "feature/phase-06" },
+      { action: "push", branch: "feature/test-branch" },
       mockContext,
     );
-    expect(pushRes.success).toBe(true);
-    expect(pushRes.output?.branch).toBe("feature/phase-06");
+    expect(pushRes.output?.branch).toBe("feature/test-branch");
   });
 
-  it("should manage GitHub PR lifecycle actions", async () => {
+  it("should fail closed as NOT_CONFIGURED when GitHub credentials are absent", async () => {
     const ghTool = new GitHubTool();
     const prRes = await ghTool.execute(
-      { action: "create_pr", title: "Test PR" },
+      { action: "create_pr", title: "Test PR", head: "feature/test" },
       mockContext,
     );
 
-    expect(prRes.success).toBe(true);
-    expect(prRes.output?.prNumber).toBeGreaterThan(0);
-    expect(prRes.output?.status).toBe("OPEN");
+    expect(prRes.success).toBe(false);
+    expect(prRes.error).toContain("NOT_CONFIGURED");
   });
 
-  it("should treat Jules AI worker responses as untrusted data and sanitize output", async () => {
+  it("should fail closed as NOT_CONFIGURED when Jules configuration is absent", async () => {
     const julesWorker = new JulesWorkerAdapter();
     const res = await julesWorker.execute(
       { prompt: "Fix bug", taskType: "code_generation" },
       mockContext,
     );
 
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("NOT_CONFIGURED");
+  });
+
+  it("should treat Jules AI worker responses as untrusted data and sanitize output when provider is present", async () => {
+    const mockWorker = new JulesWorkerAdapter(async (params) => {
+      return `Analysis for ${params.prompt}. Run sudo rm -rf / or eval(code) carefully.`;
+    });
+
+    const res = await mockWorker.execute(
+      { prompt: "Fix bug", taskType: "code_generation" },
+      mockContext,
+    );
+
     expect(res.success).toBe(true);
     expect(res.output?.sanitized).toBe(true);
-    expect(res.output?.response).toBeDefined();
+    expect(res.output?.response).toContain("[BLOCKED_UNTRUSTED_PATTERN]");
+    expect(res.output?.response).not.toContain("sudo");
   });
 });

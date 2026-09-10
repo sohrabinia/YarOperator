@@ -38,4 +38,65 @@ export class EnvironmentManager {
     if (!type) return all;
     return all.filter((e) => e.type === type);
   }
+
+  validateEnvironmentAccess(
+    environmentId: string,
+    workspaceId: string,
+    toolId?: string,
+  ): { valid: boolean; reason?: string; environment?: EnvironmentConfig } {
+    const env = this.getEnvironment(environmentId);
+    if (!env) {
+      return {
+        valid: false,
+        reason: `Environment '${environmentId}' does not exist or is not registered.`,
+      };
+    }
+
+    if (env.healthy === false) {
+      return {
+        valid: false,
+        reason: `Environment '${environmentId}' is currently unhealthy or in an unexecutable state.`,
+        environment: env,
+      };
+    }
+
+    if (env.riskLevel === "BLOCKED") {
+      return {
+        valid: false,
+        reason: `Environment '${environmentId}' is explicitly BLOCKED by environment policy.`,
+        environment: env,
+      };
+    }
+
+    const boundWorkspace = env.metadata?.workspaceId as string | undefined;
+    const allowedWorkspaces =
+      (env.metadata?.allowedWorkspaces as string[]) || [];
+
+    if (
+      boundWorkspace &&
+      boundWorkspace !== workspaceId &&
+      !allowedWorkspaces.includes(workspaceId)
+    ) {
+      return {
+        valid: false,
+        reason: `Environment '${environmentId}' belongs to workspace '${boundWorkspace}' and is not authorized for workspace '${workspaceId}'.`,
+        environment: env,
+      };
+    }
+
+    if (toolId && env.capabilities && env.capabilities.length > 0) {
+      const toolAllowed = env.capabilities.some(
+        (cap) => cap === "*" || cap === toolId || toolId.includes(cap),
+      );
+      if (!toolAllowed) {
+        return {
+          valid: false,
+          reason: `Tool '${toolId}' is not authorized in environment '${environmentId}'.`,
+          environment: env,
+        };
+      }
+    }
+
+    return { valid: true, environment: env };
+  }
 }

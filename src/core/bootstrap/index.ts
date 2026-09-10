@@ -1,18 +1,25 @@
 import { OperatorApiHandler } from "../../api/operator.js";
 import { OwnerManager, OwnerCommandReceiver } from "../owner/index.js";
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
-import { AuditManager } from "../audit/index.js";
+import {
+  AuditManager,
+  AuditStore,
+  InMemoryAuditStore,
+  SQLiteAuditStore,
+} from "../audit/index.js";
 import { NotificationManager } from "../notification/index.js";
 import { ControlledAutonomyEngine } from "../autonomy/index.js";
 import { RealWorldAssistant } from "../assistant/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
 import { TerminalTool } from "../terminal/index.js";
-import { GitTool } from "../git/index.js";
+import { GitTool, GitHubTool, JulesWorkerAdapter } from "../git/index.js";
 import { BrowserTool } from "../browser/index.js";
 import { WebResearchTool } from "../research/index.js";
 import { AgentRegistry } from "../agent/index.js";
 import { AgentOrchestrator } from "../orchestrator/index.js";
 import { AcceptanceEngine } from "../acceptance/index.js";
+import { DurableOperationalMemory } from "../memory/index.js";
+import { EnvironmentManager } from "../environment/index.js";
 
 export interface BootstrapOptions {
   ownerId?: string;
@@ -20,6 +27,9 @@ export interface BootstrapOptions {
   defaultWorkspaceId?: string;
   bearerToken?: string;
   extraTokens?: Record<string, string>;
+  dbPath?: string;
+  auditStore?: AuditStore;
+  useInMemoryStores?: boolean;
 }
 
 export function bootstrapOperatorApplication(
@@ -28,9 +38,29 @@ export function bootstrapOperatorApplication(
   const ownerManager = new OwnerManager();
   const approvalManager = new ApprovalManager();
   const policyEngine = new PolicyEngine(approvalManager);
-  const auditManager = new AuditManager();
+
+  const dbPath =
+    options?.dbPath || process.env.OPERATOR_DB_PATH || "operator.db";
+
+  const auditStore =
+    options?.auditStore ||
+    (options?.useInMemoryStores
+      ? new InMemoryAuditStore()
+      : new SQLiteAuditStore(dbPath));
+
+  const auditManager = new AuditManager(auditStore);
+
+  const operationalMemory = options?.useInMemoryStores
+    ? new DurableOperationalMemory(":memory:")
+    : new DurableOperationalMemory(dbPath);
+
+  const environmentManager = new EnvironmentManager();
   const notificationManager = new NotificationManager();
-  const toolEcosystem = new SecureToolEcosystem();
+  const toolEcosystem = new SecureToolEcosystem(
+    undefined,
+    policyEngine,
+    approvalManager,
+  );
   const acceptanceEngine = new AcceptanceEngine();
   const agentRegistry = new AgentRegistry();
   const orchestrator = new AgentOrchestrator(agentRegistry);
@@ -38,6 +68,8 @@ export function bootstrapOperatorApplication(
   // Register default production tools
   toolEcosystem.registerTool(new TerminalTool());
   toolEcosystem.registerTool(new GitTool());
+  toolEcosystem.registerTool(new GitHubTool());
+  toolEcosystem.registerTool(new JulesWorkerAdapter());
   toolEcosystem.registerTool(new BrowserTool());
   toolEcosystem.registerTool(new WebResearchTool());
 
@@ -71,6 +103,8 @@ export function bootstrapOperatorApplication(
     acceptanceEngine,
     auditManager,
     notificationManager,
+    operationalMemory,
+    environmentManager,
   );
 
   const assistant = new RealWorldAssistant(

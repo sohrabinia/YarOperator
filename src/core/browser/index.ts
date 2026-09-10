@@ -76,22 +76,47 @@ export class BrowserTool implements Tool<
       }
     }
 
-    if (!this.driverFactory) {
-      return {
-        success: true,
-        output: {
-          url: params.url,
-          title: "Page Observation Title",
-          contentSnippet: this.redactSecrets(
-            `Navigated to ${params.url} successfully.`,
-          ),
-        },
+    let activeDriverFactory = this.driverFactory;
+    if (!activeDriverFactory) {
+      activeDriverFactory = async () => {
+        try {
+          const playwright = await import("playwright");
+          const browser = await playwright.chromium.launch({ headless: true });
+          const context = await browser.newContext();
+          const page = await context.newPage();
+
+          return {
+            navigate: async (url: string) => {
+              await page.goto(url, {
+                waitUntil: "domcontentloaded",
+                timeout: 15000,
+              });
+              const title = await page.title();
+              const bodyText = (await page.textContent("body")) || "";
+              const contentSnippet = bodyText.substring(0, 1000);
+              return { title, contentSnippet };
+            },
+            click: async (selector: string) => {
+              await page.click(selector, { timeout: 5000 });
+            },
+            fill: async (selector: string, value: string) => {
+              await page.fill(selector, value, { timeout: 5000 });
+            },
+            close: async () => {
+              await browser.close().catch(() => {});
+            },
+          };
+        } catch (err: any) {
+          throw new Error(
+            `NOT_CONFIGURED: Playwright browser driver is unavailable (${err.message}).`,
+          );
+        }
       };
     }
 
     let driver: BrowserDriver | null = null;
     try {
-      driver = await this.driverFactory();
+      driver = await activeDriverFactory();
       const obs = await driver.navigate(params.url);
 
       if (params.action === "click" && params.selector && driver.click) {

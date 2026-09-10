@@ -77,14 +77,42 @@ export class WebResearchTool implements Tool<
           error: `Search provider error: ${err.message}`,
         };
       }
+    } else if (process.env.TAVILY_API_KEY) {
+      try {
+        const res = await fetch("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_key: process.env.TAVILY_API_KEY,
+            query: params.query,
+            max_results: maxResults,
+          }),
+        });
+        if (!res.ok) {
+          const errText = await res.text();
+          return {
+            success: false,
+            error: `Tavily search API error (${res.status}): ${errText}`,
+          };
+        }
+        const data = (await res.json()) as any;
+        rawResults = (data.results || []).map((r: any) => ({
+          title: r.title || "Untitled",
+          url: r.url || "",
+          snippet: r.content || r.snippet || "",
+        }));
+      } catch (err: any) {
+        return {
+          success: false,
+          error: `Tavily search request failed: ${err.message}`,
+        };
+      }
     } else {
-      rawResults = [
-        {
-          title: `Result for ${params.query}`,
-          url: `https://example.com/search?q=${encodeURIComponent(params.query)}`,
-          snippet: `This is a safe research snippet regarding ${params.query}.`,
-        },
-      ];
+      return {
+        success: false,
+        error:
+          "NOT_CONFIGURED: Web research search provider or API key (TAVILY_API_KEY) is missing in current production environment.",
+      };
     }
 
     const seenHashes = new Set<string>();

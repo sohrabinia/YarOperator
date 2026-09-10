@@ -4,16 +4,24 @@ import {
   ExecutionContext,
   ToolResult,
 } from "../contracts/index.js";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 export interface GitOperationParams {
-  action: "status" | "commit" | "push" | "checkout";
+  action: "status" | "commit" | "push" | "checkout" | "diff" | "branch";
   message?: string;
   branch?: string;
+  cwd?: string;
+  args?: string[];
+  timeoutMs?: number;
 }
 
 export interface GitOperationResult {
   output: string;
   branch?: string;
+  exitCode?: number;
 }
 
 export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
@@ -21,41 +29,117 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
     id: "git_operate",
     name: "Git Workspace Tool",
     description:
-      "Performs workspace Git operations with strict policy and approval enforcement.",
+      "Performs real workspace Git operations with strict policy and approval enforcement.",
     safetyLevel: "APPROVAL_REQUIRED",
   };
+
+  private sensitiveKeyPattern =
+    /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
 
   async execute(
     params: GitOperationParams,
     _context: ExecutionContext,
   ): Promise<ToolResult<GitOperationResult>> {
-    if (params.action === "status") {
+    const cwd = params.cwd || process.cwd();
+    const timeout = params.timeoutMs || 15000;
+
+    let command = "";
+    switch (params.action) {
+      case "status":
+        command = "git status";
+        break;
+      case "diff":
+        command = "git diff";
+        break;
+      case "branch":
+        command = params.branch ? `git branch ${params.branch}` : "git branch";
+        break;
+      case "checkout":
+        if (!params.branch) {
+          return {
+            success: false,
+            error: "Git checkout requires a valid branch parameter.",
+          };
+        }
+        command = `git checkout ${params.branch}`;
+        break;
+      case "commit":
+        if (!params.message || params.message.trim().length === 0) {
+          return {
+            success: false,
+            error: "Git commit requires a non-empty commit message.",
+          };
+        }
+        command = `git commit -m ${JSON.stringify(params.message)}`;
+        break;
+      case "push":
+        command = params.branch
+          ? `git push origin ${params.branch}`
+          : "git push";
+        break;
+      default:
+        return {
+          success: false,
+          error: `Unsupported Git action: '${(params as any).action}'`,
+        };
+    }
+
+    try {
+      const { stdout, stderr } = await execAsync(command, { cwd, timeout });
+
+      let currentBranch = params.branch;
+      if (!currentBranch) {
+        try {
+          const { stdout: branchOut } = await execAsync(
+            "git rev-parse --abbrev-ref HEAD",
+            { cwd, timeout: 5000 },
+          );
+          currentBranch = branchOut.trim();
+        } catch {
+          currentBranch = "main";
+        }
+      }
+
       return {
         success: true,
         output: {
-          output: "On branch main, working tree clean",
-          branch: "main",
+          output: this.redactSecrets(
+            stdout || stderr || "Git operation completed successfully.",
+          ),
+          branch: currentBranch,
+          exitCode: 0,
         },
       };
-    }
+    } catch (error: any) {
+      const stdout = error.stdout
+        ? this.redactSecrets(error.stdout.toString())
+        : "";
+      const stderr = error.stderr
+        ? this.redactSecrets(error.stderr.toString())
+        : "";
+      const exitCode = typeof error.code === "number" ? error.code : 1;
+      const isTimeout = error.killed || error.signal === "SIGTERM";
 
-    if (params.action === "push" || params.action === "commit") {
       return {
-        success: true,
+        success: false,
+        error: isTimeout
+          ? `Git command timed out after ${timeout}ms`
+          : `Git ${params.action} failed with exit code ${exitCode}: ${stderr || stdout || error.message}`,
         output: {
-          output: `Git ${params.action} completed successfully for branch ${params.branch || "main"}`,
-          branch: params.branch || "main",
+          output: stderr || stdout || error.message,
+          branch: params.branch,
+          exitCode,
         },
       };
     }
+  }
 
-    return {
-      success: true,
-      output: {
-        output: `Git action ${params.action} executed.`,
-        branch: params.branch,
-      },
-    };
+  private redactSecrets(text: string): string {
+    if (!text) return "";
+    return text.replace(
+      this.sensitiveKeyPattern,
+      (_match, key) => `${key}=[REDACTED]`,
+    );
   }
 }
 
@@ -66,6 +150,9 @@ export interface GitHubPRParams {
   prNumber?: number;
   head?: string;
   base?: string;
+  owner?: string;
+  repo?: string;
+  token?: string;
 }
 
 export interface GitHubPRResult {
@@ -79,7 +166,7 @@ export class GitHubTool implements Tool<GitHubPRParams, GitHubPRResult> {
     id: "github_operate",
     name: "GitHub API Tool",
     description:
-      "Interacts with GitHub API for PR management under approval rules.",
+      "Interacts with GitHub API for real PR management under approval rules.",
     safetyLevel: "APPROVAL_REQUIRED",
   };
 
@@ -87,21 +174,162 @@ export class GitHubTool implements Tool<GitHubPRParams, GitHubPRResult> {
     params: GitHubPRParams,
     _context: ExecutionContext,
   ): Promise<ToolResult<GitHubPRResult>> {
-    const prNumber = params.prNumber || Math.floor(Math.random() * 1000) + 1;
-    return {
-      success: true,
-      output: {
-        prNumber,
-        url: `https://github.com/sohrabinia/YarOperator/pull/${prNumber}`,
-        status: params.action === "merge_pr" ? "MERGED" : "OPEN",
-      },
-    };
+    const token =
+      params.token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+
+    if (!token) {
+      return {
+        success: false,
+        error:
+          "NOT_CONFIGURED: GitHub credentials (GITHUB_TOKEN) are missing in current production environment.",
+      };
+    }
+
+    const owner = params.owner || process.env.GITHUB_OWNER || "sohrabinia";
+    const repo = params.repo || process.env.GITHUB_REPO || "YarOperator";
+
+    try {
+      if (params.action === "create_pr") {
+        if (!params.title || !params.head) {
+          return {
+            success: false,
+            error: "GitHub create_pr requires title and head branch.",
+          };
+        }
+
+        const res = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github.v3+json",
+              "Content-Type": "application/json",
+              "User-Agent": "YarOperator",
+            },
+            body: JSON.stringify({
+              title: params.title,
+              body: params.body || "",
+              head: params.head,
+              base: params.base || "main",
+            }),
+          },
+        );
+
+        if (!res.ok) {
+          const errText = await res.text();
+          return {
+            success: false,
+            error: `GitHub API error (${res.status}): ${errText}`,
+          };
+        }
+
+        const data = (await res.json()) as any;
+        return {
+          success: true,
+          output: {
+            prNumber: data.number,
+            url: data.html_url,
+            status: data.state || "OPEN",
+          },
+        };
+      }
+
+      if (params.action === "get_pr") {
+        if (!params.prNumber) {
+          return {
+            success: false,
+            error: "GitHub get_pr requires prNumber parameter.",
+          };
+        }
+
+        const res = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls/${params.prNumber}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github.v3+json",
+              "User-Agent": "YarOperator",
+            },
+          },
+        );
+
+        if (!res.ok) {
+          const errText = await res.text();
+          return {
+            success: false,
+            error: `GitHub API error (${res.status}): ${errText}`,
+          };
+        }
+
+        const data = (await res.json()) as any;
+        return {
+          success: true,
+          output: {
+            prNumber: data.number,
+            url: data.html_url,
+            status: data.state || "OPEN",
+          },
+        };
+      }
+
+      if (params.action === "merge_pr") {
+        if (!params.prNumber) {
+          return {
+            success: false,
+            error: "GitHub merge_pr requires prNumber parameter.",
+          };
+        }
+
+        const res = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/pulls/${params.prNumber}/merge`,
+          {
+            method: "PUT",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github.v3+json",
+              "User-Agent": "YarOperator",
+            },
+          },
+        );
+
+        if (!res.ok) {
+          const errText = await res.text();
+          return {
+            success: false,
+            error: `GitHub API error (${res.status}): ${errText}`,
+          };
+        }
+
+        const data = (await res.json()) as any;
+        return {
+          success: true,
+          output: {
+            prNumber: params.prNumber,
+            url: `https://github.com/${owner}/${repo}/pull/${params.prNumber}`,
+            status: data.merged ? "MERGED" : "FAILED",
+          },
+        };
+      }
+
+      return {
+        success: false,
+        error: `Unsupported GitHub action: '${params.action}'`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: `GitHub API request failed: ${err.message}`,
+      };
+    }
   }
 }
 
 export interface JulesWorkerParams {
   prompt: string;
   taskType: "code_generation" | "review" | "analysis";
+  apiKey?: string;
+  apiUrl?: string;
 }
 
 export interface JulesWorkerResult {
@@ -109,6 +337,10 @@ export interface JulesWorkerResult {
   sanitized: boolean;
   warnings?: string[];
 }
+
+export type JulesWorkerProvider = (
+  params: JulesWorkerParams,
+) => Promise<string>;
 
 export class JulesWorkerAdapter implements Tool<
   JulesWorkerParams,
@@ -118,7 +350,7 @@ export class JulesWorkerAdapter implements Tool<
     id: "jules_worker_delegate",
     name: "Jules AI Worker Adapter",
     description:
-      "Delegates sub-tasks to Jules AI worker treating all outputs as UNTRUSTED DATA.",
+      "Delegates sub-tasks to real Jules AI worker treating all outputs as UNTRUSTED DATA.",
     safetyLevel: "SAFE",
   };
 
@@ -129,34 +361,77 @@ export class JulesWorkerAdapter implements Tool<
     /process\.exit/i,
   ];
 
+  constructor(private workerProvider?: JulesWorkerProvider) {}
+
   async execute(
     params: JulesWorkerParams,
     _context: ExecutionContext,
   ): Promise<ToolResult<JulesWorkerResult>> {
-    const rawResponse = `Jules worker analysis for: '${params.prompt}'. Proposed patch generated cleanly.`;
+    const apiKey = params.apiKey || process.env.JULES_API_KEY;
+    const apiUrl = params.apiUrl || process.env.JULES_API_URL;
 
-    const warnings: string[] = [];
-    let sanitizedResponse = rawResponse;
-
-    for (const pattern of this.untrustedPatterns) {
-      if (pattern.test(rawResponse)) {
-        warnings.push(
-          `Untrusted code pattern detected and neutralized: ${pattern}`,
-        );
-        sanitizedResponse = sanitizedResponse.replace(
-          pattern,
-          "[BLOCKED_UNTRUSTED_PATTERN]",
-        );
-      }
+    if (!this.workerProvider && (!apiKey || !apiUrl)) {
+      return {
+        success: false,
+        error:
+          "NOT_CONFIGURED: Jules API key or worker endpoint is missing in current production environment.",
+      };
     }
 
-    return {
-      success: true,
-      output: {
-        response: sanitizedResponse,
-        sanitized: true,
-        warnings,
-      },
-    };
+    try {
+      let rawResponse = "";
+      if (this.workerProvider) {
+        rawResponse = await this.workerProvider(params);
+      } else {
+        const res = await fetch(apiUrl!, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(params),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          return {
+            success: false,
+            error: `Jules API error (${res.status}): ${errText}`,
+          };
+        }
+
+        const data = (await res.json()) as any;
+        rawResponse = data.response || JSON.stringify(data);
+      }
+
+      const warnings: string[] = [];
+      let sanitizedResponse = rawResponse;
+
+      for (const pattern of this.untrustedPatterns) {
+        if (pattern.test(rawResponse)) {
+          warnings.push(
+            `Untrusted code pattern detected and neutralized: ${pattern}`,
+          );
+          sanitizedResponse = sanitizedResponse.replace(
+            pattern,
+            "[BLOCKED_UNTRUSTED_PATTERN]",
+          );
+        }
+      }
+
+      return {
+        success: true,
+        output: {
+          response: sanitizedResponse,
+          sanitized: true,
+          warnings,
+        },
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: `Jules worker request failed: ${err.message}`,
+      };
+    }
   }
 }

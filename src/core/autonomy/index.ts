@@ -6,6 +6,7 @@ import { AuditManager } from "../audit/index.js";
 import { NotificationManager } from "../notification/index.js";
 import { AcceptanceEngine, AcceptanceCriteria } from "../acceptance/index.js";
 import { DurableOperationalMemory } from "../memory/index.js";
+import { EnvironmentManager } from "../environment/index.js";
 import { ExecutionContext, ActionSafetyLevel } from "../contracts/index.js";
 
 export type AutonomyDecisionLevel = "SAFE" | "APPROVAL_REQUIRED" | "BLOCKED";
@@ -207,6 +208,7 @@ export class ControlledAutonomyEngine {
     private auditManager: AuditManager,
     private notificationManager: NotificationManager,
     private memory: DurableOperationalMemory = new DurableOperationalMemory(),
+    private environmentManager: EnvironmentManager = new EnvironmentManager(),
   ) {}
 
   validateStateTransition(
@@ -251,16 +253,47 @@ export class ControlledAutonomyEngine {
   recoverInterruptedTasks(atTime: Date = new Date()): {
     recoveredCount: number;
     resumedTasks: string[];
+    failedRecoveryTasks: string[];
   } {
     const keys = this.memory.listKeys("task_retry:");
     const resumedTasks: string[] = [];
+    const failedRecoveryTasks: string[] = [];
     const nowIso = atTime.toISOString();
 
     for (const key of keys) {
       const entry = this.memory.getState<DurableRetryState>(key);
       if (entry && entry.value && entry.value.status === "RETRYING") {
-        if (entry.value.nextRetryAtIso <= nowIso) {
-          resumedTasks.push(entry.value.taskId);
+        const rState = entry.value;
+
+        // Verify required durable context for safe reconstruction
+        if (
+          !rState.taskId ||
+          !rState.workspaceId ||
+          typeof rState.attemptNumber !== "number" ||
+          typeof rState.maxRetries !== "number"
+        ) {
+          rState.status = "CANCELLED";
+          rState.updatedAtIso = nowIso;
+          this.memory.saveState(key, rState);
+
+          this.auditManager.recordEvent(
+            "ACTION_FAILED",
+            {
+              error: `Crash recovery blocked: Task '${rState.taskId || key}' lacks required durable context for safe reconstruction.`,
+              retryState: rState,
+            },
+            {
+              workspaceId: rState.workspaceId || "UNKNOWN",
+              taskId: rState.taskId || "UNKNOWN",
+              severity: "CRITICAL",
+            },
+          );
+          failedRecoveryTasks.push(rState.taskId || key);
+          continue;
+        }
+
+        if (rState.nextRetryAtIso <= nowIso) {
+          resumedTasks.push(rState.taskId);
         }
       }
     }
@@ -268,6 +301,7 @@ export class ControlledAutonomyEngine {
     return {
       recoveredCount: resumedTasks.length,
       resumedTasks,
+      failedRecoveryTasks,
     };
   }
 
@@ -296,6 +330,31 @@ export class ControlledAutonomyEngine {
         actionToolId: request.toolId || "UNKNOWN",
         timestamp: now,
       };
+    }
+
+    if (request.environmentId) {
+      const envCheck = this.environmentManager.validateEnvironmentAccess(
+        request.environmentId,
+        request.workspaceId,
+        request.toolId,
+      );
+
+      if (!envCheck.valid) {
+        return {
+          decision: "BLOCKED",
+          reason:
+            envCheck.reason ||
+            `Environment boundary check failed for environment '${request.environmentId}'.`,
+          policyResult: "BLOCKED",
+          approvalRequired: false,
+          scopeValid: false,
+          toolAuthorized: false,
+          workspaceId: request.workspaceId,
+          environmentId: request.environmentId,
+          actionToolId: request.toolId,
+          timestamp: now,
+        };
+      }
     }
 
     if (request.isSecurityCriticalModification) {

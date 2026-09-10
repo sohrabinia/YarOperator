@@ -1,4 +1,9 @@
 import { AuditEvent as BasicAuditEvent } from "../contracts/index.js";
+import { createRequire } from "module";
+import { mkdirSync } from "fs";
+import { dirname } from "path";
+
+const require = createRequire(import.meta.url);
 
 export type AuditEventType =
   | "TASK_CREATED"
@@ -57,6 +62,145 @@ export class InMemoryAuditStore implements AuditStore {
       if (filter.severity && e.severity !== filter.severity) return false;
       return true;
     });
+  }
+}
+
+export class SQLiteAuditStore implements AuditStore {
+  private db: any;
+
+  constructor(dbPath: string = process.env.OPERATOR_DB_PATH || "operator.db") {
+    if (dbPath !== ":memory:") {
+      const parentDir = dirname(dbPath);
+      if (parentDir && parentDir !== ".") {
+        mkdirSync(parentDir, { recursive: true });
+      }
+    }
+    const { DatabaseSync } = require("node:sqlite");
+    this.db = new DatabaseSync(dbPath);
+    this.init();
+  }
+
+  private init(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        workspace_id TEXT,
+        task_id TEXT,
+        context_id TEXT,
+        payload TEXT NOT NULL,
+        decision_trace TEXT,
+        severity TEXT NOT NULL
+      );
+    `);
+  }
+
+  async save(event: DetailedAuditEvent): Promise<void> {
+    const redactedPayload = this.redactSecretsInObject(event.payload || {});
+    const redactedTrace = event.decisionTrace
+      ? this.redactSecretsInObject(event.decisionTrace)
+      : null;
+
+    const jsonPayload = JSON.stringify(redactedPayload);
+    const jsonTrace = redactedTrace ? JSON.stringify(redactedTrace) : null;
+
+    const stmt = this.db.prepare(`
+      INSERT INTO audit_events (id, type, timestamp, workspace_id, task_id, context_id, payload, decision_trace, severity)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      event.id,
+      event.type,
+      event.timestamp.toISOString(),
+      event.workspaceId || null,
+      event.taskId || null,
+      event.contextId || null,
+      jsonPayload,
+      jsonTrace,
+      event.severity,
+    );
+  }
+
+  private redactSecretsInObject(obj: any): any {
+    if (typeof obj === "string") {
+      return this.redactSecretsInString(obj);
+    }
+    if (obj === null || typeof obj !== "object") {
+      return obj;
+    }
+    if (Array.isArray(obj)) {
+      return obj.map((item) => this.redactSecretsInObject(item));
+    }
+    const cleanObj: Record<string, any> = {};
+    for (const [key, val] of Object.entries(obj)) {
+      if (
+        /(PASSWORD|SECRET|TOKEN|BEARER|AUTH|API_KEY|COOKIE|SESSION)/i.test(key)
+      ) {
+        if (typeof val === "string") {
+          cleanObj[key] = this.redactSecretsInString(val);
+        } else {
+          cleanObj[key] = "[REDACTED]";
+        }
+      } else {
+        cleanObj[key] = this.redactSecretsInObject(val);
+      }
+    }
+    return cleanObj;
+  }
+
+  private redactSecretsInString(text: string): string {
+    if (!text) return "";
+    return text.replace(
+      /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER|COOKIE|SESSION)[=:\s]+[^\s"'&,]+/gi,
+      (_match, key) => `${key}=[REDACTED]`,
+    );
+  }
+
+  async query(filter: AuditQueryFilter): Promise<DetailedAuditEvent[]> {
+    let sql = `SELECT id, type, timestamp, workspace_id, task_id, context_id, payload, decision_trace, severity FROM audit_events WHERE 1=1`;
+    const params: any[] = [];
+
+    if (filter.workspaceId) {
+      sql += ` AND workspace_id = ?`;
+      params.push(filter.workspaceId);
+    }
+    if (filter.taskId) {
+      sql += ` AND task_id = ?`;
+      params.push(filter.taskId);
+    }
+    if (filter.type) {
+      sql += ` AND type = ?`;
+      params.push(filter.type);
+    }
+    if (filter.severity) {
+      sql += ` AND severity = ?`;
+      params.push(filter.severity);
+    }
+
+    sql += ` ORDER BY timestamp ASC`;
+
+    const stmt = this.db.prepare(sql);
+    const rows = stmt.all(...params) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      type: r.type as AuditEventType,
+      timestamp: new Date(r.timestamp),
+      workspaceId: r.workspace_id || undefined,
+      taskId: r.task_id || undefined,
+      contextId: r.context_id || undefined,
+      payload: JSON.parse(r.payload || "{}"),
+      decisionTrace: r.decision_trace
+        ? JSON.parse(r.decision_trace)
+        : undefined,
+      severity: r.severity as AuditSeverity,
+    }));
+  }
+
+  close(): void {
+    this.db.close();
   }
 }
 
