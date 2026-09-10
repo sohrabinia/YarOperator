@@ -94,7 +94,7 @@ document.addEventListener("DOMContentLoaded", () => {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          workspaceId: "default",
+          workspaceId: "yartrader",
           environmentId: "development",
           rawCommandText: messageText
         })
