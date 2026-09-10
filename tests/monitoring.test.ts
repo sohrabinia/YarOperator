@@ -18,6 +18,7 @@ import {
 import { OwnerManager } from "../src/core/owner/index.js";
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
+import { EnvironmentManager } from "../src/core/environment/index.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class MockRestartTool implements Tool {
@@ -74,6 +75,18 @@ describe("Phase 28 — Production Monitoring & Incident Loop", () => {
     restartTool = new MockRestartTool();
     toolEcosystem.registerTool(restartTool);
 
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "prod",
+      name: "Production Environment",
+      type: "PRODUCTION",
+      capabilities: ["mock_restart_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -82,6 +95,8 @@ describe("Phase 28 — Production Monitoring & Incident Loop", () => {
       undefined, // AcceptanceEngine
       auditManager,
       notificationManager,
+      undefined,
+      environmentManager,
     );
 
     agentRegistry.registerAgent({

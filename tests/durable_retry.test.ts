@@ -15,6 +15,7 @@ import {
   ExecutionContext,
   ToolRegistry,
   Tool,
+  EnvironmentManager,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
@@ -90,6 +91,18 @@ describe("Phase 8.3 — Durable Retry & Failure Semantics", () => {
       available: true,
     });
 
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["failing_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     engine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -99,6 +112,7 @@ describe("Phase 8.3 — Durable Retry & Failure Semantics", () => {
       auditManager,
       notificationManager,
       memory,
+      environmentManager,
     );
   });
 
@@ -119,6 +133,7 @@ describe("Phase 8.3 — Durable Retry & Failure Semantics", () => {
     const request: AutonomousActionRequest = {
       taskId: "task_retry_101",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       toolId: "failing_tool",
       params: {},
     };
@@ -158,6 +173,7 @@ describe("Phase 8.3 — Durable Retry & Failure Semantics", () => {
     const request: AutonomousActionRequest = {
       taskId: "task_exhaust_202",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       toolId: "failing_tool",
       params: {},
     };

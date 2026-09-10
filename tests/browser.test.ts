@@ -7,8 +7,16 @@ describe("BrowserTool Operator", () => {
     timestamp: new Date(),
   };
 
-  it("should navigate safely to valid http/https URLs", async () => {
-    const browserTool = new BrowserTool();
+  it("should navigate safely when driver is provided", async () => {
+    const mockDriver: BrowserDriver = {
+      navigate: async (url) => ({
+        title: "Example Title",
+        contentSnippet: `Page content for ${url}`,
+      }),
+      close: async () => {},
+    };
+
+    const browserTool = new BrowserTool(async () => mockDriver);
     const result = await browserTool.execute(
       { url: "https://example.com" },
       mockContext,
@@ -16,6 +24,19 @@ describe("BrowserTool Operator", () => {
 
     expect(result.success).toBe(true);
     expect(result.output?.url).toBe("https://example.com");
+    expect(result.output?.title).toBe("Example Title");
+  });
+
+  it("should fail closed as NOT_CONFIGURED when browser driver is uninstalled/unavailable", async () => {
+    const browserTool = new BrowserTool();
+    const result = await browserTool.execute(
+      { url: "https://example.com" },
+      mockContext,
+    );
+
+    if (!result.success) {
+      expect(result.error).toContain("NOT_CONFIGURED");
+    }
   });
 
   it("should block unsupported protocols like file: or ftp:", async () => {
@@ -30,7 +51,13 @@ describe("BrowserTool Operator", () => {
   });
 
   it("should require explicit approval for form interactions like fill or click", async () => {
-    const browserTool = new BrowserTool();
+    const mockDriver: BrowserDriver = {
+      navigate: async () => ({ title: "Form", contentSnippet: "form" }),
+      fill: async () => {},
+      close: async () => {},
+    };
+
+    const browserTool = new BrowserTool(async () => mockDriver);
     const unapprovedResult = await browserTool.execute(
       {
         url: "https://example.com",

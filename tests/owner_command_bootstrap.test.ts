@@ -16,6 +16,7 @@ import {
 } from "../src/core/tools/index.js";
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
+import { EnvironmentManager } from "../src/core/environment/index.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class MockCommandTool implements Tool {
@@ -70,6 +71,18 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     mockTool = new MockCommandTool();
     toolEcosystem.registerTool(mockTool);
 
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["mock_command_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -78,6 +91,8 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       undefined,
       auditManager,
       notificationManager,
+      undefined,
+      environmentManager,
     );
 
     assistant = new RealWorldAssistant(
@@ -151,6 +166,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       commandId: "cmd_handoff_safe",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       rawCommandText: realPersianCommand,
       targetCapability: "software-development",
       requestedToolId: "mock_command_tool",
@@ -313,6 +329,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       commandId: "cmd_operational_check",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       rawCommandText: "وضعیت repository YarTrader را بررسی کن",
       timestamp: new Date().toISOString(),
     };

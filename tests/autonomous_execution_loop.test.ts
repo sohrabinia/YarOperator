@@ -14,6 +14,7 @@ import {
   NotificationManager,
   ToolRegistry,
   Tool,
+  EnvironmentManager,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
@@ -84,6 +85,18 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
       available: true,
     });
 
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["safe_tool", "blocked_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -93,6 +106,7 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
       auditManager,
       notificationManager,
       memory,
+      environmentManager,
     );
 
     loop = new AutonomousExecutionLoop(scheduler, memory, autonomyEngine, 100);
@@ -122,6 +136,7 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
       payload: {
         taskId: "task_auto_100",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "safe_tool",
       },
     });
@@ -148,6 +163,7 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
       payload: {
         taskId: "task_auto_blocked",
         workspaceId: "yartrader",
+        environmentId: "env_yartrader",
         toolId: "blocked_tool",
       },
     });

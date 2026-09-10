@@ -11,8 +11,29 @@ describe("WebResearchTool Operator", () => {
     timestamp: new Date(),
   };
 
-  it("should perform web research search and return provenance", async () => {
+  it("should fail closed as NOT_CONFIGURED when search provider/API key is unconfigured", async () => {
     const researchTool = new WebResearchTool();
+    const result = await researchTool.execute(
+      { query: "node js security" },
+      mockContext,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("NOT_CONFIGURED");
+  });
+
+  it("should perform web research search and return provenance when provider is injected", async () => {
+    const mockProvider: SearchProvider = {
+      search: async (query) => [
+        {
+          title: `Results for ${query}`,
+          url: "https://example.org/search",
+          snippet: `Information on ${query}`,
+        },
+      ],
+    };
+
+    const researchTool = new WebResearchTool(mockProvider);
     const result = await researchTool.execute(
       { query: "node js security" },
       mockContext,

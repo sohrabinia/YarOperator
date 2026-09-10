@@ -457,6 +457,7 @@ export class IncidentResponseLoop {
     const request: AutonomousActionRequest = {
       taskId: incident.id,
       workspaceId: observation.workspaceId,
+      environmentId: observation.environmentId,
       toolId: recoveryAction.toolId,
       params: recoveryAction.params,
     };

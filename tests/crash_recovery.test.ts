@@ -14,6 +14,8 @@ import {
   ToolRegistry,
   ScheduleDefinition,
   DurableRetryState,
+  EnvironmentManager,
+  Tool,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
@@ -83,11 +85,12 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
     scheduler2.close();
   });
 
-  it("should detect and recover pending interrupted task retries from durable operational memory", () => {
+  it("should detect and recover pending interrupted task retries from durable operational memory", async () => {
     let memory1 = new DurableOperationalMemory(dbMemory);
     const pendingRetry: DurableRetryState = {
       taskId: "task_interrupted_777",
       workspaceId: "yartrader",
+      environmentId: "env_yartrader",
       attemptNumber: 1,
       maxRetries: 3,
       failureClassification: "RETRYABLE",
@@ -116,6 +119,42 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
     const auditManager = new AuditManager();
     const notificationManager = new NotificationManager();
 
+    const gitTool: Tool = {
+      metadata: {
+        id: "git_operate",
+        name: "Git Operate",
+        description: "Git tool for recovery",
+        safetyLevel: "SAFE",
+      },
+      execute: async () => ({ success: true, output: { status: "clean" } }),
+    };
+    toolRegistry.register(gitTool);
+    policyEngine.setRule("git_operate", "SAFE");
+
+    agentRegistry.registerAgent({
+      id: "recovery_agent",
+      name: "Recovery Agent",
+      capabilities: ["software-development"],
+      workspaceScopes: ["yartrader"],
+      toolScopes: ["git_operate"],
+      provider: "JulesProvider",
+      model: "jules-v1",
+      contract: { inputSchema: {}, outputSchema: {} },
+      available: true,
+    });
+
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["git_operate"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     const engine = new ControlledAutonomyEngine(
       orchestrator,
       policyEngine,
@@ -125,9 +164,10 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
       auditManager,
       notificationManager,
       memory2,
+      environmentManager,
     );
 
-    const recovery = engine.recoverInterruptedTasks(new Date());
+    const recovery = await engine.recoverInterruptedTasks(new Date());
     expect(recovery.recoveredCount).toBe(1);
     expect(recovery.resumedTasks).toContain("task_interrupted_777");
 

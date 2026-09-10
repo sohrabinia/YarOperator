@@ -1,12 +1,25 @@
 import { ExecutionScope } from "../orchestrator/index.js";
 import { Tool, ToolResult, ExecutionContext } from "../contracts/index.js";
 import { ToolRegistry } from "../registry/index.js";
+import { PolicyEngine, ApprovalManager } from "../policy/index.js";
 
 export class SecureToolEcosystem {
-  constructor(private registry: ToolRegistry = new ToolRegistry()) {}
+  constructor(
+    private registry: ToolRegistry = new ToolRegistry(),
+    private policyEngine?: PolicyEngine,
+    private approvalManager?: ApprovalManager,
+  ) {}
 
   getRegistry(): ToolRegistry {
     return this.registry;
+  }
+
+  getPolicyEngine(): PolicyEngine | undefined {
+    return this.policyEngine;
+  }
+
+  getApprovalManager(): ApprovalManager | undefined {
+    return this.approvalManager;
   }
 
   registerTool(tool: Tool): void {

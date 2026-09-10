@@ -6,6 +6,7 @@ import { AuditManager } from "../audit/index.js";
 import { NotificationManager } from "../notification/index.js";
 import { AcceptanceEngine, AcceptanceCriteria } from "../acceptance/index.js";
 import { DurableOperationalMemory } from "../memory/index.js";
+import { EnvironmentManager } from "../environment/index.js";
 import { ExecutionContext, ActionSafetyLevel } from "../contracts/index.js";
 
 export type AutonomyDecisionLevel = "SAFE" | "APPROVAL_REQUIRED" | "BLOCKED";
@@ -207,6 +208,7 @@ export class ControlledAutonomyEngine {
     private auditManager: AuditManager,
     private notificationManager: NotificationManager,
     private memory: DurableOperationalMemory = new DurableOperationalMemory(),
+    private environmentManager: EnvironmentManager = new EnvironmentManager(),
   ) {}
 
   validateStateTransition(
@@ -248,19 +250,155 @@ export class ControlledAutonomyEngine {
     return entry ? entry.value : null;
   }
 
-  recoverInterruptedTasks(atTime: Date = new Date()): {
+  async recoverInterruptedTasks(atTime: Date = new Date()): Promise<{
     recoveredCount: number;
     resumedTasks: string[];
-  } {
+    failedRecoveryTasks: string[];
+  }> {
     const keys = this.memory.listKeys("task_retry:");
     const resumedTasks: string[] = [];
+    const failedRecoveryTasks: string[] = [];
     const nowIso = atTime.toISOString();
 
     for (const key of keys) {
       const entry = this.memory.getState<DurableRetryState>(key);
       if (entry && entry.value && entry.value.status === "RETRYING") {
-        if (entry.value.nextRetryAtIso <= nowIso) {
-          resumedTasks.push(entry.value.taskId);
+        const rState = entry.value;
+
+        // Verify required durable context for safe reconstruction
+        if (
+          !rState.taskId ||
+          !rState.workspaceId ||
+          typeof rState.attemptNumber !== "number" ||
+          typeof rState.maxRetries !== "number"
+        ) {
+          rState.status = "CANCELLED";
+          rState.updatedAtIso = nowIso;
+          this.memory.saveState(key, rState);
+
+          await this.auditManager.recordEvent(
+            "ACTION_FAILED",
+            {
+              error: `Crash recovery blocked: Task '${rState.taskId || key}' lacks required durable context for safe reconstruction.`,
+              retryState: rState,
+            },
+            {
+              workspaceId: rState.workspaceId || "UNKNOWN",
+              taskId: rState.taskId || "UNKNOWN",
+              severity: "CRITICAL",
+            },
+          );
+          failedRecoveryTasks.push(rState.taskId || key);
+          continue;
+        }
+
+        // Revalidate environment boundary and health before resuming
+        if (!rState.environmentId || typeof rState.environmentId !== "string") {
+          rState.status = "CANCELLED";
+          rState.updatedAtIso = nowIso;
+          this.memory.saveState(key, rState);
+
+          await this.auditManager.recordEvent(
+            "ACTION_FAILED",
+            {
+              error: `Crash recovery blocked for task '${rState.taskId}': Missing environmentId in durable retry state.`,
+              retryState: rState,
+            },
+            {
+              workspaceId: rState.workspaceId,
+              taskId: rState.taskId,
+              severity: "CRITICAL",
+            },
+          );
+          failedRecoveryTasks.push(rState.taskId);
+          continue;
+        }
+
+        const envCheck = this.environmentManager.validateEnvironmentAccess(
+          rState.environmentId,
+          rState.workspaceId,
+        );
+
+        if (!envCheck.valid) {
+          rState.status = "CANCELLED";
+          rState.updatedAtIso = nowIso;
+          this.memory.saveState(key, rState);
+
+          await this.auditManager.recordEvent(
+            "ACTION_FAILED",
+            {
+              error: `Crash recovery blocked for task '${rState.taskId}': Environment validation failed (${envCheck.reason}).`,
+              retryState: rState,
+            },
+            {
+              workspaceId: rState.workspaceId,
+              taskId: rState.taskId,
+              severity: "CRITICAL",
+            },
+          );
+          failedRecoveryTasks.push(rState.taskId);
+          continue;
+        }
+
+        // Revalidate policy rules if tool ID is present
+        if (rState.toolId && typeof rState.toolId === "string") {
+          const rule = this.policyEngine.getRule(rState.toolId);
+          if (rule === "BLOCKED") {
+            rState.status = "CANCELLED";
+            rState.updatedAtIso = nowIso;
+            this.memory.saveState(key, rState);
+
+            await this.auditManager.recordEvent(
+              "ACTION_FAILED",
+              {
+                error: `Crash recovery blocked for task '${rState.taskId}': Tool '${rState.toolId}' is explicitly BLOCKED by policy.`,
+                retryState: rState,
+              },
+              {
+                workspaceId: rState.workspaceId,
+                taskId: rState.taskId,
+                severity: "CRITICAL",
+              },
+            );
+            failedRecoveryTasks.push(rState.taskId);
+            continue;
+          }
+        }
+
+        if (rState.nextRetryAtIso <= nowIso) {
+          // Perform real execution re-entry through runControlledAction
+          const req: AutonomousActionRequest = {
+            taskId: rState.taskId,
+            workspaceId: rState.workspaceId,
+            environmentId: rState.environmentId,
+            toolId: (rState.toolId as string) || "git_operate",
+            params: rState.params || {},
+          };
+
+          const budget: AutonomyBudget = {
+            maxActions: 5,
+            maxRetries: rState.maxRetries,
+            maxReplans: 1,
+            usedActions: 0,
+            usedRetries: rState.attemptNumber,
+            usedReplans: 0,
+          };
+
+          const execContext: ExecutionContext = {
+            executionId: `recovery_exec_${rState.taskId}_${Date.now()}`,
+            timestamp: atTime,
+          };
+
+          const runRes = await this.runControlledAction(
+            req,
+            budget,
+            execContext,
+          );
+          if (runRes.success) {
+            resumedTasks.push(rState.taskId);
+          } else {
+            failedRecoveryTasks.push(rState.taskId);
+          }
         }
       }
     }
@@ -268,6 +406,7 @@ export class ControlledAutonomyEngine {
     return {
       recoveredCount: resumedTasks.length,
       resumedTasks,
+      failedRecoveryTasks,
     };
   }
 
@@ -294,6 +433,50 @@ export class ControlledAutonomyEngine {
         workspaceId: request.workspaceId || "UNKNOWN",
         environmentId: request.environmentId,
         actionToolId: request.toolId || "UNKNOWN",
+        timestamp: now,
+      };
+    }
+
+    // Explicit environmentId is strictly MANDATORY
+    if (
+      !request.environmentId ||
+      typeof request.environmentId !== "string" ||
+      request.environmentId.trim().length === 0
+    ) {
+      return {
+        decision: "BLOCKED",
+        reason:
+          "Missing mandatory environment context: environmentId is required for autonomous execution.",
+        policyResult: "BLOCKED",
+        approvalRequired: false,
+        scopeValid: false,
+        toolAuthorized: false,
+        workspaceId: request.workspaceId,
+        environmentId: "UNSPECIFIED",
+        actionToolId: request.toolId,
+        timestamp: now,
+      };
+    }
+
+    const envCheck = this.environmentManager.validateEnvironmentAccess(
+      request.environmentId,
+      request.workspaceId,
+      request.toolId,
+    );
+
+    if (!envCheck.valid) {
+      return {
+        decision: "BLOCKED",
+        reason:
+          envCheck.reason ||
+          `Mandatory environment boundary validation failed for environment '${request.environmentId}'.`,
+        policyResult: "BLOCKED",
+        approvalRequired: false,
+        scopeValid: false,
+        toolAuthorized: false,
+        workspaceId: request.workspaceId,
+        environmentId: request.environmentId,
+        actionToolId: request.toolId,
         timestamp: now,
       };
     }
