@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createProductionServer } from "../src/web/index.js";
 import { OperatorWebServer } from "../src/web/server.js";
+import { readFile } from "node:fs/promises";
 
 describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
   let server: OperatorWebServer | null = null;
@@ -57,6 +58,15 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
     expect(apiData.result.accepted).toBe(true);
   });
 
+  it("2. Browser command payload uses the canonical yartrader workspace", async () => {
+    const appJs = await readFile(
+      new URL("../src/web/public/app.js", import.meta.url),
+      "utf8",
+    );
+
+    expect(appJs).toContain('workspaceId: "yartrader"');
+    expect(appJs).not.toContain('workspaceId: "default"');
+  });
   it("2. Server stops cleanly when stop() is invoked", async () => {
     const res = await createProductionServer({
       port: 0,
