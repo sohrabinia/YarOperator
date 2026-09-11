@@ -95,7 +95,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
         body: JSON.stringify({
           workspaceId: "yartrader",
-          environmentId: "development",
+          environmentId: "env_yartrader",
           rawCommandText: messageText
         })
       });
@@ -169,7 +169,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // Executive Assistant Personality-driven response formatting
     let textOutput = "";
 
-    if (status === "COMPLETED") {
+    // Check if there is an explicit summary/evidence response (e.g. conversational greetings or assistant responses)
+    if (
+      result.details &&
+      result.details.evidence &&
+      result.details.evidence.summary
+    ) {
+      textOutput = result.details.evidence.summary;
+    } else if (status === "COMPLETED") {
       textOutput = "حتماً. اقدام درخواستی با موفقیت انجام شد.";
     } else if (status === "APPROVAL_REQUIRED") {
       textOutput = "برای این اقدام به تأیید شما نیاز دارم. فعلاً متوقف می‌مانم.";
