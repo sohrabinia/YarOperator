@@ -1,4 +1,5 @@
 import { PermissionScope } from "../context/index.js";
+export * from "./policy.js";
 
 export interface WorkspaceConfig {
   id: string;

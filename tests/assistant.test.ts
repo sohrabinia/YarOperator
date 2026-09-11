@@ -16,6 +16,10 @@ import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { EnvironmentManager } from "../src/core/environment/index.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 
 class MockAssistantTool implements Tool {
   metadata = {
@@ -56,12 +60,15 @@ describe("Phase 29 — Real World Assistant", () => {
     policyEngine = new PolicyEngine(approvalManager);
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();
-    toolEcosystem = new SecureToolEcosystem();
-    agentRegistry = new AgentRegistry();
-    orchestrator = new AgentOrchestrator(agentRegistry);
 
-    mockTool = new MockAssistantTool();
-    toolEcosystem.registerTool(mockTool);
+    const workspacePolicyManager = new WorkspacePolicyManager();
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["mock_assistant_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
 
     const environmentManager = new EnvironmentManager();
     environmentManager.registerEnvironment({
@@ -74,6 +81,19 @@ describe("Phase 29 — Real World Assistant", () => {
       healthy: true,
       metadata: { workspaceId: "yartrader" },
     });
+
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+      workspacePolicyManager,
+    );
+    agentRegistry = new AgentRegistry();
+    orchestrator = new AgentOrchestrator(agentRegistry);
+
+    mockTool = new MockAssistantTool();
+    toolEcosystem.registerTool(mockTool);
 
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
@@ -110,6 +130,7 @@ describe("Phase 29 — Real World Assistant", () => {
     mockContext = {
       executionId: "exec_ast_1",
       timestamp: new Date(),
+      environmentId: "env_yartrader",
     };
   });
 

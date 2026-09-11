@@ -20,6 +20,10 @@ import { AgentOrchestrator } from "../orchestrator/index.js";
 import { AcceptanceEngine } from "../acceptance/index.js";
 import { DurableOperationalMemory } from "../memory/index.js";
 import { EnvironmentManager } from "../environment/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../workspace/policy.js";
 
 export interface BootstrapOptions {
   ownerId?: string;
@@ -38,6 +42,7 @@ export function bootstrapOperatorApplication(
   const ownerManager = new OwnerManager();
   const approvalManager = new ApprovalManager();
   const policyEngine = new PolicyEngine(approvalManager);
+  const workspacePolicyManager = new WorkspacePolicyManager();
 
   const dbPath =
     options?.dbPath || process.env.OPERATOR_DB_PATH || "operator.db";
@@ -60,10 +65,14 @@ export function bootstrapOperatorApplication(
     "yartrader";
 
   const notificationManager = new NotificationManager();
+  const environmentManager = new EnvironmentManager();
+
   const toolEcosystem = new SecureToolEcosystem(
     undefined,
     policyEngine,
     approvalManager,
+    environmentManager,
+    workspacePolicyManager,
   );
   const acceptanceEngine = new AcceptanceEngine();
   const agentRegistry = new AgentRegistry();
@@ -89,14 +98,20 @@ export function bootstrapOperatorApplication(
     registeredToolIds.push(t.metadata.id);
   }
 
-  const environmentManager = new EnvironmentManager();
-
-  // Register default production environments bound to authorized workspaces with concrete tool capabilities
+  // Register default production workspace policies & environments
   const defaultWorkspaces = Array.from(
     new Set([activeWorkspaceId, "yartrader", "ws_default"]),
   );
 
   for (const wsId of defaultWorkspaces) {
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: wsId,
+        allowedTools: registeredToolIds,
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
     environmentManager.registerEnvironment({
       id: `env_${wsId}`,
       name: `Production Environment (${wsId})`,

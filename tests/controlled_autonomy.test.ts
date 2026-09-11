@@ -17,6 +17,10 @@ import {
   Tool,
   ToolResult,
 } from "../src/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 
 class MockExecutableTool implements Tool {
   public invocations: Array<{ params: unknown; context: ExecutionContext }> =
@@ -66,6 +70,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
   let orchestrator: AgentOrchestrator;
   let approvalManager: ApprovalManager;
   let policyEngine: PolicyEngine;
+  let workspacePolicyManager: WorkspacePolicyManager;
   let toolEcosystem: SecureToolEcosystem;
   let acceptanceEngine: AcceptanceEngine;
   let auditManager: AuditManager;
@@ -77,6 +82,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
   const mockContext: ExecutionContext = {
     executionId: "autonomy_exec_1",
     timestamp: new Date(),
+    environmentId: "env_yartrader",
   };
 
   const createBudget = (
@@ -96,14 +102,25 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
     orchestrator = new AgentOrchestrator(agentRegistry);
     approvalManager = new ApprovalManager();
     policyEngine = new PolicyEngine(approvalManager);
-    toolEcosystem = new SecureToolEcosystem();
-    acceptanceEngine = new AcceptanceEngine();
-    auditManager = new AuditManager();
-    notificationManager = new NotificationManager();
-    ownerManager = new OwnerManager();
 
-    mockTool = new MockExecutableTool();
-    toolEcosystem.registerTool(mockTool);
+    workspacePolicyManager = new WorkspacePolicyManager();
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: [
+          "mock_exec_tool",
+          "unregistered_tool_id",
+          "unauthorized_tool",
+          "git_read",
+          "run_test",
+          "run_build",
+          "report_generate",
+          "deploy_prod",
+          "PolicyEngine_modify_rules",
+        ],
+        allowedRoots: [process.cwd()],
+      }),
+    );
 
     const environmentManager = new EnvironmentManager();
     environmentManager.registerEnvironment({
@@ -125,6 +142,21 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
       healthy: true,
       metadata: { workspaceId: "yartrader" },
     });
+
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+      workspacePolicyManager,
+    );
+    acceptanceEngine = new AcceptanceEngine();
+    auditManager = new AuditManager();
+    notificationManager = new NotificationManager();
+    ownerManager = new OwnerManager();
+
+    mockTool = new MockExecutableTool();
+    toolEcosystem.registerTool(mockTool);
 
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,

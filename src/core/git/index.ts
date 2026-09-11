@@ -6,6 +6,7 @@ import {
 } from "../contracts/index.js";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { resolve, relative, isAbsolute } from "path";
 
 const execFileAsync = promisify(execFile);
 
@@ -38,9 +39,21 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
 
   async execute(
     params: GitOperationParams,
-    _context: ExecutionContext,
+    context: ExecutionContext,
   ): Promise<ToolResult<GitOperationResult>> {
-    const cwd = params.cwd || process.cwd();
+    const defaultRoot = resolve(process.cwd());
+    const targetCwd = params.cwd ? resolve(params.cwd) : defaultRoot;
+
+    // Enforce workspace path boundary: target cwd must be within authorized workspace root
+    const rel = relative(defaultRoot, targetCwd);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      return {
+        success: false,
+        error: `Git operation rejected: Target path '${params.cwd}' escapes authorized workspace root '${defaultRoot}'.`,
+      };
+    }
+
+    const cwd = targetCwd;
     const timeout = params.timeoutMs || 15000;
 
     let gitArgs: string[] = [];

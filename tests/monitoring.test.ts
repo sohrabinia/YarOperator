@@ -20,6 +20,10 @@ import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { EnvironmentManager } from "../src/core/environment/index.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 
 class MockRestartTool implements Tool {
   metadata = {
@@ -67,13 +71,15 @@ describe("Phase 28 — Production Monitoring & Incident Loop", () => {
 
     approvalManager = new ApprovalManager();
     policyEngine = new PolicyEngine(approvalManager);
-    toolEcosystem = new SecureToolEcosystem();
-    ownerManager = new OwnerManager();
-    agentRegistry = new AgentRegistry();
-    orchestrator = new AgentOrchestrator(agentRegistry);
 
-    restartTool = new MockRestartTool();
-    toolEcosystem.registerTool(restartTool);
+    const workspacePolicyManager = new WorkspacePolicyManager();
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["mock_restart_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
 
     const environmentManager = new EnvironmentManager();
     environmentManager.registerEnvironment({
@@ -86,6 +92,20 @@ describe("Phase 28 — Production Monitoring & Incident Loop", () => {
       healthy: true,
       metadata: { workspaceId: "yartrader" },
     });
+
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+      workspacePolicyManager,
+    );
+    ownerManager = new OwnerManager();
+    agentRegistry = new AgentRegistry();
+    orchestrator = new AgentOrchestrator(agentRegistry);
+
+    restartTool = new MockRestartTool();
+    toolEcosystem.registerTool(restartTool);
 
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
@@ -114,6 +134,7 @@ describe("Phase 28 — Production Monitoring & Incident Loop", () => {
     mockContext = {
       executionId: "exec_mon_1",
       timestamp: new Date(),
+      environmentId: "prod",
     };
   });
 
