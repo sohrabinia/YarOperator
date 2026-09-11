@@ -16,6 +16,10 @@ import {
   Tool,
   EnvironmentManager,
 } from "../src/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -49,6 +53,27 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
     policyEngine = new PolicyEngine();
     approvalManager = new ApprovalManager();
 
+    const workspacePolicyManager = new WorkspacePolicyManager();
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["safe_tool", "blocked_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["safe_tool", "blocked_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     const registry = new ToolRegistry();
     const safeTool: Tool = {
       metadata: {
@@ -65,6 +90,8 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
       registry,
       policyEngine,
       approvalManager,
+      environmentManager,
+      workspacePolicyManager,
     );
     acceptanceEngine = new AcceptanceEngine();
     auditManager = new AuditManager();
@@ -83,18 +110,6 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
       model: "mock-v1",
       contract: { inputSchema: {}, outputSchema: {} },
       available: true,
-    });
-
-    const environmentManager = new EnvironmentManager();
-    environmentManager.registerEnvironment({
-      id: "env_yartrader",
-      name: "YarTrader Env",
-      type: "PRODUCTION",
-      capabilities: ["safe_tool", "blocked_tool"],
-      accessScope: "workspace",
-      riskLevel: "SAFE",
-      healthy: true,
-      metadata: { workspaceId: "yartrader" },
     });
 
     autonomyEngine = new ControlledAutonomyEngine(

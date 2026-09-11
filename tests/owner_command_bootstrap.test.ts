@@ -18,6 +18,10 @@ import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { EnvironmentManager } from "../src/core/environment/index.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 
 class MockCommandTool implements Tool {
   metadata = {
@@ -64,12 +68,15 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     policyEngine = new PolicyEngine(approvalManager);
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();
-    toolEcosystem = new SecureToolEcosystem();
-    agentRegistry = new AgentRegistry();
-    orchestrator = new AgentOrchestrator(agentRegistry);
 
-    mockTool = new MockCommandTool();
-    toolEcosystem.registerTool(mockTool);
+    const workspacePolicyManager = new WorkspacePolicyManager();
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["mock_command_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
 
     const environmentManager = new EnvironmentManager();
     environmentManager.registerEnvironment({
@@ -82,6 +89,19 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       healthy: true,
       metadata: { workspaceId: "yartrader" },
     });
+
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+      workspacePolicyManager,
+    );
+    agentRegistry = new AgentRegistry();
+    orchestrator = new AgentOrchestrator(agentRegistry);
+
+    mockTool = new MockCommandTool();
+    toolEcosystem.registerTool(mockTool);
 
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
@@ -133,6 +153,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     mockContext = {
       executionId: "exec_bootstrap_1",
       timestamp: new Date(),
+      environmentId: "env_yartrader",
     };
   });
 

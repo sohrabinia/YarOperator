@@ -786,11 +786,17 @@ export class ControlledAutonomyEngine {
 
     currentState = "EXECUTING";
 
+    const execContext: ExecutionContext = {
+      ...context,
+      workspaceId: request.workspaceId,
+      environmentId: request.environmentId,
+    };
+
     const executionResult = await this.toolEcosystem.execute(
       request.toolId,
       request.params,
       scope,
-      context,
+      execContext,
     );
 
     if (!executionResult.success) {
