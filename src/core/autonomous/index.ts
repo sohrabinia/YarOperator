@@ -143,6 +143,8 @@ export class AutonomousExecutionLoop {
       const context: ExecutionContext = {
         executionId: `loop_exec_${Date.now()}_${schedule.id}`,
         timestamp: atTime,
+        workspaceId,
+        environmentId: payload.environmentId as string,
       };
 
       const actionResult = await this.autonomyEngine.runControlledAction(
