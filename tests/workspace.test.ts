@@ -7,6 +7,11 @@ import {
   WorkspaceConfig,
   GitTool,
   ExecutionContext,
+  SecureToolEcosystem,
+  ToolRegistry,
+  EnvironmentManager,
+  Tool,
+  ToolResult,
 } from "../src/index.js";
 import { resolve, join } from "path";
 
@@ -136,6 +141,106 @@ describe("WorkspaceManager and RuntimeContext Foundation", () => {
       expect(blockedRes.reason).toContain(
         "is not permitted by WorkspacePolicy",
       );
+    });
+
+    it("CASE 1 (Test A): Missing policy denies tool access and root access", () => {
+      const manager = new WorkspacePolicyManager();
+      const toolCheck = manager.validateToolAccess(
+        "unregistered_ws",
+        "git_operate",
+      );
+      expect(toolCheck.allowed).toBe(false);
+      expect(toolCheck.reason).toContain("No WorkspacePolicy registered");
+
+      const rootCheck = manager.validateRootAccess("unregistered_ws", "./src");
+      expect(rootCheck.allowed).toBe(false);
+      expect(rootCheck.reason).toContain("No WorkspacePolicy registered");
+    });
+
+    it("CASE 2 (Test B): Existing allowed policy permits tool access", () => {
+      const manager = new WorkspacePolicyManager();
+      const policy = new WorkspacePolicy({
+        workspaceId: "ws_allowed",
+        allowedRoots: [process.cwd()],
+        allowedTools: ["git_operate"],
+      });
+      manager.registerPolicy(policy);
+
+      const check = manager.validateToolAccess("ws_allowed", "git_operate");
+      expect(check.allowed).toBe(true);
+    });
+
+    it("CASE 3 (Test C): Existing denied policy blocks tool access", () => {
+      const manager = new WorkspacePolicyManager();
+      const policy = new WorkspacePolicy({
+        workspaceId: "ws_denied",
+        allowedRoots: [process.cwd()],
+        allowedTools: ["git_operate"],
+      });
+      manager.registerPolicy(policy);
+
+      const check = manager.validateToolAccess("ws_denied", "terminal_execute");
+      expect(check.allowed).toBe(false);
+      expect(check.reason).toContain("is not permitted by WorkspacePolicy");
+    });
+
+    it("CASE 4 (Test D): Missing policy must block actual tool execution at SecureToolEcosystem boundary", async () => {
+      let executionCount = 0;
+      const fakeTool: Tool = {
+        metadata: {
+          id: "test_tool",
+          name: "Test Tool",
+          description: "Test execution tool",
+          riskLevel: "SAFE",
+        },
+        async execute(): Promise<ToolResult<unknown>> {
+          executionCount++;
+          return { success: true, output: "executed" };
+        },
+      };
+
+      const registry = new ToolRegistry();
+      registry.register(fakeTool);
+
+      const envManager = new EnvironmentManager();
+      envManager.registerEnvironment({
+        id: "env_ws_test",
+        name: "Test Env",
+        workspaceId: "ws_missing_policy",
+        capabilities: ["test_tool"],
+        status: "healthy",
+      });
+
+      const policyManager = new WorkspacePolicyManager();
+      // NO policy registered for 'ws_missing_policy'
+
+      const ecosystem = new SecureToolEcosystem(
+        registry,
+        undefined,
+        undefined,
+        envManager,
+        policyManager,
+      );
+
+      const scope = {
+        scopeId: "scope_test",
+        workspaceId: "ws_missing_policy",
+        allowedTools: ["test_tool"],
+        policyRules: [],
+      };
+
+      const context: ExecutionContext = {
+        executionId: "exec_test_1",
+        timestamp: new Date(),
+        workspaceId: "ws_missing_policy",
+        environmentId: "env_ws_test",
+      };
+
+      const result = await ecosystem.execute("test_tool", {}, scope, context);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("No WorkspacePolicy registered");
+      expect(executionCount).toBe(0);
     });
   });
 });

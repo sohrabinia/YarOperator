@@ -106,9 +106,9 @@ export class WorkspacePolicyManager {
   ): { allowed: boolean; reason?: string } {
     const policy = this.getPolicy(workspaceId);
     if (!policy) {
-      // Default fail closed if policy explicitly missing
       return {
-        allowed: true, // Allow if no workspace-level policy registered, leaving to EnvironmentManager
+        allowed: false,
+        reason: `No WorkspacePolicy registered for workspace '${workspaceId}'.`,
       };
     }
     return policy.validateTool(toolId);
@@ -120,16 +120,10 @@ export class WorkspacePolicyManager {
   ): { allowed: boolean; resolvedPath?: string; reason?: string } {
     const policy = this.getPolicy(workspaceId);
     if (!policy) {
-      const resolvedTarget = resolve(targetPath);
-      const defaultRoot = resolve(process.cwd());
-      const rel = relative(defaultRoot, resolvedTarget);
-      if (rel.startsWith("..") || isAbsolute(rel)) {
-        return {
-          allowed: false,
-          reason: `Target path '${targetPath}' escapes workspace root '${defaultRoot}'.`,
-        };
-      }
-      return { allowed: true, resolvedPath: resolvedTarget };
+      return {
+        allowed: false,
+        reason: `No WorkspacePolicy registered for workspace '${workspaceId}'.`,
+      };
     }
     return policy.validateRoot(targetPath);
   }
