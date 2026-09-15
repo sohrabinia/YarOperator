@@ -2,10 +2,10 @@ import { AuditManager } from "../audit/index.js";
 import { PolicyEngine } from "../policy/index.js";
 import {
   RealWorldAssistant,
-  AssistantGoal,
   AssistantWorkflowResult,
 } from "../assistant/index.js";
-import { ExecutionContext } from "../contracts/index.js";
+import { ExecutionContext, Brain, BrainInput } from "../contracts/index.js";
+import { DeterministicBrain } from "../brain/index.js";
 import { AgentOrchestrator } from "../orchestrator/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
 
@@ -179,197 +179,21 @@ export interface IntentClassificationResult {
 }
 
 export class IntentBoundary {
-  private static readonly conversationalGreetings = [
-    "سلام",
-    "سلام علیکم",
-    "درود",
-    "روز بخیر",
-    "وقت بخیر",
-    "hello",
-    "hi",
-    "hey",
-    "greetings",
-    "خوبی",
-    "خوبی؟",
-    "چطوری",
-    "چطوری؟",
-    "چه خبر",
-    "چه خبر؟",
-    "ممنون",
-    "مرسی",
-    "تشکر",
-    "خوشحالم",
-    "thanks",
-    "thank you",
-    "good morning",
-    "good afternoon",
-    "good evening",
-    "how are you",
-  ];
-
-  private static readonly actionKeywords = [
-    // Persian imperatives & action verbs
-    "باز کن",
-    "بازکن",
-    "بررسی کن",
-    "بررسی‌کن",
-    "تحلیل کن",
-    "بساز",
-    "ایجاد کن",
-    "ویرایش کن",
-    "تغییر بده",
-    "اصلاح کن",
-    "اجرا کن",
-    "ران کن",
-    "پاک کن",
-    "حذف کن",
-    "نمایش بده",
-    "نشان بده",
-    "ارسال کن",
-    "بفرست",
-    "دانلود کن",
-    "آپلود کن",
-    "دیپلای کن",
-    "تست کن",
-    "دریافت کن",
-    "به‌روزرسانی کن",
-    "طراحی",
-    "پیاده‌سازی",
-    "حل کن",
-    "پیدا کن",
-    "چک کن",
-
-    // Persian domain targets
-    "سایت",
-    "گزارش",
-    "فایل",
-    "سرور",
-    "ریپازیتوری",
-    "ریپو",
-    "گیتهاب",
-    "ترمینال",
-    "پروژه",
-    "محیط",
-    "کانفیگ",
-    "وضعیت",
-    "دستور",
-
-    // English imperatives & domain targets
-    "github",
-    "repository",
-    "repo",
-    "terminal",
-    "pull request",
-    "pr",
-    "open ",
-    "check ",
-    "analyze ",
-    "create ",
-    "build ",
-    "deploy",
-    "execute",
-    "delete ",
-    "show ",
-    "send ",
-    "download ",
-    "upload ",
-    "fix ",
-    "update ",
-    "patch ",
-    "commit ",
-    "push ",
-    "pull ",
-    "merge ",
-    "status",
-  ];
-
   public static classify(input: {
     rawCommandText: string;
     targetCapability?: string;
     requestedToolId?: string;
   }): IntentClassificationResult {
-    // 1. Explicit tool request forces ACTION
-    if (input.requestedToolId) {
-      return { intent: "ACTION" };
-    }
+    const brain = new DeterministicBrain();
+    const result = brain.interpret({ rawCommandText: input.rawCommandText });
 
-    // 2. Explicit non-conversational capability forces ACTION
-    if (
-      input.targetCapability &&
-      input.targetCapability !== "conversation" &&
-      input.targetCapability !== "software-development"
-    ) {
-      return { intent: "ACTION" };
-    }
-
-    const text = input.rawCommandText.trim();
-    const lowerText = text.toLowerCase();
-
-    // 3. Check for explicit action indicators (action verbs / technical domain terms)
-    const hasActionIndicator = this.actionKeywords.some((kw) =>
-      lowerText.includes(kw),
-    );
-
-    if (hasActionIndicator) {
-      return { intent: "ACTION" };
-    }
-
-    // 4. Conversational greetings, pleasantries, or greeting inquiries
-    const isGreetingMatch = this.conversationalGreetings.some(
-      (g) =>
-        lowerText === g ||
-        lowerText.startsWith(g + " ") ||
-        lowerText.endsWith(" " + g) ||
-        lowerText.includes(g),
-    );
-
-    const isConversationalPattern =
-      lowerText.includes("سلام") ||
-      lowerText.includes("درود") ||
-      lowerText.includes("خوبی") ||
-      lowerText.includes("چطوری") ||
-      lowerText.includes("چه خبر") ||
-      lowerText.includes("ممنون") ||
-      lowerText.includes("مرسی") ||
-      lowerText.includes("تشکر") ||
-      lowerText.includes("hello") ||
-      lowerText.includes("hi") ||
-      lowerText.includes("hey") ||
-      lowerText.includes("thanks") ||
-      lowerText.includes("how are you");
-
-    if (isGreetingMatch || isConversationalPattern) {
-      let reply = "سلام! در خدمتم. چه کاری برایتان انجام دهم؟";
-      if (lowerText.includes("سلام") || lowerText.includes("درود")) {
-        reply = "حتماً 😊 سلام شما را جواب می‌دهم: سلام! در خدمتم.";
-      } else if (
-        lowerText.includes("خوبی") ||
-        lowerText.includes("چطوری") ||
-        lowerText.includes("how are you")
-      ) {
-        reply =
-          "ممنون، من خوبم! شما چطورید؟ چه کاری می‌توانم برایتان انجام دهم؟";
-      } else if (
-        lowerText.includes("ممنون") ||
-        lowerText.includes("مرسی") ||
-        lowerText.includes("thanks")
-      ) {
-        reply = "خواهش می‌کنم! خوشحال می‌شوم کمکتان کنم.";
-      } else if (
-        lowerText.startsWith("hi") ||
-        lowerText.startsWith("hello") ||
-        lowerText.startsWith("hey")
-      ) {
-        reply = "Hello! How can I assist you today?";
-      }
-
+    if (result.intent === "CONVERSATION") {
       return {
         intent: "CONVERSATION",
-        reply,
+        reply: result.reply,
       };
     }
 
-    // 5. Fallback for non-greeting natural language input: route to ACTION execution pipeline
     return {
       intent: "ACTION",
     };
@@ -384,6 +208,7 @@ export class OwnerCommandReceiver {
     private assistant?: RealWorldAssistant,
     private orchestrator?: AgentOrchestrator,
     private toolEcosystem?: SecureToolEcosystem,
+    private brain: Brain = new DeterministicBrain(),
   ) {}
 
   public async receiveCommand(
@@ -434,105 +259,15 @@ export class OwnerCommandReceiver {
     // Preserved command text (Unicode & Persian text supported)
     const preservedText = input.rawCommandText;
 
-    // Intent Boundary Decision
-    const intentResult = IntentBoundary.classify({
+    // 5. Brain Interpretation
+    const brainInput: BrainInput = {
       rawCommandText: preservedText,
-      targetCapability: input.targetCapability,
-      requestedToolId: input.requestedToolId,
-    });
+      ownerId: input.ownerId,
+      workspaceId: input.workspaceId,
+      environmentId: input.environmentId,
+    };
 
-    if (intentResult.intent === "CONVERSATION") {
-      return {
-        commandId: input.commandId,
-        accepted: true,
-        commandTextPreserved: preservedText,
-        resolvedCapability: "conversation",
-        resolvedToolId: undefined,
-        assistantResult: {
-          goalId: input.commandId,
-          workspaceId: input.workspaceId,
-          success: true,
-          executedSteps: [],
-          evidence: {
-            summary:
-              intentResult.reply || "سلام، در خدمتم. چه کاری برایت انجام بدهم؟",
-          },
-        },
-      };
-    }
-
-    // Resolve capability & tool from natural language goal
-    let resolvedCapability = input.targetCapability || "software-development";
-    let resolvedToolId = input.requestedToolId;
-
-    if (!resolvedToolId) {
-      if (!this.orchestrator) {
-        return {
-          commandId: input.commandId,
-          accepted: false,
-          reason: "No AgentOrchestrator available to resolve goal capability.",
-          commandTextPreserved: preservedText,
-        };
-      }
-
-      const selectedAgent = this.orchestrator.selectAgentForCapability(
-        resolvedCapability,
-        input.workspaceId,
-      );
-
-      if (!selectedAgent) {
-        return {
-          commandId: input.commandId,
-          accepted: false,
-          reason: `No suitable agent found for capability '${resolvedCapability}' in workspace '${input.workspaceId}'.`,
-          commandTextPreserved: preservedText,
-        };
-      }
-
-      // Semantic/Metadata tool matching against agent's authorized toolScopes
-      if (this.toolEcosystem) {
-        const registry = this.toolEcosystem.getRegistry();
-        const lowerPrompt = preservedText.toLowerCase();
-
-        for (const toolId of selectedAgent.toolScopes) {
-          const toolObj = registry.get(toolId);
-          if (toolObj) {
-            const nameLower = toolObj.metadata.name.toLowerCase();
-            const descLower = toolObj.metadata.description.toLowerCase();
-            const idLower = toolObj.metadata.id.toLowerCase();
-
-            // Match keywords in raw prompt against tool ID, name, or description
-            if (
-              lowerPrompt.includes(idLower) ||
-              lowerPrompt.includes("git") ||
-              lowerPrompt.includes("terminal") ||
-              lowerPrompt.includes(" status") ||
-              lowerPrompt.includes("وضعیت") ||
-              nameLower.includes("terminal") ||
-              descLower.includes("terminal") ||
-              descLower.includes("git")
-            ) {
-              resolvedToolId = toolId;
-              break;
-            }
-          }
-        }
-      }
-
-      // If toolEcosystem not provided or metadata match not found, fail closed if scope has multiple tools
-      if (!resolvedToolId) {
-        if (selectedAgent.toolScopes.length === 1) {
-          resolvedToolId = selectedAgent.toolScopes[0];
-        } else {
-          return {
-            commandId: input.commandId,
-            accepted: false,
-            reason: `No suitable tool found for goal '${preservedText}' under capability '${resolvedCapability}'. Ambiguous tool selection rejected.`,
-            commandTextPreserved: preservedText,
-          };
-        }
-      }
-    }
+    const brainResult = await this.brain.interpret(brainInput);
 
     // Record audit event for intake
     let auditEventId: string | undefined;
@@ -546,43 +281,128 @@ export class OwnerCommandReceiver {
           workspaceId: input.workspaceId,
           environmentId: input.environmentId,
           rawCommandText: preservedText,
-          resolvedCapability,
-          resolvedToolId,
+          brainResult,
         },
         { workspaceId: input.workspaceId, taskId: input.commandId },
       );
       auditEventId = evt.id;
     }
 
-    // Forward goal to RealWorldAssistant runtime if available
-    let assistantResult: AssistantWorkflowResult | undefined;
-    if (this.assistant && resolvedToolId) {
-      const goal: AssistantGoal = {
-        id: input.commandId,
+    // Wire dependencies into orchestrator
+    if (this.orchestrator) {
+      if (this.policyEngine) {
+        this.orchestrator.setPolicyEngine(this.policyEngine);
+      }
+      if (this.toolEcosystem) {
+        this.orchestrator.setToolEcosystem(this.toolEcosystem);
+      }
+      if (this.assistant) {
+        this.orchestrator.setAssistant(this.assistant);
+      }
+    }
+
+    // 6. Route through Orchestrator
+    if (!this.orchestrator) {
+      return {
+        commandId: input.commandId,
+        accepted: false,
+        reason: "No AgentOrchestrator available to orchestrate intent.",
+        commandTextPreserved: preservedText,
+        auditEventId,
+      };
+    }
+
+    const orchResult = await this.orchestrator.orchestrateBrainResult(
+      {
+        brainResult,
+        commandId: input.commandId,
         workspaceId: input.workspaceId,
         environmentId: input.environmentId,
-        description: preservedText,
-        targetCapability: resolvedCapability,
-        requestedToolId: resolvedToolId,
-        params: input.params || {},
-      };
+        targetCapability: input.targetCapability,
+        requestedToolId: input.requestedToolId,
+        params: input.params,
+        rawCommandText: preservedText,
+      },
+      context,
+    );
 
-      const execContext: ExecutionContext = context || {
-        executionId: `exec_${input.commandId}`,
-        timestamp: new Date(),
+    // 7. Map Orchestrator Result -> OwnerCommandResult
+    if (orchResult.intent === "CONVERSATION") {
+      return {
+        commandId: input.commandId,
+        accepted: true,
+        commandTextPreserved: preservedText,
+        resolvedCapability: "conversation",
+        resolvedToolId: undefined,
+        auditEventId,
+        assistantResult: {
+          goalId: input.commandId,
+          workspaceId: input.workspaceId,
+          success: true,
+          executedSteps: [],
+          evidence: {
+            summary:
+              orchResult.reply || "سلام، در خدمتم. چه کاری برایت انجام بدهم؟",
+          },
+        },
       };
-
-      assistantResult = await this.assistant.executeWorkflow(goal, execContext);
     }
+
+    if (orchResult.intent === "AMBIGUOUS") {
+      return {
+        commandId: input.commandId,
+        accepted: false,
+        reason:
+          orchResult.reason || "Input is ambiguous and requires clarification.",
+        commandTextPreserved: preservedText,
+        auditEventId,
+      };
+    }
+
+    // ACTION Intent
+    const isSuccess = orchResult.status === "COMPLETED";
+    const stepStatus =
+      orchResult.status === "COMPLETED"
+        ? "EXECUTED"
+        : orchResult.status === "APPROVAL_REQUIRED"
+          ? "APPROVAL_REQUIRED"
+          : orchResult.status === "BLOCKED"
+            ? "BLOCKED"
+            : "FAILED";
+
+    const policyDecision =
+      stepStatus === "EXECUTED"
+        ? "SAFE"
+        : stepStatus === "APPROVAL_REQUIRED"
+          ? "APPROVAL_REQUIRED"
+          : "BLOCKED";
 
     return {
       commandId: input.commandId,
       accepted: true,
+      reason: orchResult.reason,
       commandTextPreserved: preservedText,
-      resolvedCapability,
-      resolvedToolId,
+      resolvedCapability: orchResult.resolvedCapability,
+      resolvedToolId: orchResult.resolvedToolId,
       auditEventId,
-      assistantResult,
+      assistantResult: {
+        goalId: input.commandId,
+        workspaceId: input.workspaceId,
+        success: isSuccess,
+        executedSteps: [
+          {
+            stepId: `step_${input.commandId}_1`,
+            toolId: orchResult.resolvedToolId || "",
+            params: input.params || {},
+            policyDecision,
+            status: stepStatus,
+            result: orchResult.output,
+            error: orchResult.error || orchResult.reason,
+          },
+        ],
+        evidence: (orchResult.output as Record<string, unknown>) || undefined,
+        error: orchResult.error || orchResult.reason,
+      },
     };
   }
 }
