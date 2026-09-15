@@ -48,10 +48,23 @@
 - **Phase 8.1**: Durable Operational Memory (`OperationalStateStore`, `tests/durable_operational_memory.test.ts`)
 - **Phase 8.2**: Durable Scheduler (`DurableScheduler`, `tests/durable_scheduler.test.ts`, `tests/scheduler_remediated.test.ts`)
 - **PR #19**: Fix YarOperator Conversation / Action Intent Boundary (`Brain` contract, `IntentBoundary`, `OwnerCommandReceiver`, `tests/owner_command_bootstrap.test.ts`)
+- **Brain Contract Foundation**: Minimal architectural Brain contracts (`BrainIntent`, `BrainInput`, `BrainResult`, `Brain`, `BrainRule`, `BrainProvider` in `src/core/contracts/index.ts` and `tests/brain_contract.test.ts`).
 
 ## 5. In-Progress Work
 
-- **None**. Working tree clean at baseline.
+- **None**. Working tree clean.
+
+## 5.1 Implementation Status
+
+```text
+IMPLEMENTED:
+Brain Contract Foundation
+
+NOT IMPLEMENTED:
+Actual Brain Intelligence
+LLM/AI Provider
+Brain → execution runtime integration
+```
 
 ## 6. Known Gaps / Blockers
 
