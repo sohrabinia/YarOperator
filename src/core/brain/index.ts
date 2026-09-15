@@ -137,6 +137,7 @@ export class OperatorKnowledgeBase {
         "examine",
         "see what's wrong",
         "check the status",
+        "check system status",
         "status",
       ],
     },

@@ -108,7 +108,7 @@ export class AgentOrchestrator {
       rawCommandText = "",
     } = request;
 
-    // 1. CONVERSATION Intent
+    // 1. CONVERSATION Intent -> Terminate immediately
     if (brainResult.intent === "CONVERSATION") {
       return {
         accepted: true,
@@ -120,7 +120,7 @@ export class AgentOrchestrator {
       };
     }
 
-    // 2. AMBIGUOUS Intent
+    // 2. AMBIGUOUS Intent -> Terminate immediately
     if (brainResult.intent === "AMBIGUOUS") {
       return {
         accepted: false,
@@ -133,6 +133,8 @@ export class AgentOrchestrator {
     }
 
     // 3. ACTION Intent
+    // M2 STRICT BOUNDARY: NO rawCommandText keyword matching, NO text inspection, NO tool inference.
+    // Tool ID MUST be explicitly supplied in request or bound to candidate agent scope.
     let capability = request.targetCapability || "software-development";
     let toolId = request.requestedToolId;
 
@@ -141,7 +143,7 @@ export class AgentOrchestrator {
         capability,
         workspaceId,
       );
-      if (!selectedAgent) {
+      if (!selectedAgent || selectedAgent.toolScopes.length === 0) {
         return {
           accepted: false,
           intent: "ACTION",
@@ -150,58 +152,16 @@ export class AgentOrchestrator {
         };
       }
 
-      if (this.toolEcosystem) {
-        const registry = this.toolEcosystem.getRegistry();
-        const lowerPrompt = rawCommandText.toLowerCase();
-
-        for (const tId of selectedAgent.toolScopes) {
-          const toolObj = registry.get(tId);
-          if (toolObj) {
-            const nameLower = toolObj.metadata.name.toLowerCase();
-            const descLower = toolObj.metadata.description.toLowerCase();
-            const idLower = toolObj.metadata.id.toLowerCase();
-
-            // Priority match for git / repo / repository / مخزن / ریپازیتوری
-            if (
-              (lowerPrompt.includes("git") ||
-                lowerPrompt.includes("repo") ||
-                lowerPrompt.includes("مخزن") ||
-                lowerPrompt.includes("ریپازیتوری") ||
-                lowerPrompt.includes("repository")) &&
-              (idLower.includes("git") || descLower.includes("git"))
-            ) {
-              toolId = tId;
-              break;
-            }
-
-            if (
-              lowerPrompt.includes(idLower) ||
-              lowerPrompt.includes("git") ||
-              lowerPrompt.includes("terminal") ||
-              lowerPrompt.includes(" status") ||
-              lowerPrompt.includes("وضعیت") ||
-              nameLower.includes("terminal") ||
-              descLower.includes("terminal") ||
-              descLower.includes("git")
-            ) {
-              toolId = tId;
-              break;
-            }
-          }
-        }
-      }
-
-      if (!toolId) {
-        if (selectedAgent.toolScopes.length === 1) {
-          toolId = selectedAgent.toolScopes[0];
-        } else {
-          return {
-            accepted: false,
-            intent: "ACTION",
-            status: "BLOCKED",
-            reason: `No suitable tool found for goal '${rawCommandText}' under capability '${capability}'. Ambiguous or unknown tool selection rejected.`,
-          };
-        }
+      if (selectedAgent.toolScopes.length === 1) {
+        toolId = selectedAgent.toolScopes[0];
+      } else {
+        return {
+          accepted: false,
+          intent: "ACTION",
+          status: "BLOCKED",
+          reason:
+            "No explicit tool provided for action execution under multi-tool capability.",
+        };
       }
     }
 
@@ -215,9 +175,21 @@ export class AgentOrchestrator {
           status: "BLOCKED",
           resolvedCapability: capability,
           resolvedToolId: toolId,
-          reason: `Tool '${toolId}' is not registered in ToolRegistry. Unknown capability/tool rejected.`,
+          reason: `Tool '${toolId}' is not registered in ToolRegistry. Unknown tool rejected.`,
         };
       }
+    }
+
+    // Capability / Tool explicitly identified -> Check Policy Engine
+    if (!this.policyEngine) {
+      return {
+        accepted: false,
+        intent: "ACTION",
+        status: "BLOCKED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason: "PolicyEngine unavailable to authorize capability execution.",
+      };
     }
 
     const execContext: ExecutionContext = context || {
@@ -229,13 +201,11 @@ export class AgentOrchestrator {
 
     // If RealWorldAssistant is present, delegate execution to RealWorldAssistant workflow
     if (this.assistant) {
-      if (this.policyEngine) {
-        await this.policyEngine.evaluate({
-          toolId,
-          params,
-          context: execContext,
-        });
-      }
+      await this.policyEngine.evaluate({
+        toolId,
+        params,
+        context: execContext,
+      });
 
       const goal: AssistantGoal = {
         id: commandId,
@@ -278,28 +248,29 @@ export class AgentOrchestrator {
       }
     }
 
-    // Direct Orchestrator path without RealWorldAssistant
-    if (this.policyEngine) {
-      const policyEval = await this.policyEngine.evaluate({
-        toolId,
-        params,
-        context: execContext,
-      });
+    // Evaluate Policy rule directly if Assistant not present
+    const ruleLevel = this.policyEngine.getRule(toolId) || "BLOCKED";
 
-      if (!policyEval.allowed) {
-        const rule = this.policyEngine.getRule(toolId);
-        const status =
-          rule === "APPROVAL_REQUIRED" ? "APPROVAL_REQUIRED" : "BLOCKED";
-        return {
-          accepted: rule === "APPROVAL_REQUIRED",
-          intent: "ACTION",
-          status,
-          resolvedCapability: capability,
-          resolvedToolId: toolId,
-          reason:
-            policyEval.reason || `Execution blocked by policy (${status}).`,
-        };
-      }
+    if (ruleLevel === "BLOCKED") {
+      return {
+        accepted: false,
+        intent: "ACTION",
+        status: "BLOCKED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason: `Tool '${toolId}' is explicitly BLOCKED by PolicyEngine.`,
+      };
+    }
+
+    if (ruleLevel === "APPROVAL_REQUIRED") {
+      return {
+        accepted: true,
+        intent: "ACTION",
+        status: "APPROVAL_REQUIRED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason: `Tool '${toolId}' requires explicit owner approval.`,
+      };
     }
 
     if (!this.toolEcosystem) {
@@ -310,6 +281,23 @@ export class AgentOrchestrator {
         resolvedCapability: capability,
         resolvedToolId: toolId,
         reason: "SecureToolEcosystem unavailable to execute authorized tool.",
+      };
+    }
+
+    const policyEval = await this.policyEngine.evaluate({
+      toolId,
+      params,
+      context: execContext,
+    });
+
+    if (!policyEval.allowed) {
+      return {
+        accepted: false,
+        intent: "ACTION",
+        status: "BLOCKED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason: policyEval.reason || "Execution blocked by PolicyEngine.",
       };
     }
 
