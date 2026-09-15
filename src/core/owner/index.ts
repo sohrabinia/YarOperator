@@ -10,9 +10,7 @@ import { AgentOrchestrator } from "../orchestrator/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
 
 export type CommunicationNotificationPreference =
-  | "IMMEDIATE"
-  | "BATCHED"
-  | "SILENT";
+  "IMMEDIATE" | "BATCHED" | "SILENT";
 export type InterruptionTolerance = "LOW" | "MEDIUM" | "HIGH";
 
 export interface CommunicationPreferences {
@@ -30,9 +28,7 @@ export interface OperationalPreferences {
 }
 
 export type AutonomyLevelPreference =
-  | "ASSISTANT"
-  | "SEMI_AUTONOMOUS"
-  | "FULL_AUTONOMOUS";
+  "ASSISTANT" | "SEMI_AUTONOMOUS" | "FULL_AUTONOMOUS";
 export type RiskTolerance = "LOW" | "MEDIUM" | "HIGH";
 
 export interface PreferenceModel {

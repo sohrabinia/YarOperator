@@ -114,7 +114,8 @@ export class AgentOrchestrator {
         accepted: true,
         intent: "CONVERSATION",
         status: "CONVERSATION",
-        reply: brainResult.reply || "سلام! در خدمتم. چه کاری برایتان انجام دهم؟",
+        reply:
+          brainResult.reply || "سلام! در خدمتم. چه کاری برایتان انجام دهم؟",
         resolvedCapability: "conversation",
       };
     }
