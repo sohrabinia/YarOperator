@@ -240,4 +240,25 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
     expect(res.body.result?.status).toBe("BLOCKED");
     expect(mockTool.invocations.length).toBe(0); // Tool NEVER invoked
   });
+
+  it("6. Conversational request 'چه اقدامی جواب سلام رو بده' returns COMPLETED status with conversation capability", async () => {
+    const req: OperatorApiRequest = {
+      headers: { authorization: `Bearer ${bearerToken}` },
+      body: {
+        workspaceId: "yartrader",
+        rawCommandText: "چه اقدامی جواب سلام رو بده",
+      },
+    };
+
+    const res = await apiHandler.handleChatRequest(req, mockContext);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.result?.status).toBe("COMPLETED");
+    expect(res.body.result?.resolvedCapability).toBe("conversation");
+    expect(res.body.result?.resolvedToolId).toBeUndefined();
+    const details = res.body.result?.details as any;
+    expect(details?.evidence?.summary).toContain("سلام");
+    expect(mockTool.invocations.length).toBe(0);
+  });
 });
