@@ -369,10 +369,9 @@ export class IntentBoundary {
       };
     }
 
-    // 5. Default fallback for non-action natural language input
+    // 5. Fallback for non-greeting natural language input: route to ACTION execution pipeline
     return {
-      intent: "CONVERSATION",
-      reply: "سلام! چطور می‌توانم کمکتان کنم؟",
+      intent: "ACTION",
     };
   }
 }
