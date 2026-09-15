@@ -24,6 +24,7 @@ import {
   WorkspacePolicyManager,
   WorkspacePolicy,
 } from "../workspace/policy.js";
+import { DeterministicBrain } from "../brain/index.js";
 
 export interface BootstrapOptions {
   ownerId?: string;
@@ -76,7 +77,13 @@ export function bootstrapOperatorApplication(
   );
   const acceptanceEngine = new AcceptanceEngine();
   const agentRegistry = new AgentRegistry();
-  const orchestrator = new AgentOrchestrator(agentRegistry);
+  const orchestrator = new AgentOrchestrator(
+    agentRegistry,
+    policyEngine,
+    toolEcosystem,
+  );
+
+  const brain = new DeterministicBrain();
 
   // Register default production tools and policy rules
   policyEngine.setRule("git_operate", "SAFE");
@@ -166,6 +173,8 @@ export function bootstrapOperatorApplication(
     notificationManager,
   );
 
+  orchestrator.setAssistant(assistant);
+
   const activeOwnerId =
     options?.ownerId || process.env.OPERATOR_OWNER_ID || "owner_default";
 
@@ -182,6 +191,7 @@ export function bootstrapOperatorApplication(
     assistant,
     orchestrator,
     toolEcosystem,
+    brain,
   );
 
   const tokenMap: Record<string, string> = { ...options?.extraTokens };
