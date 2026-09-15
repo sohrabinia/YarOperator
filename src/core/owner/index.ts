@@ -171,6 +171,212 @@ export class OwnerManager {
   }
 }
 
+export type CommandIntent = "CONVERSATION" | "ACTION";
+
+export interface IntentClassificationResult {
+  intent: CommandIntent;
+  reply?: string;
+}
+
+export class IntentBoundary {
+  private static readonly conversationalGreetings = [
+    "سلام",
+    "سلام علیکم",
+    "درود",
+    "روز بخیر",
+    "وقت بخیر",
+    "hello",
+    "hi",
+    "hey",
+    "greetings",
+    "خوبی",
+    "خوبی؟",
+    "چطوری",
+    "چطوری؟",
+    "چه خبر",
+    "چه خبر؟",
+    "ممنون",
+    "مرسی",
+    "تشکر",
+    "خوشحالم",
+    "thanks",
+    "thank you",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "how are you",
+  ];
+
+  private static readonly actionKeywords = [
+    // Persian imperatives & action verbs
+    "باز کن",
+    "بازکن",
+    "بررسی کن",
+    "بررسی‌کن",
+    "تحلیل کن",
+    "بساز",
+    "ایجاد کن",
+    "ویرایش کن",
+    "تغییر بده",
+    "اصلاح کن",
+    "اجرا کن",
+    "ران کن",
+    "پاک کن",
+    "حذف کن",
+    "نمایش بده",
+    "نشان بده",
+    "ارسال کن",
+    "بفرست",
+    "دانلود کن",
+    "آپلود کن",
+    "دیپلای کن",
+    "تست کن",
+    "دریافت کن",
+    "به‌روزرسانی کن",
+    "طراحی",
+    "پیاده‌سازی",
+    "حل کن",
+    "پیدا کن",
+    "چک کن",
+
+    // Persian domain targets
+    "سایت",
+    "گزارش",
+    "فایل",
+    "سرور",
+    "ریپازیتوری",
+    "ریپو",
+    "گیتهاب",
+    "ترمینال",
+    "پروژه",
+    "محیط",
+    "کانفیگ",
+    "وضعیت",
+    "دستور",
+
+    // English imperatives & domain targets
+    "github",
+    "repository",
+    "repo",
+    "terminal",
+    "pull request",
+    "pr",
+    "open ",
+    "check ",
+    "analyze ",
+    "create ",
+    "build ",
+    "deploy",
+    "execute",
+    "delete ",
+    "show ",
+    "send ",
+    "download ",
+    "upload ",
+    "fix ",
+    "update ",
+    "patch ",
+    "commit ",
+    "push ",
+    "pull ",
+    "merge ",
+    "status",
+  ];
+
+  public static classify(input: {
+    rawCommandText: string;
+    targetCapability?: string;
+    requestedToolId?: string;
+  }): IntentClassificationResult {
+    // 1. Explicit tool request forces ACTION
+    if (input.requestedToolId) {
+      return { intent: "ACTION" };
+    }
+
+    // 2. Explicit non-conversational capability forces ACTION
+    if (
+      input.targetCapability &&
+      input.targetCapability !== "conversation" &&
+      input.targetCapability !== "software-development"
+    ) {
+      return { intent: "ACTION" };
+    }
+
+    const text = input.rawCommandText.trim();
+    const lowerText = text.toLowerCase();
+
+    // 3. Check for explicit action indicators (action verbs / technical domain terms)
+    const hasActionIndicator = this.actionKeywords.some((kw) =>
+      lowerText.includes(kw),
+    );
+
+    if (hasActionIndicator) {
+      return { intent: "ACTION" };
+    }
+
+    // 4. Conversational greetings, pleasantries, or greeting inquiries
+    const isGreetingMatch = this.conversationalGreetings.some(
+      (g) =>
+        lowerText === g ||
+        lowerText.startsWith(g + " ") ||
+        lowerText.endsWith(" " + g) ||
+        lowerText.includes(g),
+    );
+
+    const isConversationalPattern =
+      lowerText.includes("سلام") ||
+      lowerText.includes("درود") ||
+      lowerText.includes("خوبی") ||
+      lowerText.includes("چطوری") ||
+      lowerText.includes("چه خبر") ||
+      lowerText.includes("ممنون") ||
+      lowerText.includes("مرسی") ||
+      lowerText.includes("تشکر") ||
+      lowerText.includes("hello") ||
+      lowerText.includes("hi") ||
+      lowerText.includes("hey") ||
+      lowerText.includes("thanks") ||
+      lowerText.includes("how are you");
+
+    if (isGreetingMatch || isConversationalPattern) {
+      let reply = "سلام! در خدمتم. چه کاری برایتان انجام دهم؟";
+      if (lowerText.includes("سلام") || lowerText.includes("درود")) {
+        reply = "حتماً 😊 سلام شما را جواب می‌دهم: سلام! در خدمتم.";
+      } else if (
+        lowerText.includes("خوبی") ||
+        lowerText.includes("چطوری") ||
+        lowerText.includes("how are you")
+      ) {
+        reply =
+          "ممنون، من خوبم! شما چطورید؟ چه کاری می‌توانم برایتان انجام دهم؟";
+      } else if (
+        lowerText.includes("ممنون") ||
+        lowerText.includes("مرسی") ||
+        lowerText.includes("thanks")
+      ) {
+        reply = "خواهش می‌کنم! خوشحال می‌شوم کمکتان کنم.";
+      } else if (
+        lowerText.startsWith("hi") ||
+        lowerText.startsWith("hello") ||
+        lowerText.startsWith("hey")
+      ) {
+        reply = "Hello! How can I assist you today?";
+      }
+
+      return {
+        intent: "CONVERSATION",
+        reply,
+      };
+    }
+
+    // 5. Default fallback for non-action natural language input
+    return {
+      intent: "CONVERSATION",
+      reply: "سلام! چطور می‌توانم کمکتان کنم؟",
+    };
+  }
+}
+
 export class OwnerCommandReceiver {
   constructor(
     private ownerManager: OwnerManager,
@@ -229,21 +435,14 @@ export class OwnerCommandReceiver {
     // Preserved command text (Unicode & Persian text supported)
     const preservedText = input.rawCommandText;
 
-    // Deterministic Conversational Greeting Detection
-    const lowerPrompt = preservedText.trim().toLowerCase();
-    const conversationalGreetings = [
-      "سلام",
-      "سلام علیکم",
-      "درود",
-      "روز بخیر",
-      "وقت بخیر",
-      "hello",
-      "hi",
-      "hey",
-      "greetings",
-    ];
+    // Intent Boundary Decision
+    const intentResult = IntentBoundary.classify({
+      rawCommandText: preservedText,
+      targetCapability: input.targetCapability,
+      requestedToolId: input.requestedToolId,
+    });
 
-    if (conversationalGreetings.includes(lowerPrompt)) {
+    if (intentResult.intent === "CONVERSATION") {
       return {
         commandId: input.commandId,
         accepted: true,
@@ -256,7 +455,8 @@ export class OwnerCommandReceiver {
           success: true,
           executedSteps: [],
           evidence: {
-            summary: "سلام، در خدمتم. چه کاری برایت انجام بدهم؟",
+            summary:
+              intentResult.reply || "سلام، در خدمتم. چه کاری برایت انجام بدهم؟",
           },
         },
       };

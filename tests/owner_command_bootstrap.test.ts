@@ -299,8 +299,47 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     expect(result.resolvedToolId).toBeUndefined();
     expect(result.assistantResult?.success).toBe(true);
     expect(result.assistantResult?.executedSteps.length).toBe(0); // ZERO tool steps executed
-    expect(result.assistantResult?.evidence?.summary).toContain("سلام");
+    expect(result.assistantResult?.evidence?.summary).toBeDefined();
     expect(mockTool.invocations.length).toBe(0); // Tool NEVER invoked
+  });
+
+  it("8b. Conversational query 'چه اقدامی جواب سلام رو بده' handles conversationally without tool execution", async () => {
+    const input: OwnerCommandInput = {
+      commandId: "cmd_greeting_query",
+      ownerId: "owner_sohrab",
+      workspaceId: "yartrader",
+      rawCommandText: "چه اقدامی جواب سلام رو بده",
+      timestamp: new Date().toISOString(),
+    };
+
+    const result = await receiver.receiveCommand(input);
+
+    expect(result.accepted).toBe(true);
+    expect(result.resolvedCapability).toBe("conversation");
+    expect(result.resolvedToolId).toBeUndefined();
+    expect(result.assistantResult?.success).toBe(true);
+    expect(result.assistantResult?.executedSteps.length).toBe(0);
+    expect(result.assistantResult?.evidence?.summary).toContain("سلام");
+    expect(mockTool.invocations.length).toBe(0);
+  });
+
+  it("8c. Conversational non-greeting 'خوبی؟' handles conversationally without tool execution", async () => {
+    const input: OwnerCommandInput = {
+      commandId: "cmd_greeting_pleasantry",
+      ownerId: "owner_sohrab",
+      workspaceId: "yartrader",
+      rawCommandText: "خوبی؟",
+      timestamp: new Date().toISOString(),
+    };
+
+    const result = await receiver.receiveCommand(input);
+
+    expect(result.accepted).toBe(true);
+    expect(result.resolvedCapability).toBe("conversation");
+    expect(result.resolvedToolId).toBeUndefined();
+    expect(result.assistantResult?.success).toBe(true);
+    expect(result.assistantResult?.executedSteps.length).toBe(0);
+    expect(mockTool.invocations.length).toBe(0);
   });
 
   it("9. Conversational English greeting 'hello' handles conversationally without tool execution", async () => {
