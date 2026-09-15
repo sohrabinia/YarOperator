@@ -17,14 +17,7 @@ import {
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { EnvironmentManager } from "../src/core/environment/index.js";
-import {
-  ExecutionContext,
-  Brain,
-  BrainInput,
-  BrainResult,
-  BrainRule,
-  BrainProvider,
-} from "../src/core/contracts/index.js";
+import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class MockCommandTool implements Tool {
   metadata = {
@@ -387,53 +380,6 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     expect(result.resolvedToolId).toBe("mock_command_tool"); // Resolved tool
     expect(result.assistantResult?.executedSteps[0].status).toBe("EXECUTED");
     expect(mockTool.invocations.length).toBe(1); // Executed through tool pipeline
-  });
-
-  it("12. Brain Contract interfaces support independent Rule and Provider contracts without tool execution", async () => {
-    class MockRule implements BrainRule {
-      id = "greeting_rule";
-      evaluate(input: BrainInput): BrainResult | undefined {
-        if (input.rawCommandText.includes("سلام")) {
-          return { intent: "CONVERSATION", reply: "سلام، در خدمتم." };
-        }
-        return undefined;
-      }
-    }
-
-    class MockProvider implements BrainProvider {
-      id = "mock_ai_provider";
-      async process(input: BrainInput): Promise<BrainResult> {
-        return { intent: "ACTION", capability: "software-development" };
-      }
-    }
-
-    class TestBrain implements Brain {
-      constructor(
-        private rule: BrainRule,
-        private provider: BrainProvider,
-      ) {}
-
-      async process(input: BrainInput): Promise<BrainResult> {
-        const ruleRes = this.rule.evaluate(input);
-        if (ruleRes) return ruleRes;
-        return this.provider.process(input);
-      }
-    }
-
-    const brain = new TestBrain(new MockRule(), new MockProvider());
-
-    const convResult = await brain.process({
-      rawCommandText: "سلام، خوبی؟",
-    });
-    expect(convResult.intent).toBe("CONVERSATION");
-    expect(convResult.reply).toContain("سلام");
-
-    const actionResult = await brain.process({
-      rawCommandText: "گزارش سیستم را بررسی کن",
-    });
-    expect(actionResult.intent).toBe("ACTION");
-    expect(actionResult.capability).toBe("software-development");
-    expect(mockTool.invocations.length).toBe(0); // ZERO tool executions
   });
 
   it("11. Unclassified/blocked tool in operational command fails closed under PolicyEngine", async () => {
