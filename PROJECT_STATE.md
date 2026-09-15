@@ -48,14 +48,16 @@
 - **Phase 8.1**: Durable Operational Memory (`OperationalStateStore`, `tests/durable_operational_memory.test.ts`)
 - **Phase 8.2**: Durable Scheduler (`DurableScheduler`, `tests/durable_scheduler.test.ts`, `tests/scheduler_remediated.test.ts`)
 - **PR #19**: Fix YarOperator Conversation / Action Intent Boundary (`Brain` contract, `IntentBoundary`, `OwnerCommandReceiver`, `tests/owner_command_bootstrap.test.ts`)
+- **M1 First Deterministic Brain Intelligence**: Implemented `DeterministicBrain` in `src/core/brain/index.ts` and contracts in `src/core/contracts/index.ts` for deterministic CONVERSATION vs ACTION vs AMBIGUOUS classification and greeting replies (`tests/brain.test.ts`).
 
 ## 5. In-Progress Work
 
-- **None**. Working tree clean at baseline.
+- **M1 Completed**: Ready for review and PR against `main`.
 
 ## 6. Known Gaps / Blockers
 
 - **Phase 8.3+**: Phase 8.3 (Durable Retry & Continuation) and subsequent roadmap phases have not been started.
+- **Not Implemented in M1**: LLM/AI Provider integration, Brain -> Orchestrator execution integration (scheduled for M2), Browser automation, Vector/Semantic Memory.
 - **Browser Driver Dependency**: `BrowserTool` requires Playwright binaries installed on host to execute browser automation; fails closed safely as `NOT_CONFIGURED` if absent.
 - **Mobile Reverse Proxy Verification**: IIS ARR reverse proxy mobile routing under custom subdomains requires live infrastructure verification (AGENTS.md Stop Condition 8).
 

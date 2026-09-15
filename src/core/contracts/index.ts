@@ -53,3 +53,37 @@ export interface AuditEvent {
     | "ERROR";
   details: Record<string, unknown>;
 }
+
+export type BrainIntent = "CONVERSATION" | "ACTION" | "AMBIGUOUS";
+
+export interface BrainInput {
+  rawCommandText: string;
+  ownerId?: string;
+  workspaceId?: string;
+  environmentId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BrainResult {
+  intent: BrainIntent;
+  reply?: string;
+  confidence?: number;
+  reason?: string;
+}
+
+export interface BrainRule {
+  id: string;
+  description: string;
+  matches(input: BrainInput): boolean;
+  evaluate(input: BrainInput): BrainResult;
+}
+
+export interface BrainProvider {
+  id: string;
+  name: string;
+  interpret(input: BrainInput): Promise<BrainResult> | BrainResult;
+}
+
+export interface Brain {
+  interpret(input: BrainInput): Promise<BrainResult> | BrainResult;
+}

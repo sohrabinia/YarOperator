@@ -2,6 +2,7 @@ export const OPERATOR_NAME = "YarOperator";
 export const OPERATOR_VERSION = "0.1.0";
 
 export * from "./core/contracts/index.js";
+export * from "./core/brain/index.js";
 export * from "./core/audit/index.js";
 export * from "./core/registry/index.js";
 export * from "./core/engine/index.js";
