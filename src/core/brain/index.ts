@@ -54,8 +54,6 @@ export class DeterministicBrain implements Brain {
     "تست کن",
     "دریافت کن",
     "به‌روزرسانی کن",
-    "سایت",
-    "اطلاعات",
     "برو سایت",
   ];
 

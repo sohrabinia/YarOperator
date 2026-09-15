@@ -63,6 +63,21 @@ describe("DeterministicBrain M1 Intelligence Capabilities", () => {
       expect(result).not.toHaveProperty("resolvedCapability");
     });
 
+    it("should classify broad noun-only questions as AMBIGUOUS rather than ACTION", () => {
+      const nounQuestions = [
+        "سایت چیست؟",
+        "اطلاعات چیست؟",
+        "من درباره سایت سؤال دارم",
+      ];
+
+      for (const q of nounQuestions) {
+        const input: BrainInput = { rawCommandText: q };
+        const result = brain.interpret(input);
+
+        expect(result.intent).toBe("AMBIGUOUS");
+      }
+    });
+
     it("should handle empty or whitespace input safely as AMBIGUOUS", () => {
       const input: BrainInput = { rawCommandText: "   " };
       const result = brain.interpret(input);
