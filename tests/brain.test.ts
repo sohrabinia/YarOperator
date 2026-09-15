@@ -26,6 +26,22 @@ describe("DeterministicBrain M1 Intelligence Capabilities", () => {
         expect(result.reply).toContain(item.expectedSubstring);
       });
     }
+
+    it("should prioritize CONVERSATION classification over action keywords when greeting is present", () => {
+      const mixedInputs = [
+        "سلام، لطفاً این سایت را بررسی کن",
+        "درود، اطلاعات X را پیدا کن",
+        "سلام خوبی؟ لطفاً این کار را انجام بده",
+      ];
+
+      for (const text of mixedInputs) {
+        const input: BrainInput = { rawCommandText: text };
+        const result = brain.interpret(input);
+
+        expect(result.intent).toBe("CONVERSATION");
+        expect(result.reply).toBeDefined();
+      }
+    });
   });
 
   describe("Action Classification", () => {

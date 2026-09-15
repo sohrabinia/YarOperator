@@ -69,20 +69,7 @@ export class DeterministicBrain implements Brain {
 
     const lowerText = text.toLowerCase();
 
-    // 1. Check for action keywords / verbs
-    const matchesAction = DeterministicBrain.actionKeywords.some((kw) =>
-      lowerText.includes(kw),
-    );
-
-    if (matchesAction) {
-      return {
-        intent: "ACTION",
-        confidence: 0.95,
-        reason: "Input matches action-oriented keyword or imperative pattern.",
-      };
-    }
-
-    // 2. Check for conversation patterns
+    // 1. Check for conversation patterns (CONVERSATION precedence)
     for (const pattern of DeterministicBrain.conversationalPatterns) {
       const matchesPattern = pattern.keywords.some((kw) =>
         lowerText.includes(kw),
@@ -95,6 +82,19 @@ export class DeterministicBrain implements Brain {
           reason: "Input matches conversational greeting or pleasantry.",
         };
       }
+    }
+
+    // 2. Check for action keywords / verbs
+    const matchesAction = DeterministicBrain.actionKeywords.some((kw) =>
+      lowerText.includes(kw),
+    );
+
+    if (matchesAction) {
+      return {
+        intent: "ACTION",
+        confidence: 0.95,
+        reason: "Input matches action-oriented keyword or imperative pattern.",
+      };
     }
 
     // 3. Ambiguous / Fail Closed fallback
