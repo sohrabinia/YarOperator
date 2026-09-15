@@ -57,13 +57,17 @@
 ## 5.1 Implementation Status
 
 ```text
-IMPLEMENTED:
-Brain Contract Foundation
+Brain Contract Foundation:
+IMPLEMENTED
 
-NOT IMPLEMENTED:
-Actual Brain Intelligence
-LLM/AI Provider
-Brain → execution runtime integration
+Actual Brain Intelligence:
+NOT IMPLEMENTED
+
+LLM/AI Provider:
+NOT IMPLEMENTED
+
+Brain → Orchestrator runtime integration:
+NOT IMPLEMENTED
 ```
 
 ## 6. Known Gaps / Blockers

@@ -17,13 +17,12 @@ describe("Brain Contract Foundation", () => {
     expect(actionIntent).toBe("ACTION");
   });
 
-  it("can represent an incoming Brain request via BrainInput", () => {
+  it("can represent an incoming Brain request via BrainInput without tool routing", () => {
     const input: BrainInput = {
       rawCommandText: "Hello YarOperator",
       ownerId: "owner_sohrab",
       workspaceId: "yartrader",
       environmentId: "production",
-      targetCapability: "conversation",
       params: { sample: true },
       timestamp: new Date().toISOString(),
       metadata: { source: "test" },
@@ -32,10 +31,11 @@ describe("Brain Contract Foundation", () => {
     expect(input.rawCommandText).toBe("Hello YarOperator");
     expect(input.ownerId).toBe("owner_sohrab");
     expect(input.workspaceId).toBe("yartrader");
-    expect(input.targetCapability).toBe("conversation");
+    expect((input as Record<string, unknown>).targetCapability).toBeUndefined();
+    expect((input as Record<string, unknown>).requestedToolId).toBeUndefined();
   });
 
-  it("can represent a Brain decision via BrainResult", () => {
+  it("can represent a Brain decision via BrainResult without resolving tools", () => {
     const conversationResult: BrainResult = {
       intent: "CONVERSATION",
       reply: "Hello! How can I assist you?",
@@ -44,19 +44,22 @@ describe("Brain Contract Foundation", () => {
 
     const actionResult: BrainResult = {
       intent: "ACTION",
-      resolvedCapability: "software-development",
-      resolvedToolId: "terminal",
-      params: { command: "git status" },
+      params: { goal: "check git status" },
       confidence: 0.95,
     };
 
     expect(conversationResult.intent).toBe("CONVERSATION");
     expect(conversationResult.reply).toBeDefined();
     expect(actionResult.intent).toBe("ACTION");
-    expect(actionResult.resolvedToolId).toBe("terminal");
+    expect(
+      (actionResult as Record<string, unknown>).resolvedCapability,
+    ).toBeUndefined();
+    expect(
+      (actionResult as Record<string, unknown>).resolvedToolId,
+    ).toBeUndefined();
   });
 
-  it("expresses the interpretation boundary without executing tools", async () => {
+  it("expresses the interpretation boundary without executing tools or resolving hands", async () => {
     class ContractStubBrain implements Brain {
       async interpret(input: BrainInput): Promise<BrainResult> {
         if (input.rawCommandText.includes("hello")) {
@@ -67,7 +70,7 @@ describe("Brain Contract Foundation", () => {
         }
         return {
           intent: "ACTION",
-          resolvedCapability: "software-development",
+          params: { goal: input.rawCommandText },
         };
       }
     }

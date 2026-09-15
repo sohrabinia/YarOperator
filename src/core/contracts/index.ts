@@ -61,8 +61,6 @@ export interface BrainInput {
   ownerId: string;
   workspaceId: string;
   environmentId?: string;
-  targetCapability?: string;
-  requestedToolId?: string;
   params?: Record<string, unknown>;
   timestamp?: string;
   context?: ExecutionContext;
@@ -72,8 +70,6 @@ export interface BrainInput {
 export interface BrainResult {
   intent: BrainIntent;
   reply?: string;
-  resolvedCapability?: string;
-  resolvedToolId?: string;
   params?: Record<string, unknown>;
   confidence?: number;
   metadata?: Record<string, unknown>;
