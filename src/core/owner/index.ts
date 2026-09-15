@@ -5,12 +5,7 @@ import {
   AssistantGoal,
   AssistantWorkflowResult,
 } from "../assistant/index.js";
-import {
-  ExecutionContext,
-  Brain,
-  BrainInput,
-  BrainResult,
-} from "../contracts/index.js";
+import { ExecutionContext } from "../contracts/index.js";
 import { AgentOrchestrator } from "../orchestrator/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
 
@@ -183,24 +178,7 @@ export interface IntentClassificationResult {
   reply?: string;
 }
 
-export class IntentBoundary implements Brain {
-  public async process(input: BrainInput): Promise<BrainResult> {
-    const classification = IntentBoundary.classify({
-      rawCommandText: input.rawCommandText,
-      targetCapability: input.targetCapability,
-      requestedToolId: input.requestedToolId,
-    });
-
-    return {
-      intent: classification.intent,
-      reply: classification.reply,
-      capability: input.targetCapability,
-      toolId: input.requestedToolId,
-      params: input.params,
-      confidence: classification.intent === "CONVERSATION" ? 1.0 : 0.9,
-    };
-  }
-
+export class IntentBoundary {
   private static readonly conversationalGreetings = [
     "سلام",
     "سلام علیکم",
@@ -399,8 +377,6 @@ export class IntentBoundary implements Brain {
 }
 
 export class OwnerCommandReceiver {
-  private brain: Brain;
-
   constructor(
     private ownerManager: OwnerManager,
     private policyEngine: PolicyEngine,
@@ -408,10 +384,7 @@ export class OwnerCommandReceiver {
     private assistant?: RealWorldAssistant,
     private orchestrator?: AgentOrchestrator,
     private toolEcosystem?: SecureToolEcosystem,
-    brain?: Brain,
-  ) {
-    this.brain = brain || new IntentBoundary();
-  }
+  ) {}
 
   public async receiveCommand(
     input: OwnerCommandInput,
@@ -461,20 +434,14 @@ export class OwnerCommandReceiver {
     // Preserved command text (Unicode & Persian text supported)
     const preservedText = input.rawCommandText;
 
-    // Intent / Brain Boundary Decision
-    const brainInput: BrainInput = {
+    // Intent Boundary Decision
+    const intentResult = IntentBoundary.classify({
       rawCommandText: preservedText,
-      ownerId: input.ownerId,
-      workspaceId: input.workspaceId,
-      environmentId: input.environmentId,
       targetCapability: input.targetCapability,
       requestedToolId: input.requestedToolId,
-      params: input.params,
-    };
+    });
 
-    const brainResult = await this.brain.process(brainInput);
-
-    if (brainResult.intent === "CONVERSATION") {
+    if (intentResult.intent === "CONVERSATION") {
       return {
         commandId: input.commandId,
         accepted: true,
@@ -488,7 +455,7 @@ export class OwnerCommandReceiver {
           executedSteps: [],
           evidence: {
             summary:
-              brainResult.reply || "سلام، در خدمتم. چه کاری برایت انجام بدهم؟",
+              intentResult.reply || "سلام، در خدمتم. چه کاری برایت انجام بدهم؟",
           },
         },
       };
