@@ -48,7 +48,7 @@
 - **Phase 8.1**: Durable Operational Memory (`OperationalStateStore`, `tests/durable_operational_memory.test.ts`)
 - **Phase 8.2**: Durable Scheduler (`DurableScheduler`, `tests/durable_scheduler.test.ts`, `tests/scheduler_remediated.test.ts`)
 - **PR #19**: Fix YarOperator Conversation / Action Intent Boundary (`Brain` contract, `IntentBoundary`, `OwnerCommandReceiver`, `tests/owner_command_bootstrap.test.ts`)
-- **M1 First Deterministic Brain Intelligence**: Implemented `DeterministicBrain` in `src/core/brain/index.ts` and contracts in `src/core/contracts/index.ts` for deterministic CONVERSATION vs ACTION vs AMBIGUOUS classification and greeting replies (`tests/brain.test.ts`).
+- **M1 First Deterministic Brain Intelligence**: Implemented `DeterministicBrain`, `Normalizer`, and `OperatorKnowledgeBase` in `src/core/brain/index.ts` and contracts in `src/core/contracts/index.ts` for deterministic CONVERSATION vs ACTION vs AMBIGUOUS classification, Persian entity alias resolution (YarTrader, YarOperator, Amlakbashi), action vocabulary matching, and greeting replies (`tests/brain.test.ts`).
 
 ## 5. In-Progress Work
 
