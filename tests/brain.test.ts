@@ -19,6 +19,8 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
         "یار‌تریدر",
         "پروژه یار تریدر",
         "پروژه یارتریدر",
+        "یارتریدر پروژه",
+        "اون یار تریدر",
       ];
 
       for (const alias of yarTraderAliases) {
@@ -32,11 +34,13 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
       const amlakbashiAliases = [
         "Amlakbashi",
         "amlakbashi",
+        "amlaakbashi",
         "املاک‌باشی",
         "املاک باشی",
         "املاکباشی",
         "سایت املاک‌باشی",
         "سایت املاک باشی",
+        "سایت املاکباشی",
       ];
 
       for (const alias of amlakbashiAliases) {
@@ -49,10 +53,12 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
     it("should resolve YarOperator aliases consistently to YarOperator entity", () => {
       const yarOperatorAliases = [
         "YarOperator",
+        "yaroperator",
         "یار اپراتور",
         "یاراپراتور",
         "یار‌اپراتور",
         "اپراتور",
+        "یار اوپراتور",
       ];
 
       for (const alias of yarOperatorAliases) {
@@ -78,6 +84,8 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
       { text: "ممنون", expectedSubstring: "خواهش" },
       { text: "مرسی", expectedSubstring: "خواهش" },
       { text: "خداحافظ", expectedSubstring: "خداحافظ" },
+      { text: "شب بخیر", expectedSubstring: "سلام" },
+      { text: "صبح بخیر", expectedSubstring: "سلام" },
     ];
 
     for (const item of conversationInputs) {
@@ -92,18 +100,29 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
     }
   });
 
-  describe("Action Classification & Greeting + Action Combination", () => {
-    const actionInputs = [
-      "یارتریدر رو چک کن",
-      "یار تریدر رو بررسی کن",
-      "YarTrader رو بررسی کن",
-      "برو یارتریدر رو ببین",
+  describe("Action Classification & Natural Owner Sentences", () => {
+    const naturalOwnerSentences = [
+      "سلام، یارتریدر رو یه نگاهی بنداز",
+      "ببین یار تریدر چه وضعیه",
+      "یارتریدر رو بررسی کن",
+      "YarTrader رو چک کن",
+      "سلام، سرور رو بررسی کن",
+      "وضعیت سرور رو ببین",
       "سرور رو چک کن",
-      "سایت املاک باشی رو بررسی کن",
+      "برو سایت املاک باشی رو ببین",
+      "سایت املاک‌باشی رو بررسی کن",
+      "این مشکل رو بررسی کن",
+      "ببین مشکل چیه",
+      "این باگ رو پیدا کن",
+      "این مشکل رو درست کن",
+      "باگ رو برطرف کن",
+      "کد رو اصلاح کن",
+      "تستش کن",
+      "ببین درست شده یا نه",
     ];
 
-    for (const text of actionInputs) {
-      it(`should classify "${text}" as ACTION`, () => {
+    for (const text of naturalOwnerSentences) {
+      it(`should classify natural sentence "${text}" as ACTION`, () => {
         const input: BrainInput = { rawCommandText: text };
         const result = brain.interpret(input);
 
@@ -112,37 +131,24 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
         expect(result).not.toHaveProperty("resolvedCapability");
       });
     }
-
-    const greetingWithActionInputs = [
-      "سلام، یارتریدر رو بررسی کن",
-      "درود، سرور رو چک کن",
-      "سلام، برو سایت املاک باشی رو ببین",
-    ];
-
-    for (const text of greetingWithActionInputs) {
-      it(`should classify greeting + action input "${text}" as ACTION`, () => {
-        const input: BrainInput = { rawCommandText: text };
-        const result = brain.interpret(input);
-
-        expect(result.intent).toBe("ACTION");
-      });
-    }
   });
 
-  describe("Entity-Only Input Fail-Closed to AMBIGUOUS", () => {
-    const entityOnlyInputs = [
+  describe("Entity-Only & Isolated Keywords Fail-Closed to AMBIGUOUS", () => {
+    const ambiguousInputs = [
       "یارتریدر",
-      "یار تریدر",
       "YarTrader",
       "سرور",
       "املاک باشی",
+      "گیت‌هاب",
+      "بررسی",
+      "مشکل",
       "سایت چیست؟",
       "اطلاعات چیست؟",
       "من درباره سایت سؤال دارم",
     ];
 
-    for (const text of entityOnlyInputs) {
-      it(`should classify entity-only or broad question "${text}" as AMBIGUOUS`, () => {
+    for (const text of ambiguousInputs) {
+      it(`should classify entity-only or isolated keyword "${text}" as AMBIGUOUS`, () => {
         const input: BrainInput = { rawCommandText: text };
         const result = brain.interpret(input);
 
@@ -151,8 +157,8 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
     }
   });
 
-  describe("Technical & Engineering Vocabulary Knowledge", () => {
-    it("should contain standard technical and agent concepts in OperatorKnowledgeBase", () => {
+  describe("Technical & Engineering Vocabulary (Recognition Only)", () => {
+    it("should contain technical concepts without triggering tool resolution or execution", () => {
       const sampleConcepts = [
         "architecture",
         "bug",
@@ -162,10 +168,20 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
         "logs",
         "fail closed",
         "approval",
+        "server",
       ];
 
       for (const concept of sampleConcepts) {
         expect(OperatorKnowledgeBase.technicalConcepts).toContain(concept);
+
+        // Negative execution test: isolated concept inputs remain AMBIGUOUS or CONVERSATION
+        const input: BrainInput = { rawCommandText: concept };
+        const result = brain.interpret(input);
+
+        expect(result).not.toHaveProperty("resolvedToolId");
+        expect(result).not.toHaveProperty("resolvedCapability");
+        expect(result).not.toHaveProperty("targetCapability");
+        expect(result).not.toHaveProperty("requestedToolId");
       }
     });
   });
