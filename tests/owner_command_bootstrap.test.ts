@@ -3,6 +3,7 @@ import {
   OwnerManager,
   OwnerCommandReceiver,
   OwnerCommandInput,
+  IntentBoundary,
 } from "../src/core/owner/index.js";
 import { PolicyEngine, ApprovalManager } from "../src/core/policy/index.js";
 import { AuditManager } from "../src/core/audit/index.js";
@@ -380,6 +381,20 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     expect(result.resolvedToolId).toBe("mock_command_tool"); // Resolved tool
     expect(result.assistantResult?.executedSteps[0].status).toBe("EXECUTED");
     expect(mockTool.invocations.length).toBe(1); // Executed through tool pipeline
+  });
+
+  it("10b. Brain Contract interface processes BrainInput deterministically", async () => {
+    const brain = new IntentBoundary();
+    const conversationRes = await brain.process({
+      rawCommandText: "سلام، خوبی؟",
+    });
+    expect(conversationRes.intent).toBe("CONVERSATION");
+    expect(conversationRes.reply).toBeDefined();
+
+    const actionRes = await brain.process({
+      rawCommandText: "وضعیت سرور را بررسی کن",
+    });
+    expect(actionRes.intent).toBe("ACTION");
   });
 
   it("11. Unclassified/blocked tool in operational command fails closed under PolicyEngine", async () => {

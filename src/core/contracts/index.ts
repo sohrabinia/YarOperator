@@ -16,6 +16,41 @@ export interface ExecutionContext {
   metadata?: Record<string, unknown>;
 }
 
+export type BrainIntent = "CONVERSATION" | "ACTION";
+
+export interface BrainInput {
+  rawCommandText: string;
+  ownerId?: string;
+  workspaceId?: string;
+  environmentId?: string;
+  targetCapability?: string;
+  requestedToolId?: string;
+  params?: Record<string, unknown>;
+}
+
+export interface BrainResult {
+  intent: BrainIntent;
+  reply?: string;
+  capability?: string;
+  toolId?: string;
+  params?: Record<string, unknown>;
+  confidence?: number;
+}
+
+export interface BrainRule {
+  id: string;
+  evaluate(input: BrainInput): BrainResult | undefined;
+}
+
+export interface BrainProvider {
+  id: string;
+  process(input: BrainInput): Promise<BrainResult>;
+}
+
+export interface Brain {
+  process(input: BrainInput): Promise<BrainResult>;
+}
+
 export interface ToolRequest<TParams = unknown> {
   toolId: string;
   params: TParams;
