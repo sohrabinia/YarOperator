@@ -15,6 +15,8 @@ import {
   ScheduleDefinition,
   DurableRetryState,
   EnvironmentManager,
+  WorkspacePolicyManager,
+  WorkspacePolicy,
   Tool,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
@@ -110,10 +112,35 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
     const policyEngine = new PolicyEngine();
     const approvalManager = new ApprovalManager();
     const toolRegistry = new ToolRegistry();
+
+    const environmentManager = new EnvironmentManager();
+    const workspacePolicyManager = new WorkspacePolicyManager();
+
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["git_operate"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["git_operate"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     const toolEcosystem = new SecureToolEcosystem(
       toolRegistry,
       policyEngine,
       approvalManager,
+      environmentManager,
+      workspacePolicyManager,
     );
     const acceptanceEngine = new AcceptanceEngine();
     const auditManager = new AuditManager();
@@ -141,18 +168,6 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
       model: "jules-v1",
       contract: { inputSchema: {}, outputSchema: {} },
       available: true,
-    });
-
-    const environmentManager = new EnvironmentManager();
-    environmentManager.registerEnvironment({
-      id: "env_yartrader",
-      name: "YarTrader Env",
-      type: "PRODUCTION",
-      capabilities: ["git_operate"],
-      accessScope: "workspace",
-      riskLevel: "SAFE",
-      healthy: true,
-      metadata: { workspaceId: "yartrader" },
     });
 
     const engine = new ControlledAutonomyEngine(

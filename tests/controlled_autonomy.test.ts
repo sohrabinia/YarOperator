@@ -14,6 +14,8 @@ import {
   ExecutionContext,
   OwnerManager,
   EnvironmentManager,
+  WorkspacePolicyManager,
+  WorkspacePolicy,
   Tool,
   ToolResult,
 } from "../src/index.js";
@@ -96,7 +98,48 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
     orchestrator = new AgentOrchestrator(agentRegistry);
     approvalManager = new ApprovalManager();
     policyEngine = new PolicyEngine(approvalManager);
-    toolEcosystem = new SecureToolEcosystem();
+
+    const environmentManager = new EnvironmentManager();
+    const workspacePolicyManager = new WorkspacePolicyManager();
+
+    const allowedToolsList = [
+      "mock_exec_tool",
+      "unregistered_tool_id",
+      "git_read",
+      "run_test",
+      "run_build",
+      "report_generate",
+      "deploy_prod",
+      "PolicyEngine_modify_rules",
+    ];
+
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: allowedToolsList,
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: allowedToolsList,
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+      workspacePolicyManager,
+    );
+
     acceptanceEngine = new AcceptanceEngine();
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();
@@ -104,27 +147,6 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
 
     mockTool = new MockExecutableTool();
     toolEcosystem.registerTool(mockTool);
-
-    const environmentManager = new EnvironmentManager();
-    environmentManager.registerEnvironment({
-      id: "env_yartrader",
-      name: "YarTrader Env",
-      type: "PRODUCTION",
-      capabilities: [
-        "mock_exec_tool",
-        "unregistered_tool_id",
-        "git_read",
-        "run_test",
-        "run_build",
-        "report_generate",
-        "deploy_prod",
-        "PolicyEngine_modify_rules",
-      ],
-      accessScope: "workspace",
-      riskLevel: "SAFE",
-      healthy: true,
-      metadata: { workspaceId: "yartrader" },
-    });
 
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
@@ -266,11 +288,16 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
     });
 
     it("5. Consumed approval token cannot be replayed", async () => {
+      policyEngine.setRule("mock_exec_tool:deploy", "APPROVAL_REQUIRED");
       policyEngine.setRule("mock_exec_tool", "APPROVAL_REQUIRED");
       const params = { action: "deploy" };
       const approvalReq = approvalManager.requestApproval(
         "mock_exec_tool",
         params,
+        300000,
+        "yartrader",
+        "env_yartrader",
+        "mock_exec_tool:deploy",
       );
       approvalManager.grantApproval(approvalReq.id, "m.a.sohrabimia@gmail.com");
 

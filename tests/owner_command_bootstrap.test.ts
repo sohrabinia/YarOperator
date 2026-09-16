@@ -17,6 +17,10 @@ import {
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { EnvironmentManager } from "../src/core/environment/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class MockCommandTool implements Tool {
@@ -64,14 +68,18 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     policyEngine = new PolicyEngine(approvalManager);
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();
-    toolEcosystem = new SecureToolEcosystem();
-    agentRegistry = new AgentRegistry();
-    orchestrator = new AgentOrchestrator(agentRegistry);
-
-    mockTool = new MockCommandTool();
-    toolEcosystem.registerTool(mockTool);
 
     const environmentManager = new EnvironmentManager();
+    const workspacePolicyManager = new WorkspacePolicyManager();
+
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["mock_command_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
     environmentManager.registerEnvironment({
       id: "env_yartrader",
       name: "YarTrader Env",
@@ -82,6 +90,20 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       healthy: true,
       metadata: { workspaceId: "yartrader" },
     });
+
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+      workspacePolicyManager,
+    );
+
+    agentRegistry = new AgentRegistry();
+    orchestrator = new AgentOrchestrator(agentRegistry);
+
+    mockTool = new MockCommandTool();
+    toolEcosystem.registerTool(mockTool);
 
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
@@ -133,6 +155,8 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
     mockContext = {
       executionId: "exec_bootstrap_1",
       timestamp: new Date(),
+      workspaceId: "yartrader",
+      environmentId: "env_yartrader",
     };
   });
 
@@ -161,6 +185,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
 
   it("2. Real Owner command handoff executes through RealWorldAssistant runtime when SAFE", async () => {
     policyEngine.setRule("mock_command_tool", "SAFE");
+    policyEngine.setRule("mock_command_tool:design_chat_interface", "SAFE");
 
     const input: OwnerCommandInput = {
       commandId: "cmd_handoff_safe",
@@ -193,6 +218,10 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
 
   it("3. Real Owner command handoff stops at APPROVAL_REQUIRED without executing tool", async () => {
     policyEngine.setRule("mock_command_tool", "APPROVAL_REQUIRED");
+    policyEngine.setRule(
+      "mock_command_tool:deploy_chat_interface",
+      "APPROVAL_REQUIRED",
+    );
 
     const input: OwnerCommandInput = {
       commandId: "cmd_handoff_app",

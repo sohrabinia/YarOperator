@@ -10,6 +10,7 @@ import {
   SecureToolEcosystem,
   ToolRegistry,
   EnvironmentManager,
+  PolicyEngine,
   Tool,
   ToolResult,
 } from "../src/index.js";
@@ -214,9 +215,10 @@ describe("WorkspaceManager and RuntimeContext Foundation", () => {
       const policyManager = new WorkspacePolicyManager();
       // NO policy registered for 'ws_missing_policy'
 
+      const policyEngine = new PolicyEngine();
       const ecosystem = new SecureToolEcosystem(
         registry,
-        undefined,
+        policyEngine,
         undefined,
         envManager,
         policyManager,

@@ -11,9 +11,17 @@ import { resolve, relative, isAbsolute } from "path";
 const execFileAsync = promisify(execFile);
 
 export interface GitOperationParams {
-  action: "status" | "commit" | "push" | "checkout" | "diff" | "branch";
+  action:
+    | "status"
+    | "commit"
+    | "push"
+    | "checkout"
+    | "diff"
+    | "branch"
+    | "branch_delete";
   message?: string;
   branch?: string;
+  deleteBranch?: string;
   cwd?: string;
   args?: string[];
   timeoutMs?: number;
@@ -33,6 +41,29 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
       "Performs real workspace Git operations with strict policy and approval enforcement.",
     safetyLevel: "APPROVAL_REQUIRED",
   };
+
+  resolveCanonicalAction(params: GitOperationParams): string {
+    const act = params.action;
+    if (act === "status") return "git_operate:status";
+    if (act === "diff") return "git_operate:diff";
+    if (act === "branch_delete") return "git_operate:branch_delete";
+    if (act === "branch") {
+      if (
+        params.deleteBranch ||
+        params.args?.includes("-d") ||
+        params.args?.includes("-D")
+      ) {
+        return "git_operate:branch_delete";
+      }
+      return params.branch
+        ? "git_operate:branch_create"
+        : "git_operate:branch_list";
+    }
+    if (act === "checkout") return "git_operate:checkout";
+    if (act === "commit") return "git_operate:commit";
+    if (act === "push") return "git_operate:push";
+    return `git_operate:${act}`;
+  }
 
   private sensitiveKeyPattern =
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
@@ -64,8 +95,24 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
       case "diff":
         gitArgs = ["diff"];
         break;
+      case "branch_delete": {
+        const targetDelete = params.deleteBranch || params.branch;
+        if (!targetDelete) {
+          return {
+            success: false,
+            error:
+              "Git branch_delete requires a valid branch or deleteBranch parameter.",
+          };
+        }
+        gitArgs = ["branch", "-D", targetDelete];
+        break;
+      }
       case "branch":
-        gitArgs = params.branch ? ["branch", params.branch] : ["branch"];
+        if (params.deleteBranch) {
+          gitArgs = ["branch", "-D", params.deleteBranch];
+        } else {
+          gitArgs = params.branch ? ["branch", params.branch] : ["branch"];
+        }
         break;
       case "checkout":
         if (!params.branch) {
@@ -184,6 +231,13 @@ export class GitHubTool implements Tool<GitHubPRParams, GitHubPRResult> {
       "Interacts with GitHub API for real PR management under approval rules.",
     safetyLevel: "APPROVAL_REQUIRED",
   };
+
+  resolveCanonicalAction(params: GitHubPRParams): string {
+    if (params.action === "get_pr") return "github_operate:get_pr";
+    if (params.action === "create_pr") return "github_operate:create_pr";
+    if (params.action === "merge_pr") return "github_operate:merge_pr";
+    return `github_operate:${params.action}`;
+  }
 
   async execute(
     params: GitHubPRParams,

@@ -19,6 +19,10 @@ import { OwnerManager } from "../src/core/owner/index.js";
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { EnvironmentManager } from "../src/core/environment/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class MockRestartTool implements Tool {
@@ -67,15 +71,18 @@ describe("Phase 28 — Production Monitoring & Incident Loop", () => {
 
     approvalManager = new ApprovalManager();
     policyEngine = new PolicyEngine(approvalManager);
-    toolEcosystem = new SecureToolEcosystem();
-    ownerManager = new OwnerManager();
-    agentRegistry = new AgentRegistry();
-    orchestrator = new AgentOrchestrator(agentRegistry);
-
-    restartTool = new MockRestartTool();
-    toolEcosystem.registerTool(restartTool);
 
     const environmentManager = new EnvironmentManager();
+    const workspacePolicyManager = new WorkspacePolicyManager();
+
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["mock_restart_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
     environmentManager.registerEnvironment({
       id: "prod",
       name: "Production Environment",
@@ -86,6 +93,21 @@ describe("Phase 28 — Production Monitoring & Incident Loop", () => {
       healthy: true,
       metadata: { workspaceId: "yartrader" },
     });
+
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+      workspacePolicyManager,
+    );
+
+    ownerManager = new OwnerManager();
+    agentRegistry = new AgentRegistry();
+    orchestrator = new AgentOrchestrator(agentRegistry);
+
+    restartTool = new MockRestartTool();
+    toolEcosystem.registerTool(restartTool);
 
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,
