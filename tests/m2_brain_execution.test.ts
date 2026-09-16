@@ -8,6 +8,11 @@ import {
   Tool,
   ToolResult,
 } from "../src/core/tools/index.js";
+import { EnvironmentManager } from "../src/core/environment/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
 import { bootstrapOperatorApplication } from "../src/core/bootstrap/index.js";
 import { OperatorApiRequest } from "../src/api/operator.js";
@@ -54,10 +59,35 @@ describe("M2: Brain → Existing Execution Architectural Pipeline", () => {
     registry = new AgentRegistry();
     approvalManager = new ApprovalManager();
     policyEngine = new PolicyEngine(approvalManager);
+
+    const envManager = new EnvironmentManager();
+    const wsPolicyManager = new WorkspacePolicyManager();
+
+    wsPolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["spy_exec_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
+    envManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["spy_exec_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     toolEcosystem = new SecureToolEcosystem(
       undefined,
       policyEngine,
       approvalManager,
+      envManager,
+      wsPolicyManager,
     );
     orchestrator = new AgentOrchestrator(registry, policyEngine, toolEcosystem);
 

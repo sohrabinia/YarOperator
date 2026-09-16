@@ -541,17 +541,31 @@ export class ControlledAutonomyEngine {
       };
     }
 
+    const tool = this.toolEcosystem.getRegistry().get(request.toolId);
+    let canonicalAction = (request.params as any)?.action
+      ? `${request.toolId}:${(request.params as any).action}`
+      : request.toolId;
+    if (tool && typeof tool.resolveCanonicalAction === "function") {
+      canonicalAction = tool.resolveCanonicalAction(request.params);
+    }
+
     const fingerprint = this.approvalManager.createFingerprint(
       request.toolId,
       request.params,
+      request.workspaceId,
+      request.environmentId,
+      canonicalAction,
     );
 
-    const rule = this.policyEngine.getRule(request.toolId);
+    const rule = this.policyEngine.resolveSafetyLevel(
+      request.toolId,
+      canonicalAction,
+    );
 
     if (rule === "BLOCKED") {
       return {
         decision: "BLOCKED",
-        reason: `Tool '${request.toolId}' is explicitly BLOCKED by PolicyEngine.`,
+        reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
         policyResult: "BLOCKED",
         approvalRequired: false,
         scopeValid: true,
@@ -564,11 +578,17 @@ export class ControlledAutonomyEngine {
     }
 
     if (rule === "APPROVAL_REQUIRED") {
-      const approvalReq = this.approvalManager.get(fingerprint);
+      const approvalReq = this.approvalManager.get(
+        fingerprint,
+        request.params,
+        request.workspaceId,
+        request.environmentId,
+        canonicalAction,
+      );
       if (!approvalReq || approvalReq.status !== "APPROVED") {
         return {
           decision: "APPROVAL_REQUIRED",
-          reason: `Tool '${request.toolId}' requires explicit owner approval.`,
+          reason: `Action '${canonicalAction}' requires explicit owner approval.`,
           policyResult: "APPROVAL_REQUIRED",
           approvalRequired: true,
           approvalFingerprint: fingerprint,
@@ -580,25 +600,12 @@ export class ControlledAutonomyEngine {
           timestamp: now,
         };
       }
-    }
-
-    const policyEval = await this.policyEngine.evaluate({
-      toolId: request.toolId,
-      params: request.params,
-      context,
-    });
-
-    if (!policyEval.allowed) {
       return {
-        decision: "BLOCKED",
-        reason:
-          policyEval.reason ||
-          `Tool '${request.toolId}' blocked by PolicyEngine.`,
-        policyResult: (rule || "UNCLASSIFIED") as
-          ActionSafetyLevel | "UNCLASSIFIED",
-        approvalRequired: rule === "APPROVAL_REQUIRED",
-        approvalFingerprint:
-          rule === "APPROVAL_REQUIRED" ? fingerprint : undefined,
+        decision: "SAFE",
+        reason: `Action '${canonicalAction}' approved and authorized.`,
+        policyResult: "APPROVAL_REQUIRED",
+        approvalRequired: false,
+        approvalFingerprint: fingerprint,
         scopeValid: true,
         toolAuthorized: true,
         workspaceId: request.workspaceId,

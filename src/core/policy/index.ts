@@ -29,23 +29,46 @@ export class ApprovalManager {
     return "{" + keyValues.join(",") + "}";
   }
 
-  createFingerprint(toolId: string, params: unknown): string {
+  createFingerprint(
+    toolIdOrAction: string,
+    params: unknown,
+    workspaceId?: string,
+    environmentId?: string,
+    action?: string,
+  ): string {
     const canonicalParamsJson = this.canonicalize(params || {});
-    return createHash("sha256")
-      .update(`${toolId}:${canonicalParamsJson}`)
-      .digest("hex");
+    const toolId = toolIdOrAction.includes(":")
+      ? toolIdOrAction.split(":")[0]
+      : toolIdOrAction;
+    const resolvedAction =
+      action ||
+      (toolIdOrAction.includes(":") ? toolIdOrAction : toolIdOrAction);
+    const ws = workspaceId || "";
+    const env = environmentId || "";
+
+    const inputStr = `${toolId}:${resolvedAction}:${canonicalParamsJson}:${ws}:${env}`;
+    return createHash("sha256").update(inputStr).digest("hex");
   }
 
   requestApproval(
-    toolId: string,
+    toolIdOrAction: string,
     params: unknown,
     ttlMs: number = 300000,
+    workspaceId?: string,
+    environmentId?: string,
+    action?: string,
   ): ApprovalRequest {
-    const fingerprint = this.createFingerprint(toolId, params);
+    const fingerprint = this.createFingerprint(
+      toolIdOrAction,
+      params,
+      workspaceId,
+      environmentId,
+      action,
+    );
     const now = new Date();
     const req: ApprovalRequest = {
       id: fingerprint,
-      toolId,
+      toolId: toolIdOrAction,
       normalizedParamsHash: fingerprint,
       requestedAt: now,
       expiresAt: new Date(now.getTime() + ttlMs),
@@ -81,10 +104,19 @@ export class ApprovalManager {
   }
 
   consumeApproval(
-    toolId: string,
+    toolIdOrAction: string,
     params: unknown,
+    workspaceId?: string,
+    environmentId?: string,
+    action?: string,
   ): { valid: boolean; reason?: string } {
-    const fingerprint = this.createFingerprint(toolId, params);
+    const fingerprint = this.createFingerprint(
+      toolIdOrAction,
+      params,
+      workspaceId,
+      environmentId,
+      action,
+    );
     const req = this.approvals.get(fingerprint);
 
     if (!req) {
@@ -118,59 +150,97 @@ export class ApprovalManager {
     return { valid: true };
   }
 
-  get(fingerprint: string): ApprovalRequest | undefined {
-    return this.approvals.get(fingerprint);
+  get(
+    fingerprintOrToolId: string,
+    params?: unknown,
+    workspaceId?: string,
+    environmentId?: string,
+    action?: string,
+  ): ApprovalRequest | undefined {
+    const direct = this.approvals.get(fingerprintOrToolId);
+    if (direct) return direct;
+
+    if (params !== undefined) {
+      const fpExact = this.createFingerprint(
+        fingerprintOrToolId,
+        params,
+        workspaceId,
+        environmentId,
+        action,
+      );
+      return this.approvals.get(fpExact);
+    }
+    return undefined;
   }
 }
 
 export class PolicyEngine {
   private explicitRules = new Map<string, ActionSafetyLevel>();
 
-  constructor(private approvalManager: ApprovalManager) {}
+  constructor(private approvalManager?: ApprovalManager) {}
 
-  setRule(toolId: string, level: ActionSafetyLevel): void {
-    this.explicitRules.set(toolId, level);
+  setRule(toolIdOrAction: string, level: ActionSafetyLevel): void {
+    this.explicitRules.set(toolIdOrAction, level);
   }
 
-  getRule(toolId: string): ActionSafetyLevel | undefined {
-    return this.explicitRules.get(toolId);
+  getRule(toolIdOrAction: string): ActionSafetyLevel | undefined {
+    return this.explicitRules.get(toolIdOrAction);
+  }
+
+  resolveSafetyLevel(
+    toolId: string,
+    actionKey?: string,
+  ): ActionSafetyLevel | undefined {
+    if (actionKey && this.explicitRules.has(actionKey)) {
+      return this.explicitRules.get(actionKey);
+    }
+    // If actionKey is specific (<toolId>:<subAction>) and not explicitly defined,
+    // do NOT fall back to broad toolId rule for unknown subActions!
+    if (actionKey && actionKey.includes(":") && actionKey !== toolId) {
+      return undefined;
+    }
+    if (this.explicitRules.has(toolId)) {
+      return this.explicitRules.get(toolId);
+    }
+    return undefined;
   }
 
   async evaluate(
     request: ToolRequest,
-  ): Promise<{ allowed: boolean; reason?: string }> {
-    const ruleLevel = this.explicitRules.get(request.toolId);
+    actionKey?: string,
+  ): Promise<{
+    allowed: boolean;
+    safetyLevel?: ActionSafetyLevel;
+    reason?: string;
+  }> {
+    const targetKey = actionKey || request.toolId;
+    const ruleLevel = this.resolveSafetyLevel(request.toolId, actionKey);
 
-    // Explicit Policy Rule Precedence
     if (ruleLevel === "BLOCKED") {
       return {
         allowed: false,
-        reason: `Tool '${request.toolId}' is explicitly BLOCKED by policy.`,
+        safetyLevel: "BLOCKED",
+        reason: `Action '${targetKey}' is explicitly BLOCKED by policy.`,
       };
     }
 
     if (ruleLevel === "APPROVAL_REQUIRED") {
-      const consumption = this.approvalManager.consumeApproval(
-        request.toolId,
-        request.params,
-      );
-      if (!consumption.valid) {
-        return {
-          allowed: false,
-          reason: `Approval required: ${consumption.reason}`,
-        };
-      }
-      return { allowed: true };
+      return {
+        allowed: false,
+        safetyLevel: "APPROVAL_REQUIRED",
+        reason: `Approval required: Action '${targetKey}' requires owner approval before execution.`,
+      };
     }
 
     if (ruleLevel === "SAFE") {
-      return { allowed: true };
+      return { allowed: true, safetyLevel: "SAFE" };
     }
 
     // Unclassified / Unknown / Ambiguous tool or action fallback -> FAIL CLOSED
     return {
       allowed: false,
-      reason: `Tool '${request.toolId}' is unclassified or ambiguous and defaults to BLOCKED (fail-closed policy).`,
+      safetyLevel: "BLOCKED",
+      reason: `Action '${targetKey}' is unclassified or ambiguous and defaults to BLOCKED (fail-closed policy).`,
     };
   }
 }

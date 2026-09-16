@@ -78,10 +78,32 @@ export function bootstrapOperatorApplication(
   const agentRegistry = new AgentRegistry();
   const orchestrator = new AgentOrchestrator(agentRegistry);
 
-  // Register default production tools and policy rules
-  policyEngine.setRule("git_operate", "SAFE");
+  // Register default production tools and explicit canonical action policy rules
+  policyEngine.setRule("browser_operate:navigate", "SAFE");
+  policyEngine.setRule("git_operate:status", "SAFE");
+  policyEngine.setRule("git_operate:diff", "SAFE");
+  policyEngine.setRule("git_operate:branch_list", "SAFE");
+  policyEngine.setRule("github_operate:get_pr", "SAFE");
+  policyEngine.setRule("web_research:search", "SAFE");
+
+  policyEngine.setRule("browser_operate:click", "APPROVAL_REQUIRED");
+  policyEngine.setRule("browser_operate:fill", "APPROVAL_REQUIRED");
+  policyEngine.setRule("git_operate:branch_create", "APPROVAL_REQUIRED");
+  policyEngine.setRule("git_operate:branch_delete", "APPROVAL_REQUIRED");
+  policyEngine.setRule("git_operate:commit", "APPROVAL_REQUIRED");
+  policyEngine.setRule("git_operate:checkout", "APPROVAL_REQUIRED");
+  policyEngine.setRule("git_operate:push", "APPROVAL_REQUIRED");
+  policyEngine.setRule("github_operate:create_pr", "APPROVAL_REQUIRED");
+  policyEngine.setRule("terminal_execute:run", "APPROVAL_REQUIRED");
+
+  policyEngine.setRule("github_operate:merge_pr", "BLOCKED");
+
+  // Base tool fallback defaults for legacy toolId lookups
   policyEngine.setRule("browser_operate", "SAFE");
   policyEngine.setRule("web_research", "SAFE");
+  policyEngine.setRule("git_operate", "APPROVAL_REQUIRED");
+  policyEngine.setRule("github_operate", "APPROVAL_REQUIRED");
+  policyEngine.setRule("terminal_execute", "APPROVAL_REQUIRED");
 
   const defaultTools = [
     new TerminalTool(),

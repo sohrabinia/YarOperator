@@ -15,6 +15,8 @@ import {
   ToolRegistry,
   Tool,
   EnvironmentManager,
+  WorkspacePolicyManager,
+  WorkspacePolicy,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
@@ -61,11 +63,36 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
     };
     registry.register(safeTool);
 
+    const environmentManager = new EnvironmentManager();
+    const workspacePolicyManager = new WorkspacePolicyManager();
+
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["safe_tool", "blocked_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Env",
+      type: "PRODUCTION",
+      capabilities: ["safe_tool", "blocked_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
     toolEcosystem = new SecureToolEcosystem(
       registry,
       policyEngine,
       approvalManager,
+      environmentManager,
+      workspacePolicyManager,
     );
+
     acceptanceEngine = new AcceptanceEngine();
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();
@@ -83,18 +110,6 @@ describe("Phase 8.5 — Autonomous Execution Loop", () => {
       model: "mock-v1",
       contract: { inputSchema: {}, outputSchema: {} },
       available: true,
-    });
-
-    const environmentManager = new EnvironmentManager();
-    environmentManager.registerEnvironment({
-      id: "env_yartrader",
-      name: "YarTrader Env",
-      type: "PRODUCTION",
-      capabilities: ["safe_tool", "blocked_tool"],
-      accessScope: "workspace",
-      riskLevel: "SAFE",
-      healthy: true,
-      metadata: { workspaceId: "yartrader" },
     });
 
     autonomyEngine = new ControlledAutonomyEngine(

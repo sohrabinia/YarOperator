@@ -11,6 +11,10 @@ import {
   ExecutionContext,
 } from "../src/core/contracts/index.js";
 import { EnvironmentManager } from "../src/core/environment/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 
 class DummyTool implements Tool {
   public metadata = {
@@ -83,12 +87,26 @@ describe("M4 Task Executor", () => {
     envManager.registerEnvironment({
       id: "env_default",
       name: "Default Environment",
-      workspaceId: "ws_default",
-      allowedTools: ["terminal_execute", "dangerous_tool"],
+      type: "DEVELOPMENT",
+      capabilities: ["terminal_execute", "dangerous_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "ws_default" },
     });
+
+    const wsPolicyManager = new WorkspacePolicyManager();
+    wsPolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "ws_default",
+        allowedTools: ["terminal_execute", "dangerous_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
 
     toolEcosystem = new SecureToolEcosystem(toolRegistry, policyEngine);
     toolEcosystem.setEnvironmentManager(envManager);
+    toolEcosystem.setWorkspacePolicyManager(wsPolicyManager);
 
     orchestrator = new AgentOrchestrator(
       agentRegistry,

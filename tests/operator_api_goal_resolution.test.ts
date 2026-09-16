@@ -14,6 +14,10 @@ import {
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { EnvironmentManager } from "../src/core/environment/index.js";
+import {
+  WorkspacePolicyManager,
+  WorkspacePolicy,
+} from "../src/core/workspace/policy.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class MockChatTool implements Tool {
@@ -62,14 +66,18 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
     policyEngine = new PolicyEngine(approvalManager);
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();
-    toolEcosystem = new SecureToolEcosystem();
-    agentRegistry = new AgentRegistry();
-    orchestrator = new AgentOrchestrator(agentRegistry);
-
-    mockTool = new MockChatTool();
-    toolEcosystem.registerTool(mockTool);
 
     const environmentManager = new EnvironmentManager();
+    const workspacePolicyManager = new WorkspacePolicyManager();
+
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["mock_chat_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
     environmentManager.registerEnvironment({
       id: "env_yartrader",
       name: "YarTrader Env",
@@ -80,6 +88,20 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
       healthy: true,
       metadata: { workspaceId: "yartrader" },
     });
+
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+      workspacePolicyManager,
+    );
+
+    agentRegistry = new AgentRegistry();
+    orchestrator = new AgentOrchestrator(agentRegistry);
+
+    mockTool = new MockChatTool();
+    toolEcosystem.registerTool(mockTool);
 
     autonomyEngine = new ControlledAutonomyEngine(
       orchestrator,

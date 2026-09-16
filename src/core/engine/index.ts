@@ -10,6 +10,7 @@ import { AuditLogger } from "../audit/index.js";
 export interface PolicyEvaluator {
   evaluate(
     request: ToolRequest,
+    actionKey?: string,
   ): Promise<{ allowed: boolean; reason?: string }>;
 }
 
@@ -52,11 +53,21 @@ export class ExecutionEngine {
     }
 
     if (this.policyEvaluator) {
-      const evaluation = await this.policyEvaluator.evaluate({
-        toolId,
-        params,
-        context,
-      });
+      let canonicalAction = (params as any)?.action
+        ? `${toolId}:${(params as any).action}`
+        : toolId;
+      if (typeof tool.resolveCanonicalAction === "function") {
+        canonicalAction = tool.resolveCanonicalAction(params);
+      }
+
+      const evaluation = await this.policyEvaluator.evaluate(
+        {
+          toolId,
+          params,
+          context,
+        },
+        canonicalAction,
+      );
       this.auditLogger.log({
         executionId: context.executionId,
         type: "POLICY_EVALUATION",
