@@ -64,7 +64,7 @@ export class WebResearchTool implements Tool<
       return { success: false, error: "Search query cannot be empty." };
     }
 
-    const maxResults = params.maxResults || 5;
+    const maxResults = Math.min(params.maxResults || 5, 10);
 
     let rawResults: Array<{ title: string; url: string; snippet: string }> = [];
 
@@ -122,6 +122,17 @@ export class WebResearchTool implements Tool<
     const now = new Date().toISOString();
 
     for (const item of rawResults) {
+      if (!item.url) continue;
+
+      try {
+        const parsedUrl = new URL(item.url);
+        if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+          continue;
+        }
+      } catch (_err) {
+        continue;
+      }
+
       const sanitizedSnippet = this.sanitizeUntrustedContent(item.snippet);
       const contentHash = createHash("sha256")
         .update(`${item.url}:${sanitizedSnippet}`)
