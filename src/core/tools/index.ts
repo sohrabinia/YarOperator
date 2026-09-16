@@ -65,7 +65,13 @@ export class SecureToolEcosystem {
       };
     }
 
-    // 1. Environment Manager Boundary Validation before Tool.execute()
+    // 1. Resolve Canonical Action
+    let canonicalAction = `${toolId}:${(params as any)?.action || "execute"}`;
+    if (typeof tool.resolveCanonicalAction === "function") {
+      canonicalAction = tool.resolveCanonicalAction(params);
+    }
+
+    // 2. Environment Manager Boundary Validation
     const envId = context.environmentId;
     const wsId = context.workspaceId || scope.workspaceId;
 
@@ -94,7 +100,7 @@ export class SecureToolEcosystem {
       }
     }
 
-    // 2. Workspace Policy Tool Validation before Tool.execute()
+    // 3. Workspace Policy Tool Validation
     if (this.workspacePolicyManager && wsId) {
       const toolCheck = this.workspacePolicyManager.validateToolAccess(
         wsId,
@@ -110,8 +116,64 @@ export class SecureToolEcosystem {
       }
     }
 
+    // 4. Authoritative Policy & Approval Gate Evaluation
+    if (this.policyEngine) {
+      const evalResult = await this.policyEngine.evaluate(
+        { toolId, params, context },
+        canonicalAction,
+      );
+
+      if (evalResult.safetyLevel === "BLOCKED") {
+        return {
+          success: false,
+          error:
+            evalResult.reason ||
+            `Action '${canonicalAction}' is explicitly BLOCKED by policy.`,
+        };
+      }
+
+      if (evalResult.safetyLevel === "APPROVAL_REQUIRED") {
+        if (!this.approvalManager) {
+          return {
+            success: false,
+            error: `Approval check failed: Action '${canonicalAction}' requires owner approval before execution.`,
+          };
+        }
+
+        const consumption = this.approvalManager.consumeApproval(
+          toolId,
+          params,
+          wsId,
+          envId,
+          canonicalAction,
+        );
+
+        if (!consumption.valid) {
+          return {
+            success: false,
+            error: `Approval check failed for action '${canonicalAction}': ${consumption.reason}`,
+          };
+        }
+      } else if (!evalResult.allowed) {
+        return {
+          success: false,
+          error:
+            evalResult.reason ||
+            `Action '${canonicalAction}' is unclassified or ambiguous and defaults to BLOCKED (fail-closed policy).`,
+        };
+      }
+    }
+
+    const toolContext: ExecutionContext = {
+      ...context,
+      metadata: {
+        ...context.metadata,
+        approved: true,
+      },
+    };
+
     try {
-      return (await tool.execute(params, context)) as ToolResult<TOutput>;
+      return (await tool.execute(params, toolContext)) as ToolResult<TOutput>;
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       return {

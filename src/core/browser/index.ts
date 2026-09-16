@@ -47,6 +47,13 @@ export class BrowserTool implements Tool<
 
   constructor(private driverFactory?: () => Promise<BrowserDriver>) {}
 
+  resolveCanonicalAction(params: BrowserNavigateParams): string {
+    const act = params.action || "navigate";
+    if (act === "click") return "browser_operate:click";
+    if (act === "fill") return "browser_operate:fill";
+    return "browser_operate:navigate";
+  }
+
   async execute(
     params: BrowserNavigateParams,
     context: ExecutionContext,

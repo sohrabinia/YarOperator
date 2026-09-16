@@ -34,6 +34,21 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
     safetyLevel: "APPROVAL_REQUIRED",
   };
 
+  resolveCanonicalAction(params: GitOperationParams): string {
+    const act = params.action;
+    if (act === "status") return "git_operate:status";
+    if (act === "diff") return "git_operate:diff";
+    if (act === "branch") {
+      return params.branch
+        ? "git_operate:branch_create"
+        : "git_operate:branch_list";
+    }
+    if (act === "checkout") return "git_operate:checkout";
+    if (act === "commit") return "git_operate:commit";
+    if (act === "push") return "git_operate:push";
+    return `git_operate:${act}`;
+  }
+
   private sensitiveKeyPattern =
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
 
@@ -184,6 +199,13 @@ export class GitHubTool implements Tool<GitHubPRParams, GitHubPRResult> {
       "Interacts with GitHub API for real PR management under approval rules.",
     safetyLevel: "APPROVAL_REQUIRED",
   };
+
+  resolveCanonicalAction(params: GitHubPRParams): string {
+    if (params.action === "get_pr") return "github_operate:get_pr";
+    if (params.action === "create_pr") return "github_operate:create_pr";
+    if (params.action === "merge_pr") return "github_operate:merge_pr";
+    return `github_operate:${params.action}`;
+  }
 
   async execute(
     params: GitHubPRParams,

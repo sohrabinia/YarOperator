@@ -56,6 +56,10 @@ export class WebResearchTool implements Tool<
 
   constructor(private searchProvider?: SearchProvider) {}
 
+  resolveCanonicalAction(_params: ResearchSearchParams): string {
+    return "web_research:search";
+  }
+
   async execute(
     params: ResearchSearchParams,
     context: ExecutionContext,

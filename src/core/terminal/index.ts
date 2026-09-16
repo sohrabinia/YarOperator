@@ -32,6 +32,10 @@ export class TerminalTool implements Tool<TerminalParams, TerminalOutput> {
     safetyLevel: "APPROVAL_REQUIRED",
   };
 
+  resolveCanonicalAction(_params: TerminalParams): string {
+    return "terminal_execute:run";
+  }
+
   private blockedCommands = ["rm", "mkfs", "dd", "shutdown", "reboot"];
   private sensitiveKeyPattern =
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;

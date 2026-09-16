@@ -260,11 +260,13 @@ export class OwnerCommandReceiver {
     const preservedText = input.rawCommandText;
 
     // 5. Brain Interpretation
+    const resolvedEnvId = input.environmentId || `env_${input.workspaceId}`;
+
     const brainInput: BrainInput = {
       rawCommandText: preservedText,
       ownerId: input.ownerId,
       workspaceId: input.workspaceId,
-      environmentId: input.environmentId,
+      environmentId: resolvedEnvId,
     };
 
     const brainResult = await this.brain.interpret(brainInput);
@@ -279,7 +281,7 @@ export class OwnerCommandReceiver {
           commandId: input.commandId,
           ownerId: input.ownerId,
           workspaceId: input.workspaceId,
-          environmentId: input.environmentId,
+          environmentId: resolvedEnvId,
           rawCommandText: preservedText,
           brainResult,
         },
@@ -317,7 +319,7 @@ export class OwnerCommandReceiver {
         brainResult,
         commandId: input.commandId,
         workspaceId: input.workspaceId,
-        environmentId: input.environmentId,
+        environmentId: resolvedEnvId,
         targetCapability: input.targetCapability,
         requestedToolId: input.requestedToolId,
         params: input.params,
