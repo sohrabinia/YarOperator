@@ -271,7 +271,9 @@ export class AgentOrchestrator {
       }
     }
 
-    let canonicalAction = `${toolId}:${(params as any)?.action || "execute"}`;
+    let canonicalAction = (params as any)?.action
+      ? `${toolId}:${(params as any).action}`
+      : toolId;
     if (this.toolEcosystem) {
       const tool = this.toolEcosystem.getRegistry().get(toolId);
       if (tool && typeof tool.resolveCanonicalAction === "function") {

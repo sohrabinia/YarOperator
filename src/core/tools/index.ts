@@ -66,7 +66,9 @@ export class SecureToolEcosystem {
     }
 
     // 1. Resolve Canonical Action
-    let canonicalAction = `${toolId}:${(params as any)?.action || "execute"}`;
+    let canonicalAction = (params as any)?.action
+      ? `${toolId}:${(params as any).action}`
+      : toolId;
     if (typeof tool.resolveCanonicalAction === "function") {
       canonicalAction = tool.resolveCanonicalAction(params);
     }

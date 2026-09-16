@@ -193,6 +193,10 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
 
   it("3. Real Owner command handoff stops at APPROVAL_REQUIRED without executing tool", async () => {
     policyEngine.setRule("mock_command_tool", "APPROVAL_REQUIRED");
+    policyEngine.setRule(
+      "mock_command_tool:deploy_chat_interface",
+      "APPROVAL_REQUIRED",
+    );
 
     const input: OwnerCommandInput = {
       commandId: "cmd_handoff_app",

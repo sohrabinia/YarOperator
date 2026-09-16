@@ -58,33 +58,14 @@ export class RealWorldAssistant {
   private resolveActionKey(goal: AssistantGoal): string {
     const toolId = goal.requestedToolId;
     const act = (goal.params as any)?.action;
-    if (toolId === "git_operate") {
-      if (act === "status") return "git_operate:status";
-      if (act === "diff") return "git_operate:diff";
-      if (act === "branch") {
-        return (goal.params as any)?.branch
-          ? "git_operate:branch_create"
-          : "git_operate:branch_list";
+    if (this.autonomyEngine) {
+      const ecosystem = (this.autonomyEngine as any).toolEcosystem;
+      if (ecosystem) {
+        const tool = ecosystem.getRegistry().get(toolId);
+        if (tool && typeof tool.resolveCanonicalAction === "function") {
+          return tool.resolveCanonicalAction(goal.params);
+        }
       }
-      if (act === "checkout") return "git_operate:checkout";
-      if (act === "commit") return "git_operate:commit";
-      if (act === "push") return "git_operate:push";
-    }
-    if (toolId === "browser_operate") {
-      if (act === "click") return "browser_operate:click";
-      if (act === "fill") return "browser_operate:fill";
-      return "browser_operate:navigate";
-    }
-    if (toolId === "github_operate") {
-      if (act === "get_pr") return "github_operate:get_pr";
-      if (act === "create_pr") return "github_operate:create_pr";
-      if (act === "merge_pr") return "github_operate:merge_pr";
-    }
-    if (toolId === "terminal_execute") {
-      return "terminal_execute:run";
-    }
-    if (toolId === "web_research") {
-      return "web_research:search";
     }
     return act ? `${toolId}:${act}` : toolId;
   }

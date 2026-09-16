@@ -11,9 +11,17 @@ import { resolve, relative, isAbsolute } from "path";
 const execFileAsync = promisify(execFile);
 
 export interface GitOperationParams {
-  action: "status" | "commit" | "push" | "checkout" | "diff" | "branch";
+  action:
+    | "status"
+    | "commit"
+    | "push"
+    | "checkout"
+    | "diff"
+    | "branch"
+    | "branch_delete";
   message?: string;
   branch?: string;
+  deleteBranch?: string;
   cwd?: string;
   args?: string[];
   timeoutMs?: number;
@@ -38,7 +46,15 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
     const act = params.action;
     if (act === "status") return "git_operate:status";
     if (act === "diff") return "git_operate:diff";
+    if (act === "branch_delete") return "git_operate:branch_delete";
     if (act === "branch") {
+      if (
+        params.deleteBranch ||
+        params.args?.includes("-d") ||
+        params.args?.includes("-D")
+      ) {
+        return "git_operate:branch_delete";
+      }
       return params.branch
         ? "git_operate:branch_create"
         : "git_operate:branch_list";
@@ -79,8 +95,24 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
       case "diff":
         gitArgs = ["diff"];
         break;
+      case "branch_delete": {
+        const targetDelete = params.deleteBranch || params.branch;
+        if (!targetDelete) {
+          return {
+            success: false,
+            error:
+              "Git branch_delete requires a valid branch or deleteBranch parameter.",
+          };
+        }
+        gitArgs = ["branch", "-D", targetDelete];
+        break;
+      }
       case "branch":
-        gitArgs = params.branch ? ["branch", params.branch] : ["branch"];
+        if (params.deleteBranch) {
+          gitArgs = ["branch", "-D", params.deleteBranch];
+        } else {
+          gitArgs = params.branch ? ["branch", params.branch] : ["branch"];
+        }
         break;
       case "checkout":
         if (!params.branch) {

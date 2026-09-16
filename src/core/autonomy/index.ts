@@ -542,7 +542,9 @@ export class ControlledAutonomyEngine {
     }
 
     const tool = this.toolEcosystem.getRegistry().get(request.toolId);
-    let canonicalAction = `${request.toolId}:${(request.params as any)?.action || "execute"}`;
+    let canonicalAction = (request.params as any)?.action
+      ? `${request.toolId}:${(request.params as any).action}`
+      : request.toolId;
     if (tool && typeof tool.resolveCanonicalAction === "function") {
       canonicalAction = tool.resolveCanonicalAction(request.params);
     }

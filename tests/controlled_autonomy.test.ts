@@ -270,6 +270,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
     });
 
     it("5. Consumed approval token cannot be replayed", async () => {
+      policyEngine.setRule("mock_exec_tool:deploy", "APPROVAL_REQUIRED");
       policyEngine.setRule("mock_exec_tool", "APPROVAL_REQUIRED");
       const params = { action: "deploy" };
       const approvalReq = approvalManager.requestApproval(

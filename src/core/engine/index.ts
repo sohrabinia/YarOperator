@@ -53,7 +53,9 @@ export class ExecutionEngine {
     }
 
     if (this.policyEvaluator) {
-      let canonicalAction = `${toolId}:${(params as any)?.action || "execute"}`;
+      let canonicalAction = (params as any)?.action
+        ? `${toolId}:${(params as any).action}`
+        : toolId;
       if (typeof tool.resolveCanonicalAction === "function") {
         canonicalAction = tool.resolveCanonicalAction(params);
       }

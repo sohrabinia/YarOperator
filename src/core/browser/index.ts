@@ -49,9 +49,11 @@ export class BrowserTool implements Tool<
 
   resolveCanonicalAction(params: BrowserNavigateParams): string {
     const act = params.action || "navigate";
+    if (act === "navigate" || act === "screenshot")
+      return "browser_operate:navigate";
     if (act === "click") return "browser_operate:click";
     if (act === "fill") return "browser_operate:fill";
-    return "browser_operate:navigate";
+    return `browser_operate:${act}`;
   }
 
   async execute(
@@ -60,6 +62,19 @@ export class BrowserTool implements Tool<
   ): Promise<ToolResult<BrowserObservation>> {
     if (!params.url) {
       return { success: false, error: "URL parameter is required." };
+    }
+
+    const act = params.action || "navigate";
+    if (
+      act !== "navigate" &&
+      act !== "click" &&
+      act !== "fill" &&
+      act !== "screenshot"
+    ) {
+      return {
+        success: false,
+        error: `Unsupported browser action: '${act}'`,
+      };
     }
 
     try {

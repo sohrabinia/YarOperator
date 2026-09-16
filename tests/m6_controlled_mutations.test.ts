@@ -198,6 +198,97 @@ describe("M6 Controlled Mutations Security Gate Suite", () => {
         "unclassified or ambiguous and defaults to BLOCKED",
       );
     });
+
+    it("rejects unknown actions for BrowserTool, GitTool, and GitHubTool despite broad tool-level rules", async () => {
+      ecosystem.registerTool(new BrowserTool());
+      ecosystem.registerTool(new GitTool());
+      ecosystem.registerTool(new GitHubTool());
+
+      // Broad tool-level rules in policyEngine
+      policyEngine.setRule("browser_operate", "SAFE");
+      policyEngine.setRule("git_operate", "APPROVAL_REQUIRED");
+      policyEngine.setRule("github_operate", "APPROVAL_REQUIRED");
+
+      // 1. Unknown browser action must fail closed as BLOCKED
+      const browserRes = await ecosystem.execute(
+        "browser_operate",
+        { url: "https://example.com", action: "eval_js" as any },
+        scope,
+        context,
+      );
+      expect(browserRes.success).toBe(false);
+      expect(browserRes.error).toContain("BLOCKED");
+
+      // 2. Unknown git action must fail closed as BLOCKED
+      const gitRes = await ecosystem.execute(
+        "git_operate",
+        { action: "rebase_all" as any },
+        scope,
+        context,
+      );
+      expect(gitRes.success).toBe(false);
+      expect(gitRes.error).toContain("BLOCKED");
+
+      // 3. Unknown github action must fail closed as BLOCKED
+      const githubRes = await ecosystem.execute(
+        "github_operate",
+        { action: "delete_repo" as any },
+        scope,
+        context,
+      );
+      expect(githubRes.success).toBe(false);
+      expect(githubRes.error).toContain("BLOCKED");
+    });
+
+    it("enforces git_operate:branch_delete under APPROVAL_REQUIRED with context-bound approval", async () => {
+      const gitExecuteSpy = vi.fn().mockResolvedValue({
+        success: true,
+        output: { output: "Deleted branch feat-1" },
+      });
+
+      class TestGitTool extends GitTool {
+        override execute = gitExecuteSpy;
+      }
+
+      const gitTool = new TestGitTool();
+      ecosystem.registerTool(gitTool);
+
+      const params = {
+        action: "branch_delete" as const,
+        deleteBranch: "feat-1",
+      };
+
+      // 1. Unapproved branch_delete must reject
+      const unapprovedRes = await ecosystem.execute(
+        "git_operate",
+        params,
+        scope,
+        context,
+      );
+      expect(unapprovedRes.success).toBe(false);
+      expect(unapprovedRes.error).toContain("Approval check failed");
+      expect(gitExecuteSpy).not.toHaveBeenCalled();
+
+      // 2. Approved branch_delete with exact context binding succeeds
+      const appReq = approvalManager.requestApproval(
+        "git_operate",
+        params,
+        300000,
+        defaultWorkspaceId,
+        defaultEnvironmentId,
+        "git_operate:branch_delete",
+      );
+      approvalManager.grantApproval(appReq.id, "owner_sohrab");
+
+      const approvedRes = await ecosystem.execute(
+        "git_operate",
+        params,
+        scope,
+        context,
+      );
+      expect(approvedRes.success).toBe(true);
+      expect(gitExecuteSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("2. Policy Evaluation & Separation", () => {

@@ -194,6 +194,11 @@ export class PolicyEngine {
     if (actionKey && this.explicitRules.has(actionKey)) {
       return this.explicitRules.get(actionKey);
     }
+    // If actionKey is specific (<toolId>:<subAction>) and not explicitly defined,
+    // do NOT fall back to broad toolId rule for unknown subActions!
+    if (actionKey && actionKey.includes(":") && actionKey !== toolId) {
+      return undefined;
+    }
     if (this.explicitRules.has(toolId)) {
       return this.explicitRules.get(toolId);
     }
