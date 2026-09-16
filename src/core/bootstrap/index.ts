@@ -80,7 +80,7 @@ export function bootstrapOperatorApplication(
 
   // Register default production tools and policy rules
   policyEngine.setRule("git_operate", "SAFE");
-  policyEngine.setRule("browser_navigate", "SAFE");
+  policyEngine.setRule("browser_operate", "SAFE");
   policyEngine.setRule("web_research", "SAFE");
 
   const defaultTools = [
@@ -131,13 +131,14 @@ export function bootstrapOperatorApplication(
     capabilities: [
       "software-development",
       "web-research",
+      "web-browsing",
       "terminal-execution",
     ],
     workspaceScopes: ["yartrader", "ws_default"],
     toolScopes: [
       "terminal_execute",
       "git_operate",
-      "browser_navigate",
+      "browser_operate",
       "web_research",
     ],
     provider: "DefaultProvider",
