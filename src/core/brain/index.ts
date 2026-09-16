@@ -1,13 +1,17 @@
-import { Brain, BrainInput, BrainResult } from "../contracts/index.js";
+import {
+  Brain,
+  BrainInput,
+  BrainResult,
+  ActionGoalCategory,
+} from "../contracts/index.js";
+
+export type { ActionGoalCategory };
 
 export interface KnowledgeEntity {
   id: string;
   name: string;
   aliases: string[];
 }
-
-export type ActionGoalCategory =
-  "INVESTIGATION" | "DEVELOPMENT" | "VERIFICATION" | "RESEARCH";
 
 export class Normalizer {
   public static normalize(input: string): string {
@@ -372,6 +376,7 @@ export class DeterministicBrain implements Brain {
         intent: "ACTION",
         confidence: 0.95,
         reason: `Input matches actionable goal pattern (${resolvedActionGoal}${resolvedEntity ? ` on ${resolvedEntity.name}` : ""}).`,
+        actionGoal: resolvedActionGoal,
       };
     }
 
