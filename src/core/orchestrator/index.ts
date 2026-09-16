@@ -8,6 +8,11 @@ import { PolicyEngine } from "../policy/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
 import { RealWorldAssistant, AssistantGoal } from "../assistant/index.js";
 import { CapabilityResolver } from "../capability/index.js";
+import {
+  TaskExecutor,
+  TaskDefinition,
+  TaskExecutionResult,
+} from "../task/index.js";
 
 export interface ExecutionScope {
   id: string;
@@ -72,6 +77,14 @@ export class AgentOrchestrator {
 
   public setAssistant(assistant: RealWorldAssistant): void {
     this.assistant = assistant;
+  }
+
+  public async executeTask(
+    task: TaskDefinition,
+    context?: ExecutionContext,
+  ): Promise<TaskExecutionResult> {
+    const taskExecutor = new TaskExecutor(this);
+    return taskExecutor.executeTask(task, context);
   }
 
   selectAgentForCapability(
