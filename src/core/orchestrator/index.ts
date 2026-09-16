@@ -271,8 +271,20 @@ export class AgentOrchestrator {
       }
     }
 
+    let canonicalAction = (params as any)?.action
+      ? `${toolId}:${(params as any).action}`
+      : toolId;
+    if (this.toolEcosystem) {
+      const tool = this.toolEcosystem.getRegistry().get(toolId);
+      if (tool && typeof tool.resolveCanonicalAction === "function") {
+        canonicalAction = tool.resolveCanonicalAction(params);
+      }
+    }
+
     // Evaluate Policy rule directly if Assistant not present
-    const ruleLevel = this.policyEngine.getRule(toolId) || "BLOCKED";
+    const ruleLevel =
+      this.policyEngine.resolveSafetyLevel(toolId, canonicalAction) ||
+      "BLOCKED";
 
     if (ruleLevel === "BLOCKED") {
       return {
@@ -281,7 +293,7 @@ export class AgentOrchestrator {
         status: "BLOCKED",
         resolvedCapability: capability,
         resolvedToolId: toolId,
-        reason: `Tool '${toolId}' is explicitly BLOCKED by PolicyEngine.`,
+        reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
       };
     }
 
@@ -292,7 +304,7 @@ export class AgentOrchestrator {
         status: "APPROVAL_REQUIRED",
         resolvedCapability: capability,
         resolvedToolId: toolId,
-        reason: `Tool '${toolId}' requires explicit owner approval.`,
+        reason: `Action '${canonicalAction}' requires explicit owner approval.`,
       };
     }
 
@@ -307,11 +319,14 @@ export class AgentOrchestrator {
       };
     }
 
-    const policyEval = await this.policyEngine.evaluate({
-      toolId,
-      params,
-      context: execContext,
-    });
+    const policyEval = await this.policyEngine.evaluate(
+      {
+        toolId,
+        params,
+        context: execContext,
+      },
+      canonicalAction,
+    );
 
     if (!policyEval.allowed) {
       return {

@@ -31,6 +31,7 @@ export interface ToolResult<TOutput = unknown> {
 
 export interface Tool<TParams = unknown, TOutput = unknown> {
   metadata: ToolMetadata;
+  resolveCanonicalAction?(params: TParams): string;
   execute(
     params: TParams,
     context: ExecutionContext,

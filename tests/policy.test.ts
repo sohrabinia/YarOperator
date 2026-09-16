@@ -101,17 +101,18 @@ describe("PolicyEngine & ApprovalManager Fail Closed & Security", () => {
       context: mockContext,
     };
 
-    let evalResult = await policyEngine.evaluate(req);
+    const evalResult = await policyEngine.evaluate(req);
     expect(evalResult.allowed).toBe(false);
+    expect(evalResult.safetyLevel).toBe("APPROVAL_REQUIRED");
 
     const appReq = approvalManager.requestApproval("sensitive_tool", params);
     approvalManager.grantApproval(appReq.id, "admin");
 
-    evalResult = await policyEngine.evaluate(req);
-    expect(evalResult.allowed).toBe(true);
+    const consume1 = approvalManager.consumeApproval("sensitive_tool", params);
+    expect(consume1.valid).toBe(true);
 
-    evalResult = await policyEngine.evaluate(req);
-    expect(evalResult.allowed).toBe(false);
-    expect(evalResult.reason).toContain("already consumed");
+    const consume2 = approvalManager.consumeApproval("sensitive_tool", params);
+    expect(consume2.valid).toBe(false);
+    expect(consume2.reason).toContain("already consumed");
   });
 });

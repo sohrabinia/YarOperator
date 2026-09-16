@@ -55,9 +55,26 @@ export class RealWorldAssistant {
     private notificationManager: NotificationManager,
   ) {}
 
+  private resolveActionKey(goal: AssistantGoal): string {
+    const toolId = goal.requestedToolId;
+    const act = (goal.params as any)?.action;
+    if (this.autonomyEngine) {
+      const ecosystem = (this.autonomyEngine as any).toolEcosystem;
+      if (ecosystem) {
+        const tool = ecosystem.getRegistry().get(toolId);
+        if (tool && typeof tool.resolveCanonicalAction === "function") {
+          return tool.resolveCanonicalAction(goal.params);
+        }
+      }
+    }
+    return act ? `${toolId}:${act}` : toolId;
+  }
+
   public createWorkflowPlan(goal: AssistantGoal): AssistantWorkflowPlan {
+    const actionKey = this.resolveActionKey(goal);
     const policyDecision =
-      this.policyEngine.getRule(goal.requestedToolId) || "UNCLASSIFIED";
+      this.policyEngine.resolveSafetyLevel(goal.requestedToolId, actionKey) ||
+      "UNCLASSIFIED";
 
     const step: AssistantWorkflowStep = {
       stepId: `step_${Date.now()}_1`,
@@ -88,12 +105,33 @@ export class RealWorldAssistant {
       { workspaceId: goal.workspaceId, taskId: goal.id },
     );
 
-    const policyRule =
-      this.policyEngine.getRule(goal.requestedToolId) || "BLOCKED";
+    const request: AutonomousActionRequest = {
+      taskId: goal.id,
+      workspaceId: goal.workspaceId,
+      environmentId: goal.environmentId,
+      toolId: goal.requestedToolId,
+      params: goal.params,
+      capability: goal.targetCapability,
+    };
 
-    if (policyRule === "BLOCKED") {
+    const budget: AutonomyBudget = {
+      maxActions: 5,
+      maxRetries: 1,
+      maxReplans: 1,
+      usedActions: 0,
+      usedRetries: 0,
+      usedReplans: 0,
+    };
+
+    const runResult = await this.autonomyEngine.runControlledAction(
+      request,
+      budget,
+      context,
+    );
+
+    if (runResult.state === "BLOCKED") {
       step.status = "BLOCKED";
-      step.error = `Tool '${goal.requestedToolId}' is explicitly BLOCKED by PolicyEngine.`;
+      step.error = runResult.error || "Action BLOCKED by security boundary.";
 
       await this.auditManager.recordEvent(
         "ACTION_FAILED",
@@ -110,9 +148,11 @@ export class RealWorldAssistant {
       };
     }
 
-    if (policyRule === "APPROVAL_REQUIRED") {
+    if (runResult.state === "APPROVAL_REQUIRED") {
       step.status = "APPROVAL_REQUIRED";
-      step.error = `Tool '${goal.requestedToolId}' requires explicit owner approval.`;
+      step.error =
+        runResult.error ||
+        `Tool '${goal.requestedToolId}' requires explicit owner approval.`;
 
       this.notificationManager.notify({
         workspaceId: goal.workspaceId,
@@ -137,31 +177,6 @@ export class RealWorldAssistant {
         error: step.error,
       };
     }
-
-    // SAFE policy rule
-    const request: AutonomousActionRequest = {
-      taskId: goal.id,
-      workspaceId: goal.workspaceId,
-      environmentId: goal.environmentId,
-      toolId: goal.requestedToolId,
-      params: goal.params,
-      capability: goal.targetCapability,
-    };
-
-    const budget: AutonomyBudget = {
-      maxActions: 5,
-      maxRetries: 1,
-      maxReplans: 1,
-      usedActions: 0,
-      usedRetries: 0,
-      usedReplans: 0,
-    };
-
-    const runResult = await this.autonomyEngine.runControlledAction(
-      request,
-      budget,
-      context,
-    );
 
     if (!runResult.success) {
       step.status = "FAILED";

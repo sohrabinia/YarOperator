@@ -96,7 +96,11 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
     orchestrator = new AgentOrchestrator(agentRegistry);
     approvalManager = new ApprovalManager();
     policyEngine = new PolicyEngine(approvalManager);
-    toolEcosystem = new SecureToolEcosystem();
+    toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+    );
     acceptanceEngine = new AcceptanceEngine();
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();
@@ -266,11 +270,16 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
     });
 
     it("5. Consumed approval token cannot be replayed", async () => {
+      policyEngine.setRule("mock_exec_tool:deploy", "APPROVAL_REQUIRED");
       policyEngine.setRule("mock_exec_tool", "APPROVAL_REQUIRED");
       const params = { action: "deploy" };
       const approvalReq = approvalManager.requestApproval(
         "mock_exec_tool",
         params,
+        300000,
+        "yartrader",
+        "env_yartrader",
+        "mock_exec_tool:deploy",
       );
       approvalManager.grantApproval(approvalReq.id, "m.a.sohrabimia@gmail.com");
 
