@@ -56,6 +56,9 @@ export interface AuditEvent {
 
 export type BrainIntent = "CONVERSATION" | "ACTION" | "AMBIGUOUS";
 
+export type ActionGoalCategory =
+  "INVESTIGATION" | "DEVELOPMENT" | "VERIFICATION" | "RESEARCH";
+
 export interface BrainInput {
   rawCommandText: string;
   ownerId?: string;
@@ -69,6 +72,7 @@ export interface BrainResult {
   reply?: string;
   confidence?: number;
   reason?: string;
+  actionGoal?: ActionGoalCategory;
 }
 
 export interface BrainRule {

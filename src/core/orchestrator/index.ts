@@ -7,6 +7,7 @@ import {
 import { PolicyEngine } from "../policy/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
 import { RealWorldAssistant, AssistantGoal } from "../assistant/index.js";
+import { CapabilityResolver } from "../capability/index.js";
 
 export interface ExecutionScope {
   id: string;
@@ -48,12 +49,18 @@ export interface OrchestrationResult {
 }
 
 export class AgentOrchestrator {
+  private capabilityResolver: CapabilityResolver;
+
   constructor(
     private registry: AgentRegistry,
     private policyEngine?: PolicyEngine,
     private toolEcosystem?: SecureToolEcosystem,
     private assistant?: RealWorldAssistant,
-  ) {}
+    capabilityResolver?: CapabilityResolver,
+  ) {
+    this.capabilityResolver =
+      capabilityResolver || new CapabilityResolver(this.registry);
+  }
 
   public setPolicyEngine(policyEngine: PolicyEngine): void {
     this.policyEngine = policyEngine;
@@ -132,11 +139,27 @@ export class AgentOrchestrator {
       };
     }
 
-    // 3. ACTION Intent
-    // M2 STRICT BOUNDARY: NO rawCommandText keyword matching, NO text inspection, NO tool inference.
-    // Tool ID MUST be explicitly supplied in request or bound to candidate agent scope.
-    let capability = request.targetCapability || "software-development";
-    let toolId = request.requestedToolId;
+    // 3. ACTION Intent Resolution via CapabilityResolver
+    const capRes = this.capabilityResolver.resolve({
+      brainResult,
+      workspaceId,
+      targetCapability: request.targetCapability,
+      requestedToolId: request.requestedToolId,
+    });
+
+    if (capRes.status !== "RESOLVED" || !capRes.resolvedCapability) {
+      return {
+        accepted: false,
+        intent: "ACTION",
+        status: "BLOCKED",
+        reason:
+          capRes.reason ||
+          "Capability resolution failed: Unknown or unsupported capability.",
+      };
+    }
+
+    let capability = capRes.resolvedCapability;
+    let toolId = capRes.resolvedToolId;
 
     if (!toolId) {
       const selectedAgent = this.selectAgentForCapability(
