@@ -5,13 +5,9 @@ import {
   BrowserDriver,
   SearchProvider,
   ExecutionContext,
-  ToolRequest,
+  OperatorApiRequest,
 } from "../src/index.js";
 import { bootstrapOperatorApplication } from "../src/core/bootstrap/index.js";
-import { AgentRegistry } from "../src/core/agent/index.js";
-import { CapabilityResolver } from "../src/core/capability/index.js";
-import { PolicyEngine, ApprovalManager } from "../src/core/policy/index.js";
-import { DeterministicBrain } from "../src/core/brain/index.js";
 
 describe("M5 Internet Operator Core Verification Suite", () => {
   const mockContext: ExecutionContext = {
@@ -20,61 +16,60 @@ describe("M5 Internet Operator Core Verification Suite", () => {
   };
 
   describe("Browser Core (1-10)", () => {
-    it("1. browser_operate is registered correctly in bootstrap", () => {
-      const handler = bootstrapOperatorApplication({ useInMemoryStores: true });
-      expect(handler).toBeDefined();
-
-      const agentRegistry = new AgentRegistry();
-      agentRegistry.registerAgent({
-        id: "default_assistant_agent",
-        name: "Default Assistant Agent",
-        capabilities: [
-          "software-development",
-          "web-research",
-          "web-browsing",
-          "terminal-execution",
-        ],
-        workspaceScopes: ["yartrader"],
-        toolScopes: [
-          "terminal_execute",
-          "git_operate",
-          "browser_operate",
-          "web_research",
-        ],
-        provider: "DefaultProvider",
-        model: "default-v1",
-        contract: { inputSchema: {}, outputSchema: {} },
-        available: true,
+    it("1. browser_operate and web-browsing capability are registered in bootstrapped application", async () => {
+      const handler = bootstrapOperatorApplication({
+        bearerToken: "test-token-001",
+        ownerId: "owner_default",
+        defaultWorkspaceId: "yartrader",
+        useInMemoryStores: true,
       });
-      const agents = agentRegistry.findAgentsByCapability(
-        "web-browsing",
-        "yartrader",
-      );
-      expect(agents.length).toBeGreaterThan(0);
-      expect(agents[0].toolScopes).toContain("browser_operate");
+
+      const req: OperatorApiRequest = {
+        headers: { authorization: "Bearer test-token-001" },
+        body: {
+          commandId: "cmd_m5_test1",
+          ownerId: "owner_default",
+          workspaceId: "yartrader",
+          rawCommandText: "سایت را بررسی کن",
+          targetCapability: "web-browsing",
+          requestedToolId: "browser_operate",
+        },
+      };
+
+      const res = await handler.handleChatRequest(req);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.result?.resolvedCapability).toBe("web-browsing");
+      expect(res.body.result?.resolvedToolId).toBe("browser_operate");
     });
 
-    it("2. web-browsing capability resolves through AgentRegistry", () => {
-      const agentRegistry = new AgentRegistry();
-      agentRegistry.registerAgent({
-        id: "default_assistant_agent",
-        name: "Default Assistant Agent",
-        capabilities: ["web-browsing"],
-        workspaceScopes: ["ws_default"],
-        toolScopes: ["browser_operate"],
-        provider: "DefaultProvider",
-        model: "default-v1",
-        contract: { inputSchema: {}, outputSchema: {} },
-        available: true,
+    it("2. web-browsing capability resolves through bootstrapped execution path", async () => {
+      const handler = bootstrapOperatorApplication({
+        bearerToken: "test-token-002",
+        ownerId: "owner_default",
+        defaultWorkspaceId: "yartrader",
+        useInMemoryStores: true,
       });
-      const resolver = new CapabilityResolver(agentRegistry);
-      const res = resolver.resolve({
-        brainResult: { intent: "ACTION", actionGoal: "INVESTIGATION" },
-        targetCapability: "web-browsing",
-        workspaceId: "ws_default",
-      });
-      expect(res.status).toBe("RESOLVED");
-      expect(res.resolvedCapability).toBe("web-browsing");
+
+      const req: OperatorApiRequest = {
+        headers: { authorization: "Bearer test-token-002" },
+        body: {
+          commandId: "cmd_m5_test2",
+          ownerId: "owner_default",
+          workspaceId: "yartrader",
+          rawCommandText: "مرورگر را بررسی کن",
+          targetCapability: "web-browsing",
+          requestedToolId: "browser_operate",
+        },
+      };
+
+      const res = await handler.handleChatRequest(req);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.result?.accepted).toBe(true);
+      expect(res.body.result?.resolvedCapability).toBe("web-browsing");
+      expect(res.body.result?.resolvedToolId).toBe("browser_operate");
     });
 
     it("3. http: navigation is accepted", async () => {
@@ -185,15 +180,17 @@ describe("M5 Internet Operator Core Verification Suite", () => {
       expect(res.output?.contentSnippet).not.toContain("sk-123456789");
     });
 
-    it("10. Playwright unavailable returns controlled failure with NOT_CONFIGURED", async () => {
+    it("10. Playwright unavailable returns controlled failure with NOT_CONFIGURED deterministically", async () => {
       const tool = new BrowserTool();
       const res = await tool.execute(
         { url: "https://example.com" },
         mockContext,
       );
-      if (!res.success) {
-        expect(res.error).toContain("NOT_CONFIGURED");
-      }
+
+      // Must explicitly fail if execution unexpectedly succeeds without driver
+      expect(res.success).toBe(false);
+      expect(res.error).toBeDefined();
+      expect(res.error).toContain("NOT_CONFIGURED");
     });
   });
 
@@ -287,17 +284,34 @@ describe("M5 Internet Operator Core Verification Suite", () => {
   });
 
   describe("Security & Boundaries (17-22)", () => {
-    it("17. browser_operate + navigate is SAFE in PolicyEngine", async () => {
-      const approvalManager = new ApprovalManager();
-      const policy = new PolicyEngine(approvalManager);
-      policy.setRule("browser_operate", "SAFE");
-      const req: ToolRequest = {
-        toolId: "browser_operate",
-        params: { url: "https://example.com" },
-        context: mockContext,
+    it("17. browser_operate navigation is SAFE under actual bootstrapped policy engine", async () => {
+      const handler = bootstrapOperatorApplication({
+        bearerToken: "test-token-17",
+        ownerId: "owner_default",
+        defaultWorkspaceId: "yartrader",
+        useInMemoryStores: true,
+      });
+
+      const safeReq: OperatorApiRequest = {
+        headers: { authorization: "Bearer test-token-17" },
+        body: {
+          commandId: "cmd_m5_test17_safe",
+          ownerId: "owner_default",
+          workspaceId: "yartrader",
+          rawCommandText: "سایت را بررسی کن",
+          requestedToolId: "browser_operate",
+          targetCapability: "web-browsing",
+          params: { url: "https://example.com" },
+        },
       };
-      const evalRes = await policy.evaluate(req);
-      expect(evalRes.allowed).toBe(true);
+
+      const res = await handler.handleChatRequest(safeReq);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.result?.accepted).toBe(true);
+      expect(res.body.result?.resolvedToolId).toBe("browser_operate");
+      expect(res.body.result?.status).not.toBe("BLOCKED");
     });
 
     it("18. click remains approval-controlled in BrowserTool", async () => {
@@ -335,35 +349,88 @@ describe("M5 Internet Operator Core Verification Suite", () => {
       expect(res.error).toContain("requires explicit approval");
     });
 
-    it("20. unknown web tool is BLOCKED by PolicyEngine default rule", async () => {
-      const approvalManager = new ApprovalManager();
-      const policy = new PolicyEngine(approvalManager);
-      const req: ToolRequest = {
-        toolId: "unknown_web_tool",
-        params: {},
-        context: mockContext,
-      };
-      const evalRes = await policy.evaluate(req);
-      expect(evalRes.allowed).toBe(false);
-      expect(evalRes.reason).toContain("fail-closed policy");
-    });
-
-    it("21. no raw-text capability/tool inference introduced into DeterministicBrain", () => {
-      const brain = new DeterministicBrain();
-      const res = brain.interpret({
-        rawCommandText: "visit https://google.com and browse",
+    it("20. unknown web tool is BLOCKED by PolicyEngine default rule under bootstrapped handler", async () => {
+      const handler = bootstrapOperatorApplication({
+        bearerToken: "test-token-20",
+        ownerId: "owner_default",
+        defaultWorkspaceId: "yartrader",
+        useInMemoryStores: true,
       });
-      expect(res).toBeDefined();
-      expect(res.intent).toBeDefined();
-      expect(res).not.toHaveProperty("resolvedToolId");
-      expect(res).not.toHaveProperty("resolvedCapability");
-      expect(res).not.toHaveProperty("targetCapability");
-      expect(res).not.toHaveProperty("requestedToolId");
+
+      const req: OperatorApiRequest = {
+        headers: { authorization: "Bearer test-token-20" },
+        body: {
+          commandId: "cmd_m5_test20_blocked",
+          ownerId: "owner_default",
+          workspaceId: "yartrader",
+          rawCommandText: "سایت را بررسی کن",
+          requestedToolId: "unknown_web_tool",
+          targetCapability: "web-browsing",
+        },
+      };
+
+      const res = await handler.handleChatRequest(req);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.result?.status).toBe("BLOCKED");
     });
 
-    it("22. M2/M3/M4 integration works with bootstrap setup", () => {
-      const handler = bootstrapOperatorApplication({ useInMemoryStores: true });
-      expect(handler).toBeDefined();
+    it("21. no raw-text capability/tool inference introduced into DeterministicBrain", async () => {
+      const handler = bootstrapOperatorApplication({
+        bearerToken: "test-token-21",
+        ownerId: "owner_default",
+        defaultWorkspaceId: "yartrader",
+        useInMemoryStores: true,
+      });
+
+      // Command without targetCapability/requestedToolId
+      const req: OperatorApiRequest = {
+        headers: { authorization: "Bearer test-token-21" },
+        body: {
+          commandId: "cmd_m5_test21_inference",
+          ownerId: "owner_default",
+          workspaceId: "yartrader",
+          rawCommandText: "سایت را بررسی کن",
+        },
+      };
+
+      const res = await handler.handleChatRequest(req);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.result?.resolvedToolId).toBeUndefined();
+    });
+
+    it("22. M2/M3/M4 integration works through bootstrapped handler with web-research execution", async () => {
+      const handler = bootstrapOperatorApplication({
+        bearerToken: "test-token-22",
+        ownerId: "owner_default",
+        defaultWorkspaceId: "yartrader",
+        useInMemoryStores: true,
+      });
+
+      const req: OperatorApiRequest = {
+        headers: { authorization: "Bearer test-token-22" },
+        body: {
+          commandId: "cmd_m5_test22_integration",
+          ownerId: "owner_default",
+          workspaceId: "yartrader",
+          rawCommandText: "سایت را بررسی کن",
+          targetCapability: "web-research",
+          requestedToolId: "web_research",
+          params: { query: "node.js security" },
+        },
+      };
+
+      const res = await handler.handleChatRequest(req);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.result?.accepted).toBe(true);
+      expect(res.body.result?.resolvedCapability).toBe("web-research");
+      expect(res.body.result?.resolvedToolId).toBe("web_research");
+      expect(res.body.result?.status).toBeDefined();
     });
   });
 });
