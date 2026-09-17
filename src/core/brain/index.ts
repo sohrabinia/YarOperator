@@ -263,6 +263,33 @@ export class OperatorKnowledgeBase {
     phrases: string[];
   }> = [
     {
+      category: "RESEARCH",
+      phrases: [
+        "تحقیق کن",
+        "درباره‌اش تحقیق کن",
+        "تحقیقش کن",
+        "بررسی اینترنتی کن",
+        "در اینترنت بررسی کن",
+        "برو ببین",
+        "برو سایت رو ببین",
+        "سایت رو بررسی کن",
+        "برو سایت",
+        "اطلاعاتش رو پیدا کن",
+        "اطلاعات جمع کن",
+        "ببین اینترنت چی میگه",
+        "بگرد",
+        "جستجو کن",
+        "research",
+        "search",
+        "web research",
+        "look online",
+        "search the web",
+        "browse the website",
+        "find information",
+        "collect information",
+      ],
+    },
+    {
       category: "INVESTIGATION",
       phrases: [
         "بررسی کن",
@@ -291,8 +318,6 @@ export class OperatorKnowledgeBase {
         "علتش رو پیدا کن",
         "ریشه مشکل رو پیدا کن",
         "فورنزیک بررسی کن",
-        "تحقیق کن",
-        "تحقیقش کن",
         "پیدا کن",
         "ببین مشکل چیه",
         "ببین چی پیدا می‌کنی",
@@ -378,6 +403,8 @@ export class OperatorKnowledgeBase {
         "ببین درست شده یا نه",
         "اجرا کن",
         "ران کن",
+        "انجام بده",
+        "انجام بدهید",
         "test",
         "run tests",
         "run command",
@@ -388,32 +415,6 @@ export class OperatorKnowledgeBase {
         "validate",
         "confirm",
         "make sure it works",
-      ],
-    },
-    {
-      category: "RESEARCH",
-      phrases: [
-        "تحقیق کن",
-        "درباره‌اش تحقیق کن",
-        "بررسی اینترنتی کن",
-        "در اینترنت بررسی کن",
-        "برو ببین",
-        "برو سایت رو ببین",
-        "سایت رو بررسی کن",
-        "برو سایت",
-        "اطلاعاتش رو پیدا کن",
-        "اطلاعات جمع کن",
-        "ببین اینترنت چی میگه",
-        "بگرد",
-        "جستجو کن",
-        "research",
-        "search",
-        "web research",
-        "look online",
-        "search the web",
-        "browse the website",
-        "find information",
-        "collect information",
       ],
     },
   ];
@@ -590,6 +591,13 @@ export class DeterministicBrain implements Brain {
               "Synthesized multi-step plan failed validation fail-closed check.",
           };
         }
+      } else {
+        return {
+          intent: "AMBIGUOUS",
+          confidence: 0.2,
+          reason:
+            "Input contains sequential conjunctions but contains unresolvable or non-actionable steps.",
+        };
       }
     }
 
