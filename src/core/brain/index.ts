@@ -2,8 +2,171 @@ import {
   Brain,
   BrainInput,
   BrainResult,
+  BrainPlan,
+  BrainPlanStep,
+  BrainPlanValidationResult,
   ActionGoalCategory,
 } from "../contracts/index.js";
+
+const VALID_ACTION_CATEGORIES = new Set<ActionGoalCategory>([
+  "INVESTIGATION",
+  "DEVELOPMENT",
+  "VERIFICATION",
+  "RESEARCH",
+]);
+
+export function validateBrainPlan(plan: unknown): BrainPlanValidationResult {
+  const errors: string[] = [];
+
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+    return {
+      valid: false,
+      errors: ["Plan must be a non-null object."],
+    };
+  }
+
+  const p = plan as Record<string, unknown>;
+
+  if (typeof p.goal !== "string" || p.goal.trim().length === 0) {
+    errors.push("Plan 'goal' must be a non-empty string.");
+  }
+
+  if (!Array.isArray(p.steps) || p.steps.length === 0) {
+    errors.push("Plan 'steps' must be a non-empty array.");
+    return { valid: false, errors };
+  }
+
+  const seenStepIds = new Set<string>();
+  const stepMap = new Map<string, Record<string, unknown>>();
+
+  for (let i = 0; i < p.steps.length; i++) {
+    const step = p.steps[i];
+    const stepIndexLabel = `Step[${i}]`;
+
+    if (!step || typeof step !== "object" || Array.isArray(step)) {
+      errors.push(`${stepIndexLabel} must be an object.`);
+      continue;
+    }
+
+    const s = step as Record<string, unknown>;
+
+    if (typeof s.id !== "string" || s.id.trim().length === 0) {
+      errors.push(`${stepIndexLabel} must have a non-empty string 'id'.`);
+    } else {
+      if (seenStepIds.has(s.id)) {
+        errors.push(`Duplicate step ID '${s.id}' found in plan.`);
+      } else {
+        seenStepIds.add(s.id);
+        stepMap.set(s.id, s);
+      }
+    }
+
+    if (typeof s.purpose !== "string" || s.purpose.trim().length === 0) {
+      errors.push(`${stepIndexLabel} must have a non-empty string 'purpose'.`);
+    }
+
+    if (
+      s.toolId !== undefined &&
+      (typeof s.toolId !== "string" || s.toolId.trim().length === 0)
+    ) {
+      errors.push(
+        `${stepIndexLabel} 'toolId' must be a non-empty string if provided.`,
+      );
+    }
+
+    if (
+      typeof s.action !== "string" ||
+      !VALID_ACTION_CATEGORIES.has(s.action as ActionGoalCategory)
+    ) {
+      errors.push(
+        `${stepIndexLabel} must have a valid ActionGoalCategory 'action' (INVESTIGATION | DEVELOPMENT | VERIFICATION | RESEARCH).`,
+      );
+    }
+
+    if (
+      s.params !== undefined &&
+      (typeof s.params !== "object" ||
+        s.params === null ||
+        Array.isArray(s.params))
+    ) {
+      errors.push(`${stepIndexLabel} 'params' must be an object if provided.`);
+    }
+
+    if (s.dependsOn !== undefined) {
+      if (!Array.isArray(s.dependsOn)) {
+        errors.push(
+          `${stepIndexLabel} 'dependsOn' must be an array of step IDs if provided.`,
+        );
+      } else {
+        for (const depId of s.dependsOn) {
+          if (typeof depId !== "string" || depId.trim().length === 0) {
+            errors.push(
+              `${stepIndexLabel} 'dependsOn' contains an invalid non-string or empty dependency ID.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // Validate dependency existence and circular dependencies
+  for (const [stepId, step] of stepMap.entries()) {
+    const dependsOn = step.dependsOn as string[] | undefined;
+    if (Array.isArray(dependsOn)) {
+      for (const depId of dependsOn) {
+        if (!stepMap.has(depId)) {
+          errors.push(
+            `Step '${stepId}' depends on unknown step ID '${depId}'.`,
+          );
+        } else if (depId === stepId) {
+          errors.push(`Step '${stepId}' cannot depend on itself.`);
+        }
+      }
+    }
+  }
+
+  // Check for circular dependencies using DFS graph cycle detection
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  function hasCycle(currentId: string, path: string[]): boolean {
+    visiting.add(currentId);
+    path.push(currentId);
+
+    const step = stepMap.get(currentId);
+    const deps = (step?.dependsOn as string[]) || [];
+
+    for (const depId of deps) {
+      if (!stepMap.has(depId)) continue;
+      if (visiting.has(depId)) {
+        const cyclePath = [...path.slice(path.indexOf(depId)), depId].join(
+          " -> ",
+        );
+        errors.push(`Circular dependency detected: ${cyclePath}`);
+        return true;
+      }
+      if (!visited.has(depId)) {
+        if (hasCycle(depId, path)) return true;
+      }
+    }
+
+    visiting.delete(currentId);
+    visited.add(currentId);
+    path.pop();
+    return false;
+  }
+
+  for (const stepId of stepMap.keys()) {
+    if (!visited.has(stepId)) {
+      hasCycle(stepId, []);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
 
 export type { ActionGoalCategory };
 
@@ -372,11 +535,23 @@ export class DeterministicBrain implements Brain {
     // 1. If an action goal / verb phrase is present, classify as ACTION regardless of greetings
     // (Greeting + Action -> ACTION rule)
     if (resolvedActionGoal) {
+      const plan: BrainPlan = {
+        goal: text,
+        steps: [
+          {
+            id: "step-1",
+            purpose: `Execute ${resolvedActionGoal} goal on ${resolvedEntity ? resolvedEntity.name : "target"}`,
+            action: resolvedActionGoal,
+          },
+        ],
+      };
+
       return {
         intent: "ACTION",
         confidence: 0.95,
         reason: `Input matches actionable goal pattern (${resolvedActionGoal}${resolvedEntity ? ` on ${resolvedEntity.name}` : ""}).`,
         actionGoal: resolvedActionGoal,
+        plan,
       };
     }
 

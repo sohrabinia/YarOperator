@@ -68,12 +68,33 @@ export interface BrainInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface BrainPlanStep {
+  id: string;
+  purpose: string;
+  action: ActionGoalCategory;
+  toolId?: string;
+  params?: Record<string, unknown>;
+  dependsOn?: string[];
+}
+
+export interface BrainPlan {
+  goal: string;
+  steps: BrainPlanStep[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface BrainPlanValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
 export interface BrainResult {
   intent: BrainIntent;
   reply?: string;
   confidence?: number;
   reason?: string;
   actionGoal?: ActionGoalCategory;
+  plan?: BrainPlan;
 }
 
 export interface BrainRule {
