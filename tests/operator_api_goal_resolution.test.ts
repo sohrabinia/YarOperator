@@ -135,6 +135,9 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
       auditManager,
       assistant,
       orchestrator,
+      toolEcosystem,
+      undefined,
+      notificationManager,
     );
 
     apiHandler = new OperatorApiHandler(commandReceiver, {

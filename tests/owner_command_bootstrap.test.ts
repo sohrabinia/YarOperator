@@ -138,6 +138,8 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       assistant,
       orchestrator,
       toolEcosystem,
+      undefined,
+      notificationManager,
     );
 
     agentRegistry.registerAgent({

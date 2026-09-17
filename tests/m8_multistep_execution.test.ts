@@ -840,15 +840,11 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     expect(safeTool.executionCount).toBe(0);
   });
 
-  it("24. RealWorldAssistant path + APPROVAL_REQUIRED: Assistant workflow handles APPROVAL_REQUIRED cleanly without calling Tool.execute", async () => {
+  it("24. RealWorldAssistant path + APPROVAL_REQUIRED: Assistant and ControlledAutonomyEngine are NOT invoked, Tool.execute count is 0", async () => {
     policyEngine.setRule("terminal_execute", "APPROVAL_REQUIRED");
 
     const mockAssistant = {
-      executeWorkflow: vi.fn().mockResolvedValue({
-        success: false,
-        executedSteps: [{ status: "APPROVAL_REQUIRED" }],
-        error: "Action requires owner approval.",
-      }),
+      executeWorkflow: vi.fn(),
     } as any;
 
     orchestrator.setAssistant(mockAssistant);
@@ -862,7 +858,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     });
 
     expect(res.status).toBe("APPROVAL_REQUIRED");
-    expect(mockAssistant.executeWorkflow).toHaveBeenCalledTimes(1);
+    expect(mockAssistant.executeWorkflow).not.toHaveBeenCalled();
     expect(safeTool.executionCount).toBe(0);
   });
 

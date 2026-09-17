@@ -200,6 +200,8 @@ export class IntentBoundary {
   }
 }
 
+import { NotificationManager } from "../notification/index.js";
+
 export class OwnerCommandReceiver {
   constructor(
     private ownerManager: OwnerManager,
@@ -209,6 +211,7 @@ export class OwnerCommandReceiver {
     private orchestrator?: AgentOrchestrator,
     private toolEcosystem?: SecureToolEcosystem,
     private brain: Brain = new DeterministicBrain(),
+    private notificationManager?: NotificationManager,
   ) {}
 
   public async receiveCommand(
@@ -378,6 +381,24 @@ export class OwnerCommandReceiver {
         : stepStatus === "APPROVAL_REQUIRED"
           ? "APPROVAL_REQUIRED"
           : "BLOCKED";
+
+    if (stepStatus === "APPROVAL_REQUIRED") {
+      const notifManager =
+        this.notificationManager ||
+        (this.assistant as any)?.notificationManager;
+      if (notifManager) {
+        notifManager.notify({
+          workspaceId: input.workspaceId,
+          taskId: input.commandId,
+          type: "APPROVAL_REQUIRED",
+          priority: "HIGH",
+          title: "Action Requires Owner Approval",
+          message:
+            orchResult.reason ||
+            `Action requires approval for tool '${orchResult.resolvedToolId}'.`,
+        });
+      }
+    }
 
     return {
       commandId: input.commandId,

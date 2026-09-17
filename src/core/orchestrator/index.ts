@@ -236,7 +236,7 @@ export class AgentOrchestrator {
       }
     }
 
-    // Verify capability/tool exists in registry
+    // Verify capability/tool exists in registry and environment boundary is valid
     if (this.toolEcosystem) {
       const registry = this.toolEcosystem.getRegistry();
       if (!registry.get(toolId)) {
@@ -248,6 +248,27 @@ export class AgentOrchestrator {
           resolvedToolId: toolId,
           reason: `Tool '${toolId}' is not registered in ToolRegistry. Unknown tool rejected.`,
         };
+      }
+
+      const envMgr = (this.toolEcosystem as any).environmentManager;
+      if (envMgr && environmentId) {
+        const envCheck = envMgr.validateEnvironmentAccess(
+          environmentId,
+          workspaceId,
+          toolId,
+        );
+        if (!envCheck.valid) {
+          return {
+            accepted: false,
+            intent: "ACTION",
+            status: "BLOCKED",
+            resolvedCapability: capability,
+            resolvedToolId: toolId,
+            reason:
+              envCheck.reason ||
+              `Environment boundary check failed for environment '${environmentId}'.`,
+          };
+        }
       }
     }
 
@@ -295,6 +316,17 @@ export class AgentOrchestrator {
             resolvedCapability: capability,
             resolvedToolId: toolId,
             reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
+          };
+        }
+
+        if (ruleLevel === "APPROVAL_REQUIRED") {
+          return {
+            accepted: true,
+            intent: "ACTION",
+            status: "APPROVAL_REQUIRED",
+            resolvedCapability: capability,
+            resolvedToolId: toolId,
+            reason: `Action '${canonicalAction}' requires explicit owner approval.`,
           };
         }
       }
