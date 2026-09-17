@@ -240,7 +240,8 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
     const notifications = notificationManager.listNotifications({
       workspaceId: "yartrader",
     });
-    expect(notifications.length).toBe(0);
+    expect(notifications.length).toBeGreaterThan(0);
+    expect(notifications[0].type).toBe("APPROVAL_REQUIRED");
   });
 
   it("5. Resolved capability with BLOCKED rule fails closed immediately with BLOCKED status", async () => {

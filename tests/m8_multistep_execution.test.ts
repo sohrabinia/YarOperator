@@ -793,7 +793,13 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     spy.mockRestore();
   });
 
-  it("22. Missing required environment context fails closed", async () => {
+  it("22. Missing required environment context fails closed before Assistant, Autonomy, or Tool.execute", async () => {
+    const mockAssistant = {
+      executeWorkflow: vi.fn(),
+    } as any;
+
+    orchestrator.setAssistant(mockAssistant);
+
     const plan: BrainPlan = {
       goal: "Missing environment context plan",
       steps: [
@@ -806,7 +812,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
       ],
     };
 
-    // When environmentId is undefined, SecureToolEcosystem rejects execution fail-closed
+    // When environmentId is omitted, execution fails closed before assistant or Tool.execute
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_no_env",
       workspaceId: "ws_m8",
@@ -814,8 +820,11 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     });
 
     expect(res.success).toBe(false);
+    expect(res.status).toBe("FAILED");
+    expect(res.stopReason).toContain("Missing mandatory environment context");
     expect(res.stepResults["s1"].state).toBe("FAILED");
     expect(safeTool.executionCount).toBe(0);
+    expect(mockAssistant.executeWorkflow).not.toHaveBeenCalled();
   });
 
   it("23. RealWorldAssistant path + BLOCKED: Assistant and ControlledAutonomyEngine are NOT invoked, Tool.execute count is 0", async () => {
@@ -840,11 +849,15 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     expect(safeTool.executionCount).toBe(0);
   });
 
-  it("24. RealWorldAssistant path + APPROVAL_REQUIRED: Assistant and ControlledAutonomyEngine are NOT invoked, Tool.execute count is 0", async () => {
+  it("24. RealWorldAssistant path + APPROVAL_REQUIRED: Assistant workflow handles APPROVAL_REQUIRED cleanly without calling Tool.execute", async () => {
     policyEngine.setRule("terminal_execute", "APPROVAL_REQUIRED");
 
     const mockAssistant = {
-      executeWorkflow: vi.fn(),
+      executeWorkflow: vi.fn().mockResolvedValue({
+        success: false,
+        executedSteps: [{ status: "APPROVAL_REQUIRED" }],
+        error: "Action requires owner approval.",
+      }),
     } as any;
 
     orchestrator.setAssistant(mockAssistant);

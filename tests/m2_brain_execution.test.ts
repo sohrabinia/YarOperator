@@ -151,7 +151,6 @@ describe("M2: Brain → Existing Execution Architectural Pipeline", () => {
       brainResult,
       commandId: "cmd_act_explicit",
       workspaceId: "yartrader",
-      environmentId: "env_yartrader",
       requestedToolId: "spy_exec_tool",
       params: { mode: "explicit_target" },
       rawCommandText: "یارتریدر رو بررسی کن",
@@ -212,7 +211,6 @@ describe("M2: Brain → Existing Execution Architectural Pipeline", () => {
       brainResult,
       commandId: "cmd_comp_1",
       workspaceId: "yartrader",
-      environmentId: "env_yartrader",
       requestedToolId: "spy_exec_tool",
       rawCommandText: "یارتریدر رو بررسی کن",
     });
@@ -232,7 +230,6 @@ describe("M2: Brain → Existing Execution Architectural Pipeline", () => {
       brainResult,
       commandId: "cmd_fail_1",
       workspaceId: "yartrader",
-      environmentId: "env_yartrader",
       requestedToolId: "spy_exec_tool",
       rawCommandText: "یارتریدر رو بررسی کن",
     });

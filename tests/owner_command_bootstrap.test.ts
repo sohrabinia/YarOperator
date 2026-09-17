@@ -248,7 +248,8 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       workspaceId: "yartrader",
       taskId: "cmd_handoff_app",
     });
-    expect(notifications.length).toBe(0);
+    expect(notifications.length).toBeGreaterThan(0);
+    expect(notifications[0].type).toBe("APPROVAL_REQUIRED");
   });
 
   it("4. Missing ownerId context fails closed", async () => {

@@ -236,7 +236,7 @@ export class AgentOrchestrator {
       }
     }
 
-    // Verify capability/tool exists in registry and environment boundary is valid
+    // Verify capability/tool exists in registry
     if (this.toolEcosystem) {
       const registry = this.toolEcosystem.getRegistry();
       if (!registry.get(toolId)) {
@@ -248,27 +248,6 @@ export class AgentOrchestrator {
           resolvedToolId: toolId,
           reason: `Tool '${toolId}' is not registered in ToolRegistry. Unknown tool rejected.`,
         };
-      }
-
-      const envMgr = (this.toolEcosystem as any).environmentManager;
-      if (envMgr && environmentId) {
-        const envCheck = envMgr.validateEnvironmentAccess(
-          environmentId,
-          workspaceId,
-          toolId,
-        );
-        if (!envCheck.valid) {
-          return {
-            accepted: false,
-            intent: "ACTION",
-            status: "BLOCKED",
-            resolvedCapability: capability,
-            resolvedToolId: toolId,
-            reason:
-              envCheck.reason ||
-              `Environment boundary check failed for environment '${environmentId}'.`,
-          };
-        }
       }
     }
 
@@ -284,53 +263,96 @@ export class AgentOrchestrator {
       };
     }
 
-    const execContext: ExecutionContext = context || {
-      executionId: `exec_${commandId}`,
-      timestamp: new Date(),
-      workspaceId,
-      environmentId,
-    };
+    let canonicalAction = (params as any)?.action
+      ? `${toolId}:${(params as any).action}`
+      : toolId;
+    if (this.toolEcosystem) {
+      const tool = this.toolEcosystem.getRegistry().get(toolId);
+      if (tool && typeof tool.resolveCanonicalAction === "function") {
+        canonicalAction = tool.resolveCanonicalAction(params);
+      }
+    }
 
-    // If RealWorldAssistant is present, delegate execution to RealWorldAssistant workflow
-    if (this.assistant) {
-      if (this.policyEngine) {
-        let canonicalAction = (params as any)?.action
-          ? `${toolId}:${(params as any).action}`
-          : toolId;
-        if (this.toolEcosystem) {
-          const tool = this.toolEcosystem.getRegistry().get(toolId);
-          if (tool && typeof tool.resolveCanonicalAction === "function") {
-            canonicalAction = tool.resolveCanonicalAction(params);
-          }
-        }
+    const ruleLevel =
+      this.policyEngine.resolveSafetyLevel(toolId, canonicalAction) ||
+      "BLOCKED";
 
-        const ruleLevel =
-          this.policyEngine.resolveSafetyLevel(toolId, canonicalAction) ||
-          "BLOCKED";
+    if (ruleLevel === "BLOCKED") {
+      return {
+        accepted: false,
+        intent: "ACTION",
+        status: "BLOCKED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
+      };
+    }
 
-        if (ruleLevel === "BLOCKED") {
+    if (ruleLevel === "APPROVAL_REQUIRED") {
+      return {
+        accepted: true,
+        intent: "ACTION",
+        status: "APPROVAL_REQUIRED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason: `Action '${canonicalAction}' requires explicit owner approval.`,
+      };
+    }
+
+    // MANDATORY ENVIRONMENT CHECK: Missing required environmentId fails closed immediately for SAFE actions
+    if (
+      !environmentId ||
+      typeof environmentId !== "string" ||
+      environmentId.trim().length === 0
+    ) {
+      return {
+        accepted: false,
+        intent: "ACTION",
+        status: "FAILED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason:
+          "Missing mandatory environment context: environmentId is required for execution.",
+        error:
+          "Missing mandatory environment context: environmentId is required for execution.",
+      };
+    }
+
+    if (this.toolEcosystem) {
+      const envMgr = (this.toolEcosystem as any).environmentManager;
+      if (envMgr) {
+        const envCheck = envMgr.validateEnvironmentAccess(
+          environmentId,
+          workspaceId,
+          toolId,
+        );
+        if (!envCheck.valid) {
           return {
             accepted: false,
             intent: "ACTION",
             status: "BLOCKED",
             resolvedCapability: capability,
             resolvedToolId: toolId,
-            reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
-          };
-        }
-
-        if (ruleLevel === "APPROVAL_REQUIRED") {
-          return {
-            accepted: true,
-            intent: "ACTION",
-            status: "APPROVAL_REQUIRED",
-            resolvedCapability: capability,
-            resolvedToolId: toolId,
-            reason: `Action '${canonicalAction}' requires explicit owner approval.`,
+            reason:
+              envCheck.reason ||
+              `Environment boundary check failed for environment '${environmentId}'.`,
+            error:
+              envCheck.reason ||
+              `Environment boundary check failed for environment '${environmentId}'.`,
           };
         }
       }
+    }
 
+    const execContext: ExecutionContext = context || {
+      executionId: `exec_${commandId}`,
+      timestamp: new Date(),
+      workspaceId,
+      environmentId: environmentId || `env_${workspaceId}`,
+    };
+
+    // If RealWorldAssistant is present, ONLY explicit SAFE actions with valid environment delegate to RealWorldAssistant workflow
+    if (this.assistant) {
       const goal: AssistantGoal = {
         id: commandId,
         workspaceId,
@@ -370,43 +392,6 @@ export class AgentOrchestrator {
           error: astRes?.error || "Execution failed in assistant runtime.",
         };
       }
-    }
-
-    let canonicalAction = (params as any)?.action
-      ? `${toolId}:${(params as any).action}`
-      : toolId;
-    if (this.toolEcosystem) {
-      const tool = this.toolEcosystem.getRegistry().get(toolId);
-      if (tool && typeof tool.resolveCanonicalAction === "function") {
-        canonicalAction = tool.resolveCanonicalAction(params);
-      }
-    }
-
-    // Evaluate Policy rule directly if Assistant not present
-    const ruleLevel =
-      this.policyEngine.resolveSafetyLevel(toolId, canonicalAction) ||
-      "BLOCKED";
-
-    if (ruleLevel === "BLOCKED") {
-      return {
-        accepted: false,
-        intent: "ACTION",
-        status: "BLOCKED",
-        resolvedCapability: capability,
-        resolvedToolId: toolId,
-        reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
-      };
-    }
-
-    if (ruleLevel === "APPROVAL_REQUIRED") {
-      return {
-        accepted: true,
-        intent: "ACTION",
-        status: "APPROVAL_REQUIRED",
-        resolvedCapability: capability,
-        resolvedToolId: toolId,
-        reason: `Action '${canonicalAction}' requires explicit owner approval.`,
-      };
     }
 
     if (!this.toolEcosystem) {
@@ -585,6 +570,22 @@ export class AgentOrchestrator {
         stepResults[currentStep.id].state = "RUNNING";
 
         const envId = planContext.environmentId || context?.environmentId;
+
+        if (!envId || typeof envId !== "string" || envId.trim().length === 0) {
+          stepStates.set(currentStep.id, "FAILED");
+          stepResults[currentStep.id] = {
+            stepId: currentStep.id,
+            purpose: currentStep.purpose,
+            action: currentStep.action,
+            state: "FAILED",
+            error:
+              "Missing mandatory environment context: environmentId is required for execution.",
+          };
+          stoppedEarly = true;
+          stopReason = `Step '${currentStep.id}' failed: Missing mandatory environment context: environmentId is required for execution.`;
+          currentStepFailedOrBlocked = true;
+          break;
+        }
 
         const stepReq: OrchestrationRequest = {
           brainResult: {
