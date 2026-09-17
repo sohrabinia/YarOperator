@@ -67,8 +67,20 @@ export function validateBrainPlan(plan: unknown): BrainPlanValidationResult {
       );
     }
 
-    if (typeof s.action !== "string" || s.action.trim().length === 0) {
-      errors.push(`${stepIndexLabel} must have a non-empty string 'action'.`);
+    const validActionCategories: ActionGoalCategory[] = [
+      "INVESTIGATION",
+      "DEVELOPMENT",
+      "VERIFICATION",
+      "RESEARCH",
+    ];
+
+    if (
+      typeof s.action !== "string" ||
+      !validActionCategories.includes(s.action as ActionGoalCategory)
+    ) {
+      errors.push(
+        `${stepIndexLabel} must have a valid ActionGoalCategory 'action' (INVESTIGATION | DEVELOPMENT | VERIFICATION | RESEARCH).`,
+      );
     }
 
     if (
@@ -529,7 +541,7 @@ export class DeterministicBrain implements Brain {
           {
             id: "step-1",
             purpose: `Execute ${resolvedActionGoal} goal on ${resolvedEntity ? resolvedEntity.name : "target"}`,
-            action: resolvedActionGoal.toLowerCase(),
+            action: resolvedActionGoal,
           },
         ],
       };

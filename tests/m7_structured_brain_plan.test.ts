@@ -25,13 +25,13 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
           {
             id: "step-1",
             purpose: "Check system logs and metrics",
-            action: "investigation",
+            action: "INVESTIGATION",
             params: { target: "system" },
           },
           {
             id: "step-2",
             purpose: "Verify service health",
-            action: "verification",
+            action: "VERIFICATION",
             dependsOn: ["step-1"],
           },
         ],
@@ -129,7 +129,7 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
         "Step[0] must have a non-empty string 'purpose'.",
       );
       expect(res.errors).toContain(
-        "Step[0] must have a non-empty string 'action'.",
+        "Step[0] must have a valid ActionGoalCategory 'action' (INVESTIGATION | DEVELOPMENT | VERIFICATION | RESEARCH).",
       );
     });
 
@@ -140,7 +140,7 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
           {
             id: "s1",
             purpose: "p",
-            action: "a",
+            action: "INVESTIGATION",
             toolId: "  ",
           },
         ],
@@ -150,6 +150,25 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
       expect(res.valid).toBe(false);
       expect(res.errors).toContain(
         "Step[0] 'toolId' must be a non-empty string if provided.",
+      );
+    });
+
+    it("should reject steps with unsupported ActionGoalCategory action string", () => {
+      const planInvalidAction = {
+        goal: "Test invalid action category",
+        steps: [
+          {
+            id: "s1",
+            purpose: "p",
+            action: "unsupported_custom_action",
+          },
+        ],
+      };
+
+      const res = validateBrainPlan(planInvalidAction);
+      expect(res.valid).toBe(false);
+      expect(res.errors).toContain(
+        "Step[0] must have a valid ActionGoalCategory 'action' (INVESTIGATION | DEVELOPMENT | VERIFICATION | RESEARCH).",
       );
     });
 
@@ -364,7 +383,7 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
       // Explicit check: entity.id ("YarTrader") must NOT be converted to toolId ("yartrader")
       const step = res.plan?.steps[0];
       expect(step?.toolId).toBeUndefined();
-      expect(step?.action).toBe("investigation");
+      expect(step?.action).toBe("INVESTIGATION");
     });
 
     it("should NOT use 'system' or silent execution fallbacks for unresolved capability", () => {
@@ -378,6 +397,7 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
       const step = res.plan?.steps[0];
       expect(step?.toolId).not.toBe("system");
       expect(step?.toolId).toBeUndefined();
+      expect(step?.action).toBe("VERIFICATION");
     });
   });
 });
