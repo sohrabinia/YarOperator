@@ -18,31 +18,30 @@ import { SecureToolEcosystem, ToolRegistry } from "../src/core/tools/index.js";
 
 describe("M7.1 Structured Brain Plan Contract Verification", () => {
   describe("1. Valid Structured Plan Representation & Validation", () => {
-    it("should accept a valid structured plan", () => {
-      const validPlan: BrainPlan = {
-        goal: "Investigate and resolve YarTrader issue",
+    it("should accept a canonical valid semantic plan with NO toolId", () => {
+      const validSemanticPlan: BrainPlan = {
+        goal: "Investigate system status",
         steps: [
           {
             id: "step-1",
-            purpose: "Check system status",
-            toolId: "git_operate",
-            action: "status",
-            params: { repo: "YarTrader" },
+            purpose: "Check system logs and metrics",
+            action: "investigation",
+            params: { target: "system" },
           },
           {
             id: "step-2",
-            purpose: "Run test suite",
-            toolId: "terminal_execute",
-            action: "run_test",
+            purpose: "Verify service health",
+            action: "verification",
             dependsOn: ["step-1"],
           },
         ],
         metadata: { source: "test" },
       };
 
-      const res = validateBrainPlan(validPlan);
+      const res = validateBrainPlan(validSemanticPlan);
       expect(res.valid).toBe(true);
       expect(res.errors).toHaveLength(0);
+      expect(validSemanticPlan.steps[0].toolId).toBeUndefined();
     });
   });
 
