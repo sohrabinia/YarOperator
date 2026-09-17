@@ -95,6 +95,7 @@ export interface BrainResult {
   reason?: string;
   actionGoal?: ActionGoalCategory;
   plan?: BrainPlan;
+  metadata?: Record<string, unknown>;
 }
 
 export interface BrainRule {
