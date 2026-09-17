@@ -11,6 +11,8 @@
 ## 2. Current Architecture
 
 - **BRAIN ≠ HANDS**: Reasoning/planning (Brain) is strictly separated from execution tool primitives (Hands). The reasoning engine cannot directly access the OS, filesystem, network, terminal, or browser.
+- **Canonical Flow Boundary**:
+  `USER → BRAIN → STRUCTURED PLAN → ORCHESTRATOR → POLICY/APPROVAL → HANDS`
 - **Governed Execution Pipeline**:
   `WorkflowEngine -> ExecutionEngine -> PolicyEngine -> ApprovalManager -> ToolRegistry -> Tool -> Adapter`
 - **Intent Boundary & Brain Contract**: `IntentBoundary` implements `Brain` contract (`BrainInput`, `BrainResult`, `BrainIntent`, `BrainRule`, `BrainProvider`, `Brain`) in `src/core/contracts/index.ts` to deterministically classify inputs into `CONVERSATION` or `ACTION`. Conversational requests route cleanly with `resolvedCapability: "conversation"` without invoking tools or `PolicyEngine`.
@@ -55,12 +57,12 @@
 
 ## 5. In-Progress Work
 
-- **M7 Brain Planning**: COMPLETE & MERGED on `main` at commit `d31315e6b2d30937cdfc2f22ed843e6caab186d4`.
+- **None**: M7 Brain Planning is COMPLETE & MERGED on `main` at commit `d31315e6b2d30937cdfc2f22ed843e6caab186d4`. No active implementation work is currently in progress.
 
 ## 6. Known Gaps / Blockers
 
 - **Phase 8.3+**: Phase 8.3 (Durable Retry & Continuation) and subsequent roadmap phases have not been started.
-- **Not Implemented in M1**: LLM/AI Provider integration, Brain -> Orchestrator execution integration (scheduled for M2), Browser automation, Vector/Semantic Memory.
+- **M8 Controlled Multi-Step Execution**: M8 multi-step execution orchestration has not been started. M7 provides execution-free semantic planning only; M8 will own multi-step governed execution.
 - **Browser Driver Dependency**: `BrowserTool` requires Playwright binaries installed on host to execute browser automation; fails closed safely as `NOT_CONFIGURED` if absent.
 - **Mobile Reverse Proxy Verification**: IIS ARR reverse proxy mobile routing under custom subdomains requires live infrastructure verification (AGENTS.md Stop Condition 8).
 
@@ -86,10 +88,10 @@
 ## 9. Current Git Baseline
 
 - **Repository Identity**: `sohrabinia/YarOperator`
-- **Base Branch**: `main` (tracking branch `jules-14175115289222590379-5c0583f8`)
-- **HEAD SHA**: `f5428bf76da1e95d9bbe7a04a2cadf7c7a481f42`
-- **Origin Main SHA**: `f5428bf76da1e95d9bbe7a04a2cadf7c7a481f42`
-- **Latest Verified Commit**: `f5428bf` Merge pull request #19 from sohrabinia/jules-8574882851843623838-e8b8dc10 ("Fix YarOperator Conversation / Action Intent Boundary")
+- **Base Branch**: `main`
+- **HEAD SHA**: `d31315e6b2d30937cdfc2f22ed843e6caab186d4`
+- **Origin Main SHA**: `d31315e6b2d30937cdfc2f22ed843e6caab186d4`
+- **Latest Verified Commit**: `d31315e` Merge pull request #34 from sohrabinia/feat/m7-2-deterministic-semantic-plan-synthesis-5038023015229001369 ("feat(brain): M7.2 deterministic semantic plan synthesis")
 
 ## 10. Verification Rules
 
@@ -105,11 +107,23 @@
 ## 11. Next Allowed Work
 
 - Scope is strictly governed by `PROJECT_STATE.md` and approved Phase A architectural plans.
-- **Next Official Roadmap Target**: Phase 8.3 (Durable Retry & Continuation) or Phase 9 (Identity Migration) as directed by CTO/Owner.
+- **Next Official Roadmap Target**: M8 Controlled Multi-Step Execution, Phase 8.3 (Durable Retry & Continuation), or Phase 9 (Identity Migration) as directed by CTO/Owner.
 - Any work must be explicitly authorized and requires prior owner approval on plan and architecture before execution.
 
 ## 12. Change History
 
+- **Date**: 2026-09-17
+  **Change / PR**: PR #34 (Merge commit `d31315e6b2d30937cdfc2f22ed843e6caab186d4`)
+  **Status**: COMPLETED & MERGED
+  **Purpose**: M7.2 Deterministic Semantic Plan Synthesis & M7 Brain Planning Completion
+  **Verified SHA**: `d31315e6b2d30937cdfc2f22ed843e6caab186d4`
+  **Short Result**: Implemented deterministic multi-step semantic plan synthesis and fail-closed decomposition in `DeterministicBrain` (`src/core/brain/index.ts`), validated via `validateBrainPlan()`, maintaining zero execution authority (`toolId === undefined`) and complete separation of Brain reasoning from Hands tool execution.
+- **Date**: 2026-09-17
+  **Change / PR**: PR #33 (Merge commit `cba9563c7d8f9237cad7187f723fd1d04b05ad2c`)
+  **Status**: COMPLETED & MERGED
+  **Purpose**: M7.1 Structured Brain Plan Contract
+  **Verified SHA**: `cba9563c7d8f9237cad7187f723fd1d04b05ad2c`
+  **Short Result**: Established `BrainPlan`, `BrainPlanStep`, and fail-closed `validateBrainPlan()` validator contract.
 - **Date**: 2026-09-15
   **Change / PR**: PR #19 (Merge commit `f5428bf76da1e95d9bbe7a04a2cadf7c7a481f42`)
   **Status**: COMPLETED & MERGED
