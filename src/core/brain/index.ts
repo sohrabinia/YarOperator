@@ -204,6 +204,7 @@ export class OperatorKnowledgeBase {
         "پروژه یارتریدر",
         "یارتریدر پروژه",
         "اون یار تریدر",
+        "تریدر",
       ],
     },
     {
@@ -230,6 +231,7 @@ export class OperatorKnowledgeBase {
         "سایت املاک‌باشی",
         "سایت املاک باشی",
         "سایت املاکباشی",
+        "املاک",
       ],
     },
     {
@@ -244,17 +246,113 @@ export class OperatorKnowledgeBase {
         "repository",
         "ریپازیتوری",
         "مخزن",
+        "branch",
+        "برنچ",
+        "pr",
+        "pull request",
+        "پول ریکوئست",
+        "commit",
+        "کامیت",
       ],
     },
     {
       id: "Server",
       name: "Server",
-      aliases: ["server", "سرور", "سرورم", "سرور پروژه", "سرورها"],
+      aliases: [
+        "server",
+        "سرور",
+        "سرورم",
+        "سرور پروژه",
+        "سرورها",
+        "iis",
+        "process",
+        "پروسس",
+        "port",
+        "پورت",
+        "service",
+        "سرویس",
+      ],
     },
     {
       id: "Production",
       name: "Production",
       aliases: ["production", "پروداکشن", "محیط پروداکشن"],
+    },
+    {
+      id: "Database",
+      name: "Database",
+      aliases: [
+        "database",
+        "db",
+        "دیتابیس",
+        "پایگاه داده",
+        "backup",
+        "بکاپ",
+        "بک آپ",
+      ],
+    },
+    {
+      id: "TradingDomain",
+      name: "TradingDomain",
+      aliases: [
+        "mt5",
+        "metatrader",
+        "متاتریدر",
+        "xauusd",
+        "طلا",
+        "نماد طلا",
+        "استراتژی",
+        "strategy",
+      ],
+    },
+    {
+      id: "JulesWorker",
+      name: "JulesWorker",
+      aliases: ["jules", "جولز", "ژول", "ورکر", "worker"],
+    },
+  ];
+
+  public static readonly restrictionPatterns: Array<{
+    flag: string;
+    keywords: string[];
+  }> = [
+    {
+      flag: "NO_MODIFY",
+      keywords: [
+        "تغییر نده",
+        "دست نزن",
+        "اصلاح نکن",
+        "دستکاری نکن",
+        "تغییر ندهید",
+        "do not modify",
+        "do not change",
+        "don't change",
+        "no change",
+      ],
+    },
+    {
+      flag: "NO_MERGE",
+      keywords: [
+        "مرج نکن",
+        "مرج نکو",
+        "ادغام نکن",
+        "do not merge",
+        "don't merge",
+      ],
+    },
+    {
+      flag: "NO_COMMIT",
+      keywords: [
+        "کامیت نکن",
+        "commit نکن",
+        "چیزی کامیت نکن",
+        "do not commit",
+        "don't commit",
+      ],
+    },
+    {
+      flag: "ONLY_READ_OR_TEST",
+      keywords: ["فقط", "صرفا", "صرفاً", "only"],
     },
   ];
 
@@ -331,57 +429,8 @@ export class OperatorKnowledgeBase {
         "check the status",
         "check system status",
         "status",
-      ],
-    },
-    {
-      category: "DEVELOPMENT",
-      phrases: [
-        "درست کن",
-        "درستش کن",
-        "اصلاح کن",
-        "اصلاحش کن",
-        "رفع کن",
-        "رفعش کن",
-        "حل کن",
-        "مشکلش رو حل کن",
-        "باگ رو حل کن",
-        "باگ رو برطرف کن",
-        "باگ را برطرف کن",
-        "باگ را حل کن",
-        "مشکل را حل کن",
-        "برطرفش کن",
-        "برطرف کن",
-        "تغییر بده",
-        "تغییرش بده",
-        "کدش رو اصلاح کن",
-        "کد رو اصلاح کن",
-        "اضافه کن",
-        "حذف کن",
-        "پیاده‌سازی کن",
-        "ارتقا بده",
-        "ارتقاش بده",
-        "به‌روزرسانی کن",
-        "آپدیتش کن",
-        "بهبودش بده",
-        "بساز",
-        "ایجاد کن",
-        "ویرایش کن",
-        "fix",
-        "repair",
-        "correct",
-        "change",
-        "modify",
-        "implement",
-        "add",
-        "build",
-        "create",
-        "create pr",
-        "create pull request",
-        "open pr",
-        "make pr",
-        "improve",
-        "upgrade",
-        "update",
+        "logs رو بررسی کن",
+        "logs رو چک کن",
       ],
     },
     {
@@ -415,6 +464,61 @@ export class OperatorKnowledgeBase {
         "validate",
         "confirm",
         "make sure it works",
+        "verify کن",
+        "run کن",
+      ],
+    },
+    {
+      category: "DEVELOPMENT",
+      phrases: [
+        "درست کن",
+        "درستش کن",
+        "اصلاح کن",
+        "اصلاحش کن",
+        "رفع کن",
+        "رفعش کن",
+        "حل کن",
+        "مشکلش رو حل کن",
+        "باگ رو حل کن",
+        "باگ رو برطرف کن",
+        "باگ را برطرف کن",
+        "باگ را حل کن",
+        "مشکل را حل کن",
+        "مشکل رو حل کن",
+        "کد رو اصلاح کن",
+        "برطرفش کن",
+        "برطرف کن",
+        "تغییر بده",
+        "تغییرش بده",
+        "کدش رو اصلاح کن",
+        "اضافه کن",
+        "حذف کن",
+        "پیاده‌سازی کن",
+        "ارتقا بده",
+        "ارتقاش بده",
+        "به‌روزرسانی کن",
+        "آپدیتش کن",
+        "بهبودش بده",
+        "بساز",
+        "ایجاد کن",
+        "ویرایش کن",
+        "fix",
+        "repair",
+        "correct",
+        "change",
+        "modify",
+        "implement",
+        "add",
+        "build",
+        "build کن",
+        "create",
+        "create pr",
+        "create pull request",
+        "open pr",
+        "make pr",
+        "improve",
+        "upgrade",
+        "update",
       ],
     },
   ];
@@ -478,6 +582,20 @@ export class OperatorKnowledgeBase {
       }
     }
     return undefined;
+  }
+
+  public static resolveRestrictions(input: string): string[] {
+    const normInput = Normalizer.normalize(input);
+    const flags: string[] = [];
+    for (const pattern of this.restrictionPatterns) {
+      const match = pattern.keywords.some((kw) =>
+        normInput.includes(Normalizer.normalize(kw)),
+      );
+      if (match) {
+        flags.push(pattern.flag);
+      }
+    }
+    return flags;
   }
 
   public static resolveActionGoal(
@@ -604,6 +722,7 @@ export class DeterministicBrain implements Brain {
     // 1. If an action goal / verb phrase is present for single segment
     const resolvedActionGoal = OperatorKnowledgeBase.resolveActionGoal(text);
     const resolvedEntity = OperatorKnowledgeBase.resolveEntity(text);
+    const restrictions = OperatorKnowledgeBase.resolveRestrictions(text);
 
     if (resolvedActionGoal) {
       const plan: BrainPlan = {
@@ -625,6 +744,7 @@ export class DeterministicBrain implements Brain {
           reason: `Input matches actionable goal pattern (${resolvedActionGoal}${resolvedEntity ? ` on ${resolvedEntity.name}` : ""}).`,
           actionGoal: resolvedActionGoal,
           plan,
+          ...(restrictions.length > 0 ? { metadata: { restrictions } } : {}),
         };
       } else {
         return {
@@ -640,7 +760,12 @@ export class DeterministicBrain implements Brain {
     for (const pattern of DeterministicBrain.conversationalPatterns) {
       const matchesPattern = pattern.keywords.some((kw) => {
         const normKw = Normalizer.normalize(kw);
-        return normText.includes(normKw);
+        return (
+          normText === normKw ||
+          normText.startsWith(normKw + " ") ||
+          normText.endsWith(" " + normKw) ||
+          normText.includes(" " + normKw + " ")
+        );
       });
       if (matchesPattern) {
         return {
