@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    "src/**/*",
+    "tests/m7_structured_brain_plan.test.ts",
+    "tests/m7_2_deterministic_semantic_plan_synthesis.test.ts",
+    "tests/owner_language_vocabulary.test.ts",
+    "tests/brain.test.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}
