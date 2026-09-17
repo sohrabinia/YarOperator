@@ -174,4 +174,16 @@ describe("Owner Language Vocabulary v1.1 Integration Suite", () => {
 
     expect(res1).toEqual(res2);
   });
+
+  it("11. Plain 'build' and 'build کن' both resolve to DEVELOPMENT action category", () => {
+    const plainBuildRes = brain.interpret({ rawCommandText: "build" });
+    expect(plainBuildRes.intent).toBe("ACTION");
+    expect(plainBuildRes.actionGoal).toBe("DEVELOPMENT");
+    expect(plainBuildRes.plan?.steps[0].action).toBe("DEVELOPMENT");
+
+    const buildKonRes = brain.interpret({ rawCommandText: "build کن" });
+    expect(buildKonRes.intent).toBe("ACTION");
+    expect(buildKonRes.actionGoal).toBe("DEVELOPMENT");
+    expect(buildKonRes.plan?.steps[0].action).toBe("DEVELOPMENT");
+  });
 });

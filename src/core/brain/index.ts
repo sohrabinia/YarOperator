@@ -474,6 +474,7 @@ export class OperatorKnowledgeBase {
         "modify",
         "implement",
         "add",
+        "build",
         "build کن",
         "create",
         "create pr",
@@ -601,15 +602,21 @@ export class OperatorKnowledgeBase {
     input: string,
   ): ActionGoalCategory | undefined {
     const normInput = Normalizer.normalize(input);
+    let bestMatchCategory: ActionGoalCategory | undefined = undefined;
+    let maxMatchLength = 0;
+
     for (const vocab of this.actionVocabularies) {
       for (const phrase of vocab.phrases) {
         const normPhrase = Normalizer.normalize(phrase);
         if (normInput.includes(normPhrase)) {
-          return vocab.category;
+          if (normPhrase.length > maxMatchLength) {
+            maxMatchLength = normPhrase.length;
+            bestMatchCategory = vocab.category;
+          }
         }
       }
     }
-    return undefined;
+    return bestMatchCategory;
   }
 }
 
