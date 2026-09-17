@@ -434,6 +434,41 @@ export class OperatorKnowledgeBase {
       ],
     },
     {
+      category: "VERIFICATION",
+      phrases: [
+        "تست کن",
+        "تستش کن",
+        "تست بگیر",
+        "تست‌ها رو اجرا کن",
+        "صحتش رو بررسی کن",
+        "مطمئن شو درست کار می‌کنه",
+        "چک کن درست شده",
+        "بررسی کن سالمه",
+        "اعتبارسنجی کن",
+        "تأیید کن",
+        "build بگیر",
+        "lint بگیر",
+        "چک نهایی کن",
+        "ببین درست شده یا نه",
+        "اجرا کن",
+        "ران کن",
+        "انجام بده",
+        "انجام بدهید",
+        "test",
+        "run tests",
+        "run command",
+        "run",
+        "execute command",
+        "execute",
+        "verify",
+        "validate",
+        "confirm",
+        "make sure it works",
+        "verify کن",
+        "run کن",
+      ],
+    },
+    {
       category: "DEVELOPMENT",
       phrases: [
         "درست کن",
@@ -484,41 +519,6 @@ export class OperatorKnowledgeBase {
         "improve",
         "upgrade",
         "update",
-      ],
-    },
-    {
-      category: "VERIFICATION",
-      phrases: [
-        "تست کن",
-        "تستش کن",
-        "تست بگیر",
-        "تست‌ها رو اجرا کن",
-        "صحتش رو بررسی کن",
-        "مطمئن شو درست کار می‌کنه",
-        "چک کن درست شده",
-        "بررسی کن سالمه",
-        "اعتبارسنجی کن",
-        "تأیید کن",
-        "build بگیر",
-        "lint بگیر",
-        "چک نهایی کن",
-        "ببین درست شده یا نه",
-        "اجرا کن",
-        "ران کن",
-        "انجام بده",
-        "انجام بدهید",
-        "test",
-        "run tests",
-        "run command",
-        "run",
-        "execute command",
-        "execute",
-        "verify",
-        "validate",
-        "confirm",
-        "make sure it works",
-        "verify کن",
-        "run کن",
       ],
     },
   ];
@@ -602,21 +602,15 @@ export class OperatorKnowledgeBase {
     input: string,
   ): ActionGoalCategory | undefined {
     const normInput = Normalizer.normalize(input);
-    let bestMatchCategory: ActionGoalCategory | undefined = undefined;
-    let maxMatchLength = 0;
-
     for (const vocab of this.actionVocabularies) {
       for (const phrase of vocab.phrases) {
         const normPhrase = Normalizer.normalize(phrase);
         if (normInput.includes(normPhrase)) {
-          if (normPhrase.length > maxMatchLength) {
-            maxMatchLength = normPhrase.length;
-            bestMatchCategory = vocab.category;
-          }
+          return vocab.category;
         }
       }
     }
-    return bestMatchCategory;
+    return undefined;
   }
 }
 
