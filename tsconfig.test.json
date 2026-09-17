@@ -4,10 +4,7 @@
     "noEmit": true
   },
   "include": [
-    "src/core/contracts/index.ts",
-    "src/core/brain/index.ts",
-    "tests/m7_1_structured_brain_plan_contract.test.ts",
-    "tests/m7_2_deterministic_semantic_plan_synthesis.test.ts",
-    "tests/owner_language_vocabulary.test.ts"
+    "src/**/*",
+    "tests/**/*"
   ]
 }
