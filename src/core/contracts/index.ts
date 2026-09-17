@@ -114,3 +114,35 @@ export interface BrainProvider {
 export interface Brain {
   interpret(input: BrainInput): Promise<BrainResult> | BrainResult;
 }
+
+export type StepExecutionState =
+  | "PENDING"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "BLOCKED"
+  | "APPROVAL_REQUIRED"
+  | "SKIPPED";
+
+export interface StepExecutionResult {
+  stepId: string;
+  purpose: string;
+  action: ActionGoalCategory;
+  state: StepExecutionState;
+  resolvedCapability?: string;
+  resolvedToolId?: string;
+  output?: unknown;
+  error?: string;
+  reason?: string;
+  skippedDueToDependency?: string;
+}
+
+export interface PlanExecutionResult {
+  goal: string;
+  success: boolean;
+  status: "COMPLETED" | "FAILED" | "BLOCKED" | "APPROVAL_REQUIRED" | "PARTIAL";
+  executionOrder: string[];
+  stepResults: Record<string, StepExecutionResult>;
+  stoppedEarly: boolean;
+  stopReason?: string;
+}

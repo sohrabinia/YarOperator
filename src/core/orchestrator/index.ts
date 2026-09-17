@@ -1,8 +1,13 @@
 import { AgentRegistry, RegisteredAgent } from "../agent/index.js";
+import { validateBrainPlan } from "../brain/index.js";
 import {
   BrainResult,
   BrainIntent,
   ExecutionContext,
+  BrainPlan,
+  PlanExecutionResult,
+  StepExecutionResult,
+  StepExecutionState,
 } from "../contracts/index.js";
 import { PolicyEngine } from "../policy/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
@@ -139,7 +144,50 @@ export class AgentOrchestrator {
       };
     }
 
-    // 3. ACTION Intent Resolution via CapabilityResolver
+    // 3. Structured BrainPlan handling
+    if (
+      brainResult.plan &&
+      brainResult.plan.steps &&
+      brainResult.plan.steps.length > 0 &&
+      !request.requestedToolId &&
+      !request.targetCapability
+    ) {
+      const planRes = await this.orchestratePlan(
+        brainResult.plan,
+        {
+          commandId,
+          workspaceId,
+          environmentId,
+        },
+        context,
+      );
+
+      const firstStepId =
+        planRes.executionOrder[0] || brainResult.plan.steps[0]?.id;
+      const firstStepRes = firstStepId
+        ? planRes.stepResults[firstStepId]
+        : undefined;
+
+      return {
+        accepted: planRes.success || planRes.status === "APPROVAL_REQUIRED",
+        intent: "ACTION",
+        status:
+          planRes.status === "COMPLETED"
+            ? "COMPLETED"
+            : planRes.status === "APPROVAL_REQUIRED"
+              ? "APPROVAL_REQUIRED"
+              : planRes.status === "BLOCKED"
+                ? "BLOCKED"
+                : "FAILED",
+        reason: planRes.stopReason,
+        resolvedCapability: firstStepRes?.resolvedCapability,
+        resolvedToolId: firstStepRes?.resolvedToolId,
+        output: planRes,
+        error: planRes.success ? undefined : planRes.stopReason,
+      };
+    }
+
+    // 4. ACTION Intent Resolution via CapabilityResolver
     const capRes = this.capabilityResolver.resolve({
       brainResult,
       workspaceId,
@@ -385,5 +433,265 @@ export class AgentOrchestrator {
         error: errorMsg,
       };
     }
+  }
+
+  async orchestratePlan(
+    plan: BrainPlan,
+    planContext: {
+      commandId: string;
+      workspaceId: string;
+      environmentId?: string;
+    },
+    context?: ExecutionContext,
+  ): Promise<PlanExecutionResult> {
+    const valRes = validateBrainPlan(plan);
+    if (!valRes.valid) {
+      return {
+        goal: plan?.goal || "Invalid Plan",
+        success: false,
+        status: "FAILED",
+        executionOrder: [],
+        stepResults: {},
+        stoppedEarly: true,
+        stopReason: `Plan validation failed: ${valRes.errors.join("; ")}`,
+      };
+    }
+
+    const stepResults: Record<string, StepExecutionResult> = {};
+    const stepStates = new Map<string, StepExecutionState>();
+    const executionOrder: string[] = [];
+
+    for (const step of plan.steps) {
+      stepStates.set(step.id, "PENDING");
+      stepResults[step.id] = {
+        stepId: step.id,
+        purpose: step.purpose,
+        action: step.action,
+        state: "PENDING",
+      };
+    }
+
+    let stoppedEarly = false;
+    let stopReason: string | undefined;
+
+    while (true) {
+      const readySteps = plan.steps.filter((step) => {
+        if (stepStates.get(step.id) !== "PENDING") return false;
+        if (!step.dependsOn || step.dependsOn.length === 0) return true;
+        return step.dependsOn.every(
+          (depId) => stepStates.get(depId) === "SUCCEEDED",
+        );
+      });
+
+      if (readySteps.length === 0) {
+        const pendingSteps = plan.steps.filter(
+          (step) => stepStates.get(step.id) === "PENDING",
+        );
+
+        if (pendingSteps.length > 0) {
+          stoppedEarly = true;
+
+          for (const step of pendingSteps) {
+            let blockingDepId: string | undefined;
+            if (step.dependsOn) {
+              blockingDepId = step.dependsOn.find((depId) => {
+                const depState = stepStates.get(depId);
+                return depState !== "SUCCEEDED";
+              });
+            }
+
+            stepStates.set(step.id, "SKIPPED");
+            stepResults[step.id] = {
+              ...stepResults[step.id],
+              state: "SKIPPED",
+              reason: blockingDepId
+                ? `Dependency '${blockingDepId}' did not complete successfully (state: ${stepStates.get(blockingDepId)}).`
+                : "Unresolvable dependency resolution.",
+              skippedDueToDependency: blockingDepId,
+            };
+          }
+
+          if (!stopReason) {
+            stopReason =
+              "Execution stopped because one or more dependencies failed, were blocked, or required approval.";
+          }
+        }
+
+        break;
+      }
+
+      let currentStepFailedOrBlocked = false;
+
+      for (const currentStep of readySteps) {
+        const currentState = stepStates.get(currentStep.id);
+        if (currentState !== "PENDING" && currentState !== undefined) {
+          continue;
+        }
+
+        stepStates.set(currentStep.id, "RUNNING");
+        stepResults[currentStep.id].state = "RUNNING";
+
+        const stepReq: OrchestrationRequest = {
+          brainResult: {
+            intent: "ACTION",
+            actionGoal: currentStep.action,
+          },
+          commandId: `${planContext.commandId}_${currentStep.id}`,
+          workspaceId: planContext.workspaceId,
+          environmentId:
+            planContext.environmentId || `env_${planContext.workspaceId}`,
+          targetCapability: undefined,
+          requestedToolId: currentStep.toolId,
+          params: currentStep.params || {},
+          rawCommandText: currentStep.purpose,
+        };
+
+        const stepExecContext: ExecutionContext = context || {
+          executionId: `exec_${planContext.commandId}_${currentStep.id}`,
+          timestamp: new Date(),
+          workspaceId: planContext.workspaceId,
+          environmentId:
+            planContext.environmentId || `env_${planContext.workspaceId}`,
+        };
+
+        const orchRes = await this.orchestrateBrainResult(
+          stepReq,
+          stepExecContext,
+        );
+
+        executionOrder.push(currentStep.id);
+
+        if (orchRes.status === "COMPLETED") {
+          stepStates.set(currentStep.id, "SUCCEEDED");
+          stepResults[currentStep.id] = {
+            stepId: currentStep.id,
+            purpose: currentStep.purpose,
+            action: currentStep.action,
+            state: "SUCCEEDED",
+            resolvedCapability: orchRes.resolvedCapability,
+            resolvedToolId: orchRes.resolvedToolId,
+            output: orchRes.output,
+          };
+        } else if (orchRes.status === "APPROVAL_REQUIRED") {
+          stepStates.set(currentStep.id, "APPROVAL_REQUIRED");
+          stepResults[currentStep.id] = {
+            stepId: currentStep.id,
+            purpose: currentStep.purpose,
+            action: currentStep.action,
+            state: "APPROVAL_REQUIRED",
+            resolvedCapability: orchRes.resolvedCapability,
+            resolvedToolId: orchRes.resolvedToolId,
+            reason: orchRes.reason || "Step requires owner approval.",
+          };
+          stoppedEarly = true;
+          stopReason = `Step '${currentStep.id}' requires approval.`;
+          currentStepFailedOrBlocked = true;
+          break;
+        } else if (orchRes.status === "BLOCKED") {
+          stepStates.set(currentStep.id, "BLOCKED");
+          stepResults[currentStep.id] = {
+            stepId: currentStep.id,
+            purpose: currentStep.purpose,
+            action: currentStep.action,
+            state: "BLOCKED",
+            resolvedCapability: orchRes.resolvedCapability,
+            resolvedToolId: orchRes.resolvedToolId,
+            reason:
+              orchRes.reason ||
+              "Step was blocked by policy or capability resolution.",
+          };
+          stoppedEarly = true;
+          stopReason = `Step '${currentStep.id}' was blocked: ${orchRes.reason || "Policy or capability failure"}`;
+          currentStepFailedOrBlocked = true;
+          break;
+        } else {
+          stepStates.set(currentStep.id, "FAILED");
+          stepResults[currentStep.id] = {
+            stepId: currentStep.id,
+            purpose: currentStep.purpose,
+            action: currentStep.action,
+            state: "FAILED",
+            resolvedCapability: orchRes.resolvedCapability,
+            resolvedToolId: orchRes.resolvedToolId,
+            error: orchRes.error || orchRes.reason || "Step execution failed.",
+          };
+          stoppedEarly = true;
+          stopReason = `Step '${currentStep.id}' failed: ${orchRes.error || orchRes.reason || "Execution failed"}`;
+          currentStepFailedOrBlocked = true;
+          break;
+        }
+      }
+
+      if (currentStepFailedOrBlocked) {
+        const remainingPending = plan.steps.filter(
+          (step) => stepStates.get(step.id) === "PENDING",
+        );
+        for (const step of remainingPending) {
+          let blockingDepId: string | undefined;
+          if (step.dependsOn) {
+            blockingDepId = step.dependsOn.find((depId) => {
+              const depState = stepStates.get(depId);
+              return depState !== "SUCCEEDED";
+            });
+          }
+
+          stepStates.set(step.id, "SKIPPED");
+          stepResults[step.id] = {
+            ...stepResults[step.id],
+            state: "SKIPPED",
+            reason: blockingDepId
+              ? `Prerequisite step '${blockingDepId}' did not succeed.`
+              : "Execution stopped early due to earlier step failure.",
+            skippedDueToDependency: blockingDepId,
+          };
+        }
+        break;
+      }
+    }
+
+    const allSucceeded = plan.steps.every(
+      (step) => stepStates.get(step.id) === "SUCCEEDED",
+    );
+
+    if (allSucceeded) {
+      return {
+        goal: plan.goal,
+        success: true,
+        status: "COMPLETED",
+        executionOrder,
+        stepResults,
+        stoppedEarly: false,
+      };
+    }
+
+    const anySucceeded = plan.steps.some(
+      (step) => stepStates.get(step.id) === "SUCCEEDED",
+    );
+
+    const hasBlocked = plan.steps.some(
+      (step) => stepStates.get(step.id) === "BLOCKED",
+    );
+
+    const hasApproval = plan.steps.some(
+      (step) => stepStates.get(step.id) === "APPROVAL_REQUIRED",
+    );
+
+    const overallStatus = anySucceeded
+      ? "PARTIAL"
+      : hasBlocked
+        ? "BLOCKED"
+        : hasApproval
+          ? "APPROVAL_REQUIRED"
+          : "FAILED";
+
+    return {
+      goal: plan.goal,
+      success: false,
+      status: overallStatus,
+      executionOrder,
+      stepResults,
+      stoppedEarly: true,
+      stopReason: stopReason || "Plan execution did not complete successfully.",
+    };
   }
 }
