@@ -8,6 +8,13 @@ import {
   ActionGoalCategory,
 } from "../contracts/index.js";
 
+const VALID_ACTION_CATEGORIES = new Set<ActionGoalCategory>([
+  "INVESTIGATION",
+  "DEVELOPMENT",
+  "VERIFICATION",
+  "RESEARCH",
+]);
+
 export function validateBrainPlan(plan: unknown): BrainPlanValidationResult {
   const errors: string[] = [];
 
@@ -67,16 +74,9 @@ export function validateBrainPlan(plan: unknown): BrainPlanValidationResult {
       );
     }
 
-    const validActionCategories: ActionGoalCategory[] = [
-      "INVESTIGATION",
-      "DEVELOPMENT",
-      "VERIFICATION",
-      "RESEARCH",
-    ];
-
     if (
       typeof s.action !== "string" ||
-      !validActionCategories.includes(s.action as ActionGoalCategory)
+      !VALID_ACTION_CATEGORIES.has(s.action as ActionGoalCategory)
     ) {
       errors.push(
         `${stepIndexLabel} must have a valid ActionGoalCategory 'action' (INVESTIGATION | DEVELOPMENT | VERIFICATION | RESEARCH).`,

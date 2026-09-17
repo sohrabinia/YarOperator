@@ -5,7 +5,6 @@ import {
   BrainInput,
   BrainResult,
   Tool,
-  ExecutionContext,
 } from "../src/core/contracts/index.js";
 import {
   validateBrainPlan,
@@ -14,7 +13,6 @@ import {
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { PolicyEngine } from "../src/core/policy/index.js";
-import { SecureToolEcosystem, ToolRegistry } from "../src/core/tools/index.js";
 
 describe("M7.1 Structured Brain Plan Contract Verification", () => {
   describe("1. Valid Structured Plan Representation & Validation", () => {
@@ -60,8 +58,7 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
           {
             id: "s1",
             purpose: "Check status",
-            toolId: "git",
-            action: "status",
+            action: "INVESTIGATION",
           },
         ],
       };
@@ -89,14 +86,12 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
           {
             id: "step-1",
             purpose: "First action",
-            toolId: "git",
-            action: "status",
+            action: "INVESTIGATION",
           },
           {
             id: "step-1",
             purpose: "Second action with same ID",
-            toolId: "terminal",
-            action: "exec",
+            action: "VERIFICATION",
           },
         ],
       };
@@ -179,8 +174,7 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
           {
             id: "s1",
             purpose: "p",
-            toolId: "t",
-            action: "a",
+            action: "INVESTIGATION",
             params: "not an object" as any,
           },
         ],
@@ -202,8 +196,7 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
           {
             id: "step-1",
             purpose: "p1",
-            toolId: "t1",
-            action: "a1",
+            action: "INVESTIGATION",
             dependsOn: ["non-existent-step"],
           },
         ],
@@ -223,8 +216,7 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
           {
             id: "step-1",
             purpose: "p1",
-            toolId: "t1",
-            action: "a1",
+            action: "INVESTIGATION",
             dependsOn: ["step-1"],
           },
         ],
@@ -242,22 +234,19 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
           {
             id: "step-1",
             purpose: "p1",
-            toolId: "t1",
-            action: "a1",
+            action: "INVESTIGATION",
             dependsOn: ["step-2"],
           },
           {
             id: "step-2",
             purpose: "p2",
-            toolId: "t2",
-            action: "a2",
+            action: "DEVELOPMENT",
             dependsOn: ["step-3"],
           },
           {
             id: "step-3",
             purpose: "p3",
-            toolId: "t3",
-            action: "a3",
+            action: "VERIFICATION",
             dependsOn: ["step-1"],
           },
         ],
