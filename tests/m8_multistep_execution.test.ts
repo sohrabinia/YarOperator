@@ -817,4 +817,77 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     expect(res.stepResults["s1"].state).toBe("FAILED");
     expect(safeTool.executionCount).toBe(0);
   });
+
+  it("23. RealWorldAssistant path + BLOCKED: Assistant and ControlledAutonomyEngine are NOT invoked, Tool.execute count is 0", async () => {
+    policyEngine.setRule("terminal_execute", "BLOCKED");
+
+    const mockAssistant = {
+      executeWorkflow: vi.fn(),
+    } as any;
+
+    orchestrator.setAssistant(mockAssistant);
+
+    const res = await orchestrator.orchestrateBrainResult({
+      brainResult: { intent: "ACTION", actionGoal: "INVESTIGATION" },
+      commandId: "cmd_ast_blocked",
+      workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
+      requestedToolId: "terminal_execute",
+    });
+
+    expect(res.status).toBe("BLOCKED");
+    expect(mockAssistant.executeWorkflow).not.toHaveBeenCalled();
+    expect(safeTool.executionCount).toBe(0);
+  });
+
+  it("24. RealWorldAssistant path + APPROVAL_REQUIRED: Assistant workflow handles APPROVAL_REQUIRED cleanly without calling Tool.execute", async () => {
+    policyEngine.setRule("terminal_execute", "APPROVAL_REQUIRED");
+
+    const mockAssistant = {
+      executeWorkflow: vi.fn().mockResolvedValue({
+        success: false,
+        executedSteps: [{ status: "APPROVAL_REQUIRED" }],
+        error: "Action requires owner approval.",
+      }),
+    } as any;
+
+    orchestrator.setAssistant(mockAssistant);
+
+    const res = await orchestrator.orchestrateBrainResult({
+      brainResult: { intent: "ACTION", actionGoal: "INVESTIGATION" },
+      commandId: "cmd_ast_app",
+      workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
+      requestedToolId: "terminal_execute",
+    });
+
+    expect(res.status).toBe("APPROVAL_REQUIRED");
+    expect(mockAssistant.executeWorkflow).toHaveBeenCalledTimes(1);
+    expect(safeTool.executionCount).toBe(0);
+  });
+
+  it("25. RealWorldAssistant path + SAFE: Assistant delegation allowed after policy evaluation", async () => {
+    policyEngine.setRule("terminal_execute", "SAFE");
+
+    const mockAssistant = {
+      executeWorkflow: vi.fn().mockResolvedValue({
+        success: true,
+        executedSteps: [{ status: "EXECUTED" }],
+        evidence: { done: true },
+      }),
+    } as any;
+
+    orchestrator.setAssistant(mockAssistant);
+
+    const res = await orchestrator.orchestrateBrainResult({
+      brainResult: { intent: "ACTION", actionGoal: "INVESTIGATION" },
+      commandId: "cmd_ast_safe",
+      workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
+      requestedToolId: "terminal_execute",
+    });
+
+    expect(res.status).toBe("COMPLETED");
+    expect(mockAssistant.executeWorkflow).toHaveBeenCalledTimes(1);
+  });
 });

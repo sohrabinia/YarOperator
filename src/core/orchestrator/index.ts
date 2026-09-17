@@ -311,7 +311,7 @@ export class AgentOrchestrator {
 
       const astRes = await this.assistant.executeWorkflow(goal, execContext);
 
-      if (astRes.success) {
+      if (astRes && astRes.success) {
         return {
           accepted: true,
           intent: "ACTION",
@@ -321,7 +321,7 @@ export class AgentOrchestrator {
           output: astRes.evidence,
         };
       } else {
-        const stepStatus = astRes.executedSteps[0]?.status;
+        const stepStatus = astRes?.executedSteps?.[0]?.status;
         const status =
           stepStatus === "APPROVAL_REQUIRED"
             ? "APPROVAL_REQUIRED"
@@ -335,7 +335,7 @@ export class AgentOrchestrator {
           status,
           resolvedCapability: capability,
           resolvedToolId: toolId,
-          error: astRes.error || "Execution failed in assistant runtime.",
+          error: astRes?.error || "Execution failed in assistant runtime.",
         };
       }
     }
