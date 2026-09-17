@@ -272,11 +272,32 @@ export class AgentOrchestrator {
 
     // If RealWorldAssistant is present, delegate execution to RealWorldAssistant workflow
     if (this.assistant) {
-      await this.policyEngine.evaluate({
-        toolId,
-        params,
-        context: execContext,
-      });
+      if (this.policyEngine) {
+        let canonicalAction = (params as any)?.action
+          ? `${toolId}:${(params as any).action}`
+          : toolId;
+        if (this.toolEcosystem) {
+          const tool = this.toolEcosystem.getRegistry().get(toolId);
+          if (tool && typeof tool.resolveCanonicalAction === "function") {
+            canonicalAction = tool.resolveCanonicalAction(params);
+          }
+        }
+
+        const ruleLevel =
+          this.policyEngine.resolveSafetyLevel(toolId, canonicalAction) ||
+          "BLOCKED";
+
+        if (ruleLevel === "BLOCKED") {
+          return {
+            accepted: false,
+            intent: "ACTION",
+            status: "BLOCKED",
+            resolvedCapability: capability,
+            resolvedToolId: toolId,
+            reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
+          };
+        }
+      }
 
       const goal: AssistantGoal = {
         id: commandId,
@@ -531,6 +552,8 @@ export class AgentOrchestrator {
         stepStates.set(currentStep.id, "RUNNING");
         stepResults[currentStep.id].state = "RUNNING";
 
+        const envId = planContext.environmentId || context?.environmentId;
+
         const stepReq: OrchestrationRequest = {
           brainResult: {
             intent: "ACTION",
@@ -538,20 +561,19 @@ export class AgentOrchestrator {
           },
           commandId: `${planContext.commandId}_${currentStep.id}`,
           workspaceId: planContext.workspaceId,
-          environmentId:
-            planContext.environmentId || `env_${planContext.workspaceId}`,
+          environmentId: envId,
           targetCapability: undefined,
           requestedToolId: currentStep.toolId,
           params: currentStep.params || {},
           rawCommandText: currentStep.purpose,
         };
 
-        const stepExecContext: ExecutionContext = context || {
+        const stepExecContext: ExecutionContext = {
           executionId: `exec_${planContext.commandId}_${currentStep.id}`,
-          timestamp: new Date(),
+          timestamp: context?.timestamp || new Date(),
           workspaceId: planContext.workspaceId,
-          environmentId:
-            planContext.environmentId || `env_${planContext.workspaceId}`,
+          environmentId: envId,
+          metadata: context?.metadata,
         };
 
         const orchRes = await this.orchestrateBrainResult(

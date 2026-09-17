@@ -180,6 +180,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_single",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(true);
@@ -213,6 +214,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_seq",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(true);
@@ -246,6 +248,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_dep_order",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(true);
@@ -276,6 +279,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_indep",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(true);
@@ -526,6 +530,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_partial",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -557,11 +562,13 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res1 = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_det_1",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     const res2 = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_det_2",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res1.success).toBe(true);
@@ -589,6 +596,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_terminal_repeat",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(true);
@@ -615,6 +623,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await taskExecutor.executeBrainPlan(plan, {
       taskId: "task_m8_1",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(true);
@@ -634,5 +643,178 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     expect(result.plan?.steps[0].action).toBe("INVESTIGATION");
     expect(result.plan?.steps[1].action).toBe("VERIFICATION");
     expect(result.plan?.steps[1].dependsOn).toEqual(["step-1"]);
+  });
+
+  it("18. Policy is evaluated independently for each executable step", async () => {
+    policyEngine.setRule("terminal_execute", "SAFE");
+    policyEngine.setRule("failing_tool", "BLOCKED");
+
+    const plan: BrainPlan = {
+      goal: "Per-step independent policy evaluation test",
+      steps: [
+        {
+          id: "step-safe",
+          purpose: "Safe step",
+          action: "INVESTIGATION",
+          toolId: "terminal_execute",
+        },
+        {
+          id: "step-blocked",
+          purpose: "Blocked step",
+          action: "DEVELOPMENT",
+          toolId: "failing_tool",
+          dependsOn: ["step-safe"],
+        },
+      ],
+    };
+
+    const res = await orchestrator.orchestratePlan(plan, {
+      commandId: "cmd_indep_policy",
+      workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
+    });
+
+    expect(res.stepResults["step-safe"].state).toBe("SUCCEEDED");
+    expect(res.stepResults["step-blocked"].state).toBe("BLOCKED");
+    expect(res.status).toBe("PARTIAL");
+    expect(res.success).toBe(false);
+  });
+
+  it("19. A later step cannot inherit authorization from an earlier step", async () => {
+    const plan: BrainPlan = {
+      goal: "Authorization inheritance prevention test",
+      steps: [
+        {
+          id: "step-authorized",
+          purpose: "Authorized SAFE step",
+          action: "INVESTIGATION",
+          toolId: "terminal_execute",
+        },
+        {
+          id: "step-unauthorized",
+          purpose: "Approval required step without approval",
+          action: "DEVELOPMENT",
+          toolId: "approval_tool",
+          dependsOn: ["step-authorized"],
+        },
+      ],
+    };
+
+    const res = await orchestrator.orchestratePlan(plan, {
+      commandId: "cmd_no_inherit",
+      workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
+    });
+
+    expect(res.stepResults["step-authorized"].state).toBe("SUCCEEDED");
+    expect(res.stepResults["step-unauthorized"].state).toBe(
+      "APPROVAL_REQUIRED",
+    );
+    expect(approvalTool.executionCount).toBe(0);
+    expect(res.success).toBe(false);
+  });
+
+  it("20. Multi-step plan cannot turn one approved step into implicit approval for another step", async () => {
+    const plan: BrainPlan = {
+      goal: "No implicit multi-step approval inheritance",
+      steps: [
+        {
+          id: "step-1-app",
+          purpose: "First approval required step",
+          action: "DEVELOPMENT",
+          toolId: "approval_tool",
+        },
+        {
+          id: "step-2-app",
+          purpose: "Second approval required step",
+          action: "DEVELOPMENT",
+          toolId: "approval_tool",
+          dependsOn: ["step-1-app"],
+        },
+      ],
+    };
+
+    const res = await orchestrator.orchestratePlan(plan, {
+      commandId: "cmd_no_multi_approval",
+      workspaceId: "ws_m8",
+    });
+
+    expect(res.stepResults["step-1-app"].state).toBe("APPROVAL_REQUIRED");
+    expect(res.stepResults["step-2-app"].state).toBe("SKIPPED");
+    expect(approvalTool.executionCount).toBe(0);
+  });
+
+  it("21. Executing step receives a distinct, deterministic per-step execution identity", async () => {
+    const capturedContexts: ExecutionContext[] = [];
+    const spy = vi
+      .spyOn(safeTool, "execute")
+      .mockImplementation(async (_params, ctx) => {
+        capturedContexts.push(ctx);
+        return { success: true, output: "ok" };
+      });
+
+    const plan: BrainPlan = {
+      goal: "Distinct execution contexts test",
+      steps: [
+        {
+          id: "step-id-1",
+          purpose: "Purpose 1",
+          action: "INVESTIGATION",
+          toolId: "terminal_execute",
+        },
+        {
+          id: "step-id-2",
+          purpose: "Purpose 2",
+          action: "VERIFICATION",
+          toolId: "terminal_execute",
+          dependsOn: ["step-id-1"],
+        },
+      ],
+    };
+
+    const res = await orchestrator.orchestratePlan(plan, {
+      commandId: "cmd_distinct_ctx",
+      workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
+    });
+
+    expect(res.success).toBe(true);
+    expect(capturedContexts).toHaveLength(2);
+    expect(capturedContexts[0].executionId).toBe(
+      "exec_cmd_distinct_ctx_step-id-1",
+    );
+    expect(capturedContexts[1].executionId).toBe(
+      "exec_cmd_distinct_ctx_step-id-2",
+    );
+    expect(capturedContexts[0].executionId).not.toBe(
+      capturedContexts[1].executionId,
+    );
+
+    spy.mockRestore();
+  });
+
+  it("22. Missing required environment context fails closed", async () => {
+    const plan: BrainPlan = {
+      goal: "Missing environment context plan",
+      steps: [
+        {
+          id: "s1",
+          purpose: "Step requiring environment",
+          action: "INVESTIGATION",
+          toolId: "terminal_execute",
+        },
+      ],
+    };
+
+    // When environmentId is undefined, SecureToolEcosystem rejects execution fail-closed
+    const res = await orchestrator.orchestratePlan(plan, {
+      commandId: "cmd_no_env",
+      workspaceId: "ws_m8",
+      // environmentId intentionally omitted
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.stepResults["s1"].state).toBe("FAILED");
+    expect(safeTool.executionCount).toBe(0);
   });
 });
