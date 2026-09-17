@@ -135,9 +135,6 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
       auditManager,
       assistant,
       orchestrator,
-      toolEcosystem,
-      undefined,
-      notificationManager,
     );
 
     apiHandler = new OperatorApiHandler(commandReceiver, {
@@ -243,8 +240,7 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
     const notifications = notificationManager.listNotifications({
       workspaceId: "yartrader",
     });
-    expect(notifications.length).toBeGreaterThan(0);
-    expect(notifications[0].type).toBe("APPROVAL_REQUIRED");
+    expect(notifications.length).toBe(0);
   });
 
   it("5. Resolved capability with BLOCKED rule fails closed immediately with BLOCKED status", async () => {

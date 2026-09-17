@@ -288,7 +288,7 @@ export class AgentOrchestrator {
       executionId: `exec_${commandId}`,
       timestamp: new Date(),
       workspaceId,
-      environmentId: environmentId || `env_${workspaceId}`,
+      environmentId,
     };
 
     // If RealWorldAssistant is present, delegate execution to RealWorldAssistant workflow

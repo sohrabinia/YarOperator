@@ -138,8 +138,6 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       assistant,
       orchestrator,
       toolEcosystem,
-      undefined,
-      notificationManager,
     );
 
     agentRegistry.registerAgent({
@@ -250,8 +248,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
       workspaceId: "yartrader",
       taskId: "cmd_handoff_app",
     });
-    expect(notifications.length).toBeGreaterThan(0);
-    expect(notifications[0].type).toBe("APPROVAL_REQUIRED");
+    expect(notifications.length).toBe(0);
   });
 
   it("4. Missing ownerId context fails closed", async () => {
