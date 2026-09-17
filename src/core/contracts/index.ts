@@ -71,8 +71,8 @@ export interface BrainInput {
 export interface BrainPlanStep {
   id: string;
   purpose: string;
-  toolId: string;
   action: string;
+  toolId?: string;
   params?: Record<string, unknown>;
   dependsOn?: string[];
 }

@@ -58,8 +58,13 @@ export function validateBrainPlan(plan: unknown): BrainPlanValidationResult {
       errors.push(`${stepIndexLabel} must have a non-empty string 'purpose'.`);
     }
 
-    if (typeof s.toolId !== "string" || s.toolId.trim().length === 0) {
-      errors.push(`${stepIndexLabel} must have a non-empty string 'toolId'.`);
+    if (
+      s.toolId !== undefined &&
+      (typeof s.toolId !== "string" || s.toolId.trim().length === 0)
+    ) {
+      errors.push(
+        `${stepIndexLabel} 'toolId' must be a non-empty string if provided.`,
+      );
     }
 
     if (typeof s.action !== "string" || s.action.trim().length === 0) {
@@ -524,7 +529,6 @@ export class DeterministicBrain implements Brain {
           {
             id: "step-1",
             purpose: `Execute ${resolvedActionGoal} goal on ${resolvedEntity ? resolvedEntity.name : "target"}`,
-            toolId: resolvedEntity ? resolvedEntity.id.toLowerCase() : "system",
             action: resolvedActionGoal.toLowerCase(),
           },
         ],

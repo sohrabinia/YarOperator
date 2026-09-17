@@ -109,14 +109,13 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
   });
 
   describe("4. Invalid/Missing Action or Tool Identity Rejection", () => {
-    it("should reject steps missing toolId, action, purpose, or id", () => {
+    it("should reject steps missing action, purpose, or id", () => {
       const planMissingFields = {
         goal: "Test missing fields",
         steps: [
           {
             id: "",
             purpose: "",
-            toolId: "",
             action: "",
           },
         ],
@@ -131,10 +130,27 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
         "Step[0] must have a non-empty string 'purpose'.",
       );
       expect(res.errors).toContain(
-        "Step[0] must have a non-empty string 'toolId'.",
-      );
-      expect(res.errors).toContain(
         "Step[0] must have a non-empty string 'action'.",
+      );
+    });
+
+    it("should reject step with empty toolId if provided", () => {
+      const planEmptyToolId = {
+        goal: "Test empty toolId",
+        steps: [
+          {
+            id: "s1",
+            purpose: "p",
+            action: "a",
+            toolId: "  ",
+          },
+        ],
+      };
+
+      const res = validateBrainPlan(planEmptyToolId);
+      expect(res.valid).toBe(false);
+      expect(res.errors).toContain(
+        "Step[0] 'toolId' must be a non-empty string if provided.",
       );
     });
 
@@ -335,20 +351,34 @@ describe("M7.1 Structured Brain Plan Contract Verification", () => {
     });
   });
 
-  describe("10. ACTION Intent Generates Valid Structured Plan Proposal", () => {
-    it("should generate a valid structured plan for actionable goal input", () => {
+  describe("10. Critical Non-Inference & Non-Fallback Boundaries", () => {
+    it("should NOT infer toolId from entity.id (e.g., entity.id -> toolId)", () => {
       const brain = new DeterministicBrain();
-      const input: BrainInput = { rawCommandText: "تست کن سیستم را" };
+      const input: BrainInput = {
+        rawCommandText: "بررسی کن وضعیت YarTrader را",
+      };
       const res = brain.interpret(input);
 
       expect(res.intent).toBe("ACTION");
-      expect(res.actionGoal).toBe("VERIFICATION");
       expect(res.plan).toBeDefined();
 
-      const valRes = validateBrainPlan(res.plan);
-      expect(valRes.valid).toBe(true);
-      expect(res.plan?.steps[0].toolId).toBeDefined();
-      expect(res.plan?.steps[0].action).toBe("verification");
+      // Explicit check: entity.id ("YarTrader") must NOT be converted to toolId ("yartrader")
+      const step = res.plan?.steps[0];
+      expect(step?.toolId).toBeUndefined();
+      expect(step?.action).toBe("investigation");
+    });
+
+    it("should NOT use 'system' or silent execution fallbacks for unresolved capability", () => {
+      const brain = new DeterministicBrain();
+      const input: BrainInput = { rawCommandText: "تست کن پروژه را" };
+      const res = brain.interpret(input);
+
+      expect(res.intent).toBe("ACTION");
+      expect(res.plan).toBeDefined();
+
+      const step = res.plan?.steps[0];
+      expect(step?.toolId).not.toBe("system");
+      expect(step?.toolId).toBeUndefined();
     });
   });
 });
