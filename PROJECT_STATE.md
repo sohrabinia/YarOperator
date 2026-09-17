@@ -49,10 +49,13 @@
 - **Phase 8.2**: Durable Scheduler (`DurableScheduler`, `tests/durable_scheduler.test.ts`, `tests/scheduler_remediated.test.ts`)
 - **PR #19**: Fix YarOperator Conversation / Action Intent Boundary (`Brain` contract, `IntentBoundary`, `OwnerCommandReceiver`, `tests/owner_command_bootstrap.test.ts`)
 - **M1 First Deterministic Brain Intelligence**: Implemented `DeterministicBrain`, `Normalizer`, and `OperatorKnowledgeBase` in `src/core/brain/index.ts` and contracts in `src/core/contracts/index.ts` for deterministic CONVERSATION vs ACTION vs AMBIGUOUS classification, Persian entity alias resolution (YarTrader, YarOperator, Amlakbashi), action vocabulary matching, and greeting replies (`tests/brain.test.ts`).
+- **M7 Brain Planning — COMPLETE**:
+  - **M7.1 Structured Brain Plan Contract (PR #33 — MERGED)**: Established `BrainPlan`, `BrainPlanStep`, and fail-closed `validateBrainPlan()` contract in `src/core/contracts/index.ts` & `src/core/brain/index.ts`.
+  - **M7.2 Deterministic Semantic Plan Synthesis (PR #34 — MERGED)**: Implemented multi-step sequential parsing and semantic decomposition in `DeterministicBrain` (`src/core/brain/index.ts`) for single-step and multi-step commands (`INVESTIGATION`, `DEVELOPMENT`, `VERIFICATION`, `RESEARCH`) with deterministic `dependsOn` linkage (`step-2 -> step-1`, `step-3 -> step-2`), fail-closed ambiguity handling (`AMBIGUOUS` with `plan: undefined`), category vocabulary collision resolution, and zero execution authority (`toolId === undefined`).
 
 ## 5. In-Progress Work
 
-- **M1 Completed**: Ready for review and PR against `main`.
+- **M7 Brain Planning**: COMPLETE & MERGED on `main` at commit `d31315e6b2d30937cdfc2f22ed843e6caab186d4`.
 
 ## 6. Known Gaps / Blockers
 
