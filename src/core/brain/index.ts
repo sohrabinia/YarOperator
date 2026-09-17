@@ -321,7 +321,11 @@ export class OperatorKnowledgeBase {
         "مشکلش رو حل کن",
         "باگ رو حل کن",
         "باگ رو برطرف کن",
+        "باگ را برطرف کن",
+        "باگ را حل کن",
+        "مشکل را حل کن",
         "برطرفش کن",
+        "برطرف کن",
         "تغییر بده",
         "تغییرش بده",
         "کدش رو اصلاح کن",
@@ -492,6 +496,9 @@ export class OperatorKnowledgeBase {
 }
 
 export class DeterministicBrain implements Brain {
+  private static readonly SEQUENTIAL_DELIMITERS =
+    /(?:\s+و\s+بعد\s+از\s+آن\s+|\s+و\s+در\s+نهایت\s+|\s+and\s+after\s+that\s+|\s+after\s+that\s+|\s+and\s+then\s+|\s+و\s+بعدش\s+|\s+و\s+بعدا\s+|\s+و\s+بعد\s+هم\s+|\s+و\s+بعد\s+|\s+و\s+سپس\s+|\s+سپس\s+|\s+بعدش\s+|\s+then\s+)/gi;
+
   private static readonly conversationalPatterns: Array<{
     keywords: string[];
     reply: string;
@@ -529,11 +536,67 @@ export class DeterministicBrain implements Brain {
     }
 
     const normText = Normalizer.normalize(text);
+
+    const rawSegments = normText
+      .split(DeterministicBrain.SEQUENTIAL_DELIMITERS)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    if (rawSegments.length > 1) {
+      const segmentGoals = rawSegments.map((seg) =>
+        OperatorKnowledgeBase.resolveActionGoal(seg),
+      );
+      const allResolved = segmentGoals.every(
+        (g): g is ActionGoalCategory => g !== undefined,
+      );
+
+      if (allResolved) {
+        const overallEntity = OperatorKnowledgeBase.resolveEntity(text);
+        const steps: BrainPlanStep[] = rawSegments.map((seg, idx) => {
+          const goal = segmentGoals[idx];
+          const entity =
+            OperatorKnowledgeBase.resolveEntity(seg) || overallEntity;
+          const stepId = `step-${idx + 1}`;
+          const step: BrainPlanStep = {
+            id: stepId,
+            purpose: `Execute ${goal} goal on ${entity ? entity.name : "target"}`,
+            action: goal,
+          };
+          if (idx > 0) {
+            step.dependsOn = [`step-${idx}`];
+          }
+          return step;
+        });
+
+        const plan: BrainPlan = {
+          goal: text,
+          steps,
+        };
+
+        const valRes = validateBrainPlan(plan);
+        if (valRes.valid) {
+          return {
+            intent: "ACTION",
+            confidence: 0.95,
+            reason: `Input matches actionable multi-step sequential plan (${steps.map((s) => s.action).join(" -> ")}).`,
+            actionGoal: steps[0].action,
+            plan,
+          };
+        } else {
+          return {
+            intent: "AMBIGUOUS",
+            confidence: 0.2,
+            reason:
+              "Synthesized multi-step plan failed validation fail-closed check.",
+          };
+        }
+      }
+    }
+
+    // 1. If an action goal / verb phrase is present for single segment
     const resolvedActionGoal = OperatorKnowledgeBase.resolveActionGoal(text);
     const resolvedEntity = OperatorKnowledgeBase.resolveEntity(text);
 
-    // 1. If an action goal / verb phrase is present, classify as ACTION regardless of greetings
-    // (Greeting + Action -> ACTION rule)
     if (resolvedActionGoal) {
       const plan: BrainPlan = {
         goal: text,
@@ -546,13 +609,23 @@ export class DeterministicBrain implements Brain {
         ],
       };
 
-      return {
-        intent: "ACTION",
-        confidence: 0.95,
-        reason: `Input matches actionable goal pattern (${resolvedActionGoal}${resolvedEntity ? ` on ${resolvedEntity.name}` : ""}).`,
-        actionGoal: resolvedActionGoal,
-        plan,
-      };
+      const valRes = validateBrainPlan(plan);
+      if (valRes.valid) {
+        return {
+          intent: "ACTION",
+          confidence: 0.95,
+          reason: `Input matches actionable goal pattern (${resolvedActionGoal}${resolvedEntity ? ` on ${resolvedEntity.name}` : ""}).`,
+          actionGoal: resolvedActionGoal,
+          plan,
+        };
+      } else {
+        return {
+          intent: "AMBIGUOUS",
+          confidence: 0.2,
+          reason:
+            "Synthesized single-step plan failed validation fail-closed check.",
+        };
+      }
     }
 
     // 2. Check for conversation patterns (CONVERSATION for pure greetings/pleasantries)
