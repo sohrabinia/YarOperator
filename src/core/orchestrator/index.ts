@@ -144,50 +144,7 @@ export class AgentOrchestrator {
       };
     }
 
-    // 3. Structured BrainPlan handling
-    if (
-      brainResult.plan &&
-      brainResult.plan.steps &&
-      brainResult.plan.steps.length > 0 &&
-      !request.requestedToolId &&
-      !request.targetCapability
-    ) {
-      const planRes = await this.orchestratePlan(
-        brainResult.plan,
-        {
-          commandId,
-          workspaceId,
-          environmentId,
-        },
-        context,
-      );
-
-      const firstStepId =
-        planRes.executionOrder[0] || brainResult.plan.steps[0]?.id;
-      const firstStepRes = firstStepId
-        ? planRes.stepResults[firstStepId]
-        : undefined;
-
-      return {
-        accepted: planRes.success || planRes.status === "APPROVAL_REQUIRED",
-        intent: "ACTION",
-        status:
-          planRes.status === "COMPLETED"
-            ? "COMPLETED"
-            : planRes.status === "APPROVAL_REQUIRED"
-              ? "APPROVAL_REQUIRED"
-              : planRes.status === "BLOCKED"
-                ? "BLOCKED"
-                : "FAILED",
-        reason: planRes.stopReason,
-        resolvedCapability: firstStepRes?.resolvedCapability,
-        resolvedToolId: firstStepRes?.resolvedToolId,
-        output: planRes,
-        error: planRes.success ? undefined : planRes.stopReason,
-      };
-    }
-
-    // 4. ACTION Intent Resolution via CapabilityResolver
+    // 3. ACTION Intent Resolution via CapabilityResolver
     const capRes = this.capabilityResolver.resolve({
       brainResult,
       workspaceId,
@@ -273,6 +230,7 @@ export class AgentOrchestrator {
       }
     }
 
+    // Evaluate Policy rule directly before Assistant delegation or ToolEcosystem execution
     const ruleLevel =
       this.policyEngine.resolveSafetyLevel(toolId, canonicalAction) ||
       "BLOCKED";
@@ -299,60 +257,21 @@ export class AgentOrchestrator {
       };
     }
 
-    // MANDATORY ENVIRONMENT CHECK: Missing explicit environmentId fails closed immediately
-    if (
-      !environmentId ||
-      typeof environmentId !== "string" ||
-      environmentId.trim().length === 0
-    ) {
-      return {
-        accepted: false,
-        intent: "ACTION",
-        status: "FAILED",
-        resolvedCapability: capability,
-        resolvedToolId: toolId,
-        reason:
-          "Missing mandatory environment context: environmentId is required for execution.",
-        error:
-          "Missing mandatory environment context: environmentId is required for execution.",
-      };
-    }
-
-    if (this.toolEcosystem) {
-      const envMgr = (this.toolEcosystem as any).environmentManager;
-      if (envMgr) {
-        const envCheck = envMgr.validateEnvironmentAccess(
-          environmentId,
-          workspaceId,
-          toolId,
-        );
-        if (!envCheck.valid) {
-          return {
-            accepted: false,
-            intent: "ACTION",
-            status: "BLOCKED",
-            resolvedCapability: capability,
-            resolvedToolId: toolId,
-            reason:
-              envCheck.reason ||
-              `Environment boundary check failed for environment '${environmentId}'.`,
-            error:
-              envCheck.reason ||
-              `Environment boundary check failed for environment '${environmentId}'.`,
-          };
-        }
-      }
-    }
-
     const execContext: ExecutionContext = context || {
       executionId: `exec_${commandId}`,
       timestamp: new Date(),
       workspaceId,
-      environmentId,
+      environmentId: environmentId || `env_${workspaceId}`,
     };
 
-    // If RealWorldAssistant is present, ONLY explicit SAFE actions with valid explicit environment delegate to RealWorldAssistant workflow
+    // If RealWorldAssistant is present, ONLY explicit SAFE actions delegate to RealWorldAssistant workflow
     if (this.assistant) {
+      await this.policyEngine.evaluate({
+        toolId,
+        params,
+        context: execContext,
+      });
+
       const goal: AssistantGoal = {
         id: commandId,
         workspaceId,
@@ -569,6 +488,7 @@ export class AgentOrchestrator {
         stepStates.set(currentStep.id, "RUNNING");
         stepResults[currentStep.id].state = "RUNNING";
 
+        // M8 MULTI-STEP ENVIRONMENT MANDATORY CHECK
         const envId = planContext.environmentId || context?.environmentId;
 
         if (!envId || typeof envId !== "string" || envId.trim().length === 0) {
