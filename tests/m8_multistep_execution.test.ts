@@ -311,6 +311,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_prereq_fail",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -349,6 +350,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_policy_blocked",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -378,6 +380,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_missing_dep",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -395,6 +398,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(invalidPlan, {
       commandId: "cmd_invalid",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -426,6 +430,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(cyclicPlan, {
       commandId: "cmd_cycle",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -452,6 +457,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_blocked_tool",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -476,6 +482,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_approval",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -500,6 +507,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_missing_cap",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.success).toBe(false);
@@ -737,6 +745,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_no_multi_approval",
       workspaceId: "ws_m8",
+      environmentId: "env_ws_m8",
     });
 
     expect(res.stepResults["step-1-app"].state).toBe("APPROVAL_REQUIRED");
@@ -794,6 +803,12 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
   });
 
   it("22. Missing required environment context fails closed", async () => {
+    const mockAssistant = {
+      executeWorkflow: vi.fn(),
+    } as any;
+
+    orchestrator.setAssistant(mockAssistant);
+
     const plan: BrainPlan = {
       goal: "Missing environment context plan",
       steps: [
@@ -806,25 +821,29 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
       ],
     };
 
+    // When environmentId is omitted, orchestratePlan fails closed immediately
     const res = await orchestrator.orchestratePlan(plan, {
       commandId: "cmd_no_env",
       workspaceId: "ws_m8",
       // environmentId intentionally omitted
     });
 
-    expect(res.success).toBe(true);
-    expect(res.stepResults["s1"].state).toBe("SUCCEEDED");
+    expect(res.success).toBe(false);
+    expect(res.status).toBe("FAILED");
+    expect(res.stopReason).toContain("Missing mandatory environment context");
+    expect(res.stepResults["s1"].state).toBe("FAILED");
+    expect(res.stepResults["s1"].error).toContain(
+      "Missing mandatory environment context",
+    );
+    expect(safeTool.executionCount).toBe(0);
+    expect(mockAssistant.executeWorkflow).not.toHaveBeenCalled();
   });
 
-  it("23. RealWorldAssistant path + BLOCKED: Policy Engine blocks action", async () => {
+  it("23. RealWorldAssistant path + BLOCKED: Assistant and ControlledAutonomyEngine are NOT invoked, Tool.execute count is 0", async () => {
     policyEngine.setRule("terminal_execute", "BLOCKED");
 
     const mockAssistant = {
-      executeWorkflow: vi.fn().mockResolvedValue({
-        success: false,
-        executedSteps: [{ status: "BLOCKED" }],
-        error: "Action explicitly blocked by policy.",
-      }),
+      executeWorkflow: vi.fn(),
     } as any;
 
     orchestrator.setAssistant(mockAssistant);
@@ -838,18 +857,15 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     });
 
     expect(res.status).toBe("BLOCKED");
+    expect(mockAssistant.executeWorkflow).not.toHaveBeenCalled();
     expect(safeTool.executionCount).toBe(0);
   });
 
-  it("24. RealWorldAssistant path + APPROVAL_REQUIRED: Assistant handles approval required cleanly", async () => {
+  it("24. RealWorldAssistant path + APPROVAL_REQUIRED: Assistant and ControlledAutonomyEngine are NOT invoked, Tool.execute count is 0", async () => {
     policyEngine.setRule("terminal_execute", "APPROVAL_REQUIRED");
 
     const mockAssistant = {
-      executeWorkflow: vi.fn().mockResolvedValue({
-        success: false,
-        executedSteps: [{ status: "APPROVAL_REQUIRED" }],
-        error: "Action requires approval.",
-      }),
+      executeWorkflow: vi.fn(),
     } as any;
 
     orchestrator.setAssistant(mockAssistant);
@@ -863,6 +879,7 @@ describe("YarOperator M8 — Multi-step Controlled Execution Suite", () => {
     });
 
     expect(res.status).toBe("APPROVAL_REQUIRED");
+    expect(mockAssistant.executeWorkflow).not.toHaveBeenCalled();
     expect(safeTool.executionCount).toBe(0);
   });
 
