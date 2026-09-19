@@ -2,6 +2,8 @@ import {
   BrainResult,
   BrainIntent,
   ExecutionContext,
+  BrainPlan,
+  PlanExecutionResult,
 } from "../contracts/index.js";
 import { WorkflowValidator, WorkflowDefinition } from "../workflow/index.js";
 import { AcceptanceEngine, AcceptanceCriteria } from "../acceptance/index.js";
@@ -258,5 +260,25 @@ export class TaskExecutor {
       success: true,
       stepResults,
     };
+  }
+
+  public async executeBrainPlan(
+    brainPlan: BrainPlan,
+    planContext: {
+      taskId: string;
+      workspaceId: string;
+      environmentId?: string;
+    },
+    context?: ExecutionContext,
+  ): Promise<PlanExecutionResult> {
+    return this.orchestrator.orchestratePlan(
+      brainPlan,
+      {
+        commandId: planContext.taskId,
+        workspaceId: planContext.workspaceId,
+        environmentId: planContext.environmentId,
+      },
+      context,
+    );
   }
 }
