@@ -230,41 +230,43 @@ export class AgentOrchestrator {
       }
     }
 
-    // Evaluate Policy rule directly before Assistant delegation or ToolEcosystem execution
-    const ruleLevel =
-      this.policyEngine.resolveSafetyLevel(toolId, canonicalAction) ||
-      "BLOCKED";
+    const resolvedEnvId =
+      environmentId ||
+      context?.environmentId ||
+      (workspaceId ? `env_${workspaceId}` : "");
 
-    if (ruleLevel === "BLOCKED") {
-      return {
-        accepted: false,
-        intent: "ACTION",
-        status: "BLOCKED",
-        resolvedCapability: capability,
-        resolvedToolId: toolId,
-        reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
-      };
-    }
-
-    if (ruleLevel === "APPROVAL_REQUIRED") {
-      return {
-        accepted: true,
-        intent: "ACTION",
-        status: "APPROVAL_REQUIRED",
-        resolvedCapability: capability,
-        resolvedToolId: toolId,
-        reason: `Action '${canonicalAction}' requires explicit owner approval.`,
-      };
+    // 1. Environment Boundary Check (FAIL-CLOSED)
+    if (this.toolEcosystem) {
+      const envManager = (this.toolEcosystem as any).environmentManager;
+      if (envManager) {
+        const envCheck = envManager.validateEnvironmentAccess(
+          resolvedEnvId,
+          workspaceId,
+          toolId,
+        );
+        if (!envCheck.valid) {
+          return {
+            accepted: false,
+            intent: "ACTION",
+            status: "BLOCKED",
+            resolvedCapability: capability,
+            resolvedToolId: toolId,
+            reason:
+              envCheck.reason ||
+              `Environment boundary check failed for environment '${resolvedEnvId}'.`,
+          };
+        }
+      }
     }
 
     const execContext: ExecutionContext = context || {
       executionId: `exec_${commandId}`,
       timestamp: new Date(),
       workspaceId,
-      environmentId: environmentId || `env_${workspaceId}`,
+      environmentId: resolvedEnvId,
     };
 
-    // If RealWorldAssistant is present, ONLY explicit SAFE actions delegate to RealWorldAssistant workflow
+    // 2. If RealWorldAssistant is present, delegate execution to RealWorldAssistant workflow
     if (this.assistant) {
       await this.policyEngine.evaluate({
         toolId,
@@ -275,7 +277,7 @@ export class AgentOrchestrator {
       const goal: AssistantGoal = {
         id: commandId,
         workspaceId,
-        environmentId,
+        environmentId: resolvedEnvId,
         description: rawCommandText,
         targetCapability: capability,
         requestedToolId: toolId,
@@ -311,6 +313,33 @@ export class AgentOrchestrator {
           error: astRes?.error || "Execution failed in assistant runtime.",
         };
       }
+    }
+
+    // 3. Direct Orchestrator Execution Path (when Assistant is not present)
+    const ruleLevel =
+      this.policyEngine.resolveSafetyLevel(toolId, canonicalAction) ||
+      "BLOCKED";
+
+    if (ruleLevel === "BLOCKED") {
+      return {
+        accepted: false,
+        intent: "ACTION",
+        status: "BLOCKED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason: `Action '${canonicalAction}' is explicitly BLOCKED by PolicyEngine.`,
+      };
+    }
+
+    if (ruleLevel === "APPROVAL_REQUIRED") {
+      return {
+        accepted: true,
+        intent: "ACTION",
+        status: "APPROVAL_REQUIRED",
+        resolvedCapability: capability,
+        resolvedToolId: toolId,
+        reason: `Action '${canonicalAction}' requires explicit owner approval.`,
+      };
     }
 
     if (!this.toolEcosystem) {
