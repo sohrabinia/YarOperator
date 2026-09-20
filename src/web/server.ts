@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { OperatorApiHandler, OperatorApiRequest } from "../api/operator.js";
+import { IdentityStore } from "../core/identity/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -77,8 +78,8 @@ export class OperatorWebServer {
   private allowedOwnerEmails: Record<string, string>;
   private mockJwksPublicKeyPem?: string;
 
+  private identityStore: IdentityStore;
   private jwksCache: { keys: GoogleJwkKey[]; fetchedAt: number } | null = null;
-  private sessions: Map<string, SessionData> = new Map();
   private authStates: Map<string, OAuthStateData> = new Map();
 
   constructor(options: OperatorServerOptions) {
@@ -109,6 +110,14 @@ export class OperatorWebServer {
     this.allowedOwnerEmails = options.allowedOwnerEmails || {
       [this.authorizedOwnerEmail]: "owner_sohrab",
     };
+
+    const dbPath = process.env.OPERATOR_DB_PATH || "operator.db";
+    this.identityStore = new IdentityStore(dbPath);
+    // Seed initial legacy owner identity
+    this.identityStore.migrateLegacyOwnerSohrab(this.authorizedOwnerEmail, [
+      "yartrader",
+      "ws_default",
+    ]);
 
     this.mockJwksPublicKeyPem = options.mockJwksPublicKeyPem;
   }
@@ -176,40 +185,74 @@ export class OperatorWebServer {
     ownerId: string,
     googleSub?: string,
   ): SessionData {
-    const sessionId = `sess_${crypto.randomBytes(32).toString("hex")}`;
-    const now = Date.now();
-    const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
+    const mappedOwnerId =
+      this.allowedOwnerEmails[email.toLowerCase()] || ownerId;
+
+    // Resolve user by provider sub or create user
+    let user = googleSub
+      ? this.identityStore.getUserByProviderSub("google", googleSub)
+      : null;
+
+    if (!user) {
+      user = this.identityStore.getUserByEmail(email);
+      if (!user) {
+        user = this.identityStore.createUser({
+          userId: mappedOwnerId,
+          primaryEmail: email,
+        });
+      }
+      if (googleSub) {
+        this.identityStore.bindProvider({
+          userId: user.userId,
+          provider: "google",
+          providerSub: googleSub,
+          emailAtBinding: email,
+        });
+      }
+    }
+
+    if (user.status !== "ACTIVE") {
+      throw new Error("User identity is disabled.");
+    }
+
+    const pSession = this.identityStore.createSession({
+      userId: user.userId,
+      ownerId: mappedOwnerId,
+    });
 
     const session: SessionData = {
-      sessionId,
+      sessionId: pSession.sessionId,
       googleSub,
       email: email.toLowerCase(),
-      ownerId,
-      createdAt: now,
-      expiresAt,
+      ownerId: mappedOwnerId,
+      createdAt: pSession.createdAt,
+      expiresAt: pSession.expiresAt,
     };
 
-    this.sessions.set(sessionId, session);
-    // Register session token with OperatorApiHandler so API handler recognizes it
-    this.apiHandler.registerBearerToken(sessionId, ownerId);
+    this.apiHandler.registerBearerToken(pSession.sessionId, mappedOwnerId);
     return session;
   }
 
   public getSession(sessionId?: string): SessionData | null {
     if (!sessionId) return null;
-    const session = this.sessions.get(sessionId);
-    if (!session) return null;
+    const pSession = this.identityStore.getSession(sessionId);
+    if (!pSession) return null;
 
-    if (Date.now() > session.expiresAt) {
-      this.sessions.delete(sessionId);
-      return null;
-    }
-    return session;
+    const user = this.identityStore.getUserById(pSession.userId);
+    if (!user || user.status !== "ACTIVE") return null;
+
+    return {
+      sessionId: pSession.sessionId,
+      email: user.primaryEmail,
+      ownerId: user.userId,
+      createdAt: pSession.createdAt,
+      expiresAt: pSession.expiresAt,
+    };
   }
 
   public revokeSession(sessionId?: string): void {
     if (sessionId) {
-      this.sessions.delete(sessionId);
+      this.identityStore.revokeSession(sessionId);
     }
   }
 

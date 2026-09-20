@@ -131,6 +131,8 @@ export class OperatorApiHandler {
         params,
       } = rawBody;
 
+      const effectiveOwnerId = ownerId;
+
       // Type & Length Validation Gates
       if (
         commandId &&
@@ -158,12 +160,12 @@ export class OperatorApiHandler {
       }
 
       // Prevent Owner Impersonation
-      if (ownerId !== authenticatedOwnerId) {
+      if (effectiveOwnerId !== authenticatedOwnerId) {
         return {
           statusCode: 403,
           body: {
             success: false,
-            error: `Forbidden: Authenticated owner '${authenticatedOwnerId}' cannot submit commands as owner '${ownerId}'.`,
+            error: `Forbidden: Authenticated owner '${authenticatedOwnerId}' cannot submit commands as owner '${effectiveOwnerId}'.`,
           },
         };
       }
@@ -264,11 +266,13 @@ export class OperatorApiHandler {
       }
 
       // 3. Dispatch Input Command to OwnerCommandReceiver
+      const resolvedEnvironmentId = environmentId || `env_${workspaceId}`;
+
       const commandInput: OwnerCommandInput = {
         commandId,
         ownerId: authenticatedOwnerId,
         workspaceId,
-        environmentId,
+        environmentId: resolvedEnvironmentId,
         rawCommandText,
         targetCapability,
         requestedToolId,
