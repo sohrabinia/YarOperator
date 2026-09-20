@@ -1,6 +1,3 @@
-import { createRequire } from "module";
-import { mkdirSync } from "fs";
-import { dirname } from "path";
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
 import { AgentOrchestrator, ExecutionScope } from "../orchestrator/index.js";
@@ -11,8 +8,6 @@ import { DurableOperationalMemory } from "../memory/index.js";
 import { EnvironmentManager } from "../environment/index.js";
 import { ExecutionContext, ActionSafetyLevel } from "../contracts/index.js";
 import { IdentityStore } from "../identity/index.js";
-
-const require = createRequire(import.meta.url);
 
 export type AutonomyDecisionLevel = "SAFE" | "APPROVAL_REQUIRED" | "BLOCKED";
 
@@ -185,400 +180,9 @@ const PROTECTED_SECURITY_MODULES = [
   "autonomypolicy",
 ];
 
-export type CheckpointState =
-  | "PLANNED"
-  | "DISPATCHED"
-  | "EXECUTED"
-  | "VERIFIED"
-  | "FAILED"
-  | "UNKNOWN_IN_FLIGHT";
-
-export interface ActionCheckpoint {
-  checkpointId: string;
-  runId: string;
-  taskId: string;
-  workspaceId: string;
-  environmentId: string;
-  stepIndex: number;
-  toolId: string;
-  canonicalAction: string;
-  idempotencyKey: string;
-  workerId: string;
-  dispatchTimestamp: string;
-  executionState: CheckpointState;
-  paramsJson?: string;
-  executionOutputJson?: string;
-  error?: string;
-  updatedAt: string;
-}
-
-export interface DurableRunRecord {
-  run: AutonomousRunRecord;
-  stepIndex: number;
-  activeWorkerId?: string;
-  leaseExpiresAtIso?: string;
-  cancellationReason?: string;
-  deadlineIso?: string;
-}
-
-export class DurableAutonomyRunStore {
-  private db: any;
-
-  constructor(dbPath: string = ":memory:") {
-    if (dbPath !== ":memory:") {
-      const parentDir = dirname(dbPath);
-      if (parentDir && parentDir !== ".") {
-        mkdirSync(parentDir, { recursive: true });
-      }
-    }
-    const { DatabaseSync } = require("node:sqlite");
-    this.db = new DatabaseSync(dbPath);
-    this.init();
-  }
-
-  private init(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS autonomy_runs (
-        run_id TEXT PRIMARY KEY,
-        owner_id TEXT NOT NULL,
-        workspace_id TEXT NOT NULL,
-        task_id TEXT NOT NULL,
-        environment_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        policy_json TEXT NOT NULL,
-        step_index INTEGER NOT NULL DEFAULT 0,
-        active_worker_id TEXT,
-        lease_expires_at TEXT,
-        cancellation_reason TEXT,
-        deadline_iso TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        completed_at TEXT,
-        terminal_reason TEXT,
-        last_proposal_json TEXT,
-        last_verification_result TEXT,
-        audit_trail_json TEXT
-      );
-
-      CREATE TABLE IF NOT EXISTS action_checkpoints (
-        checkpoint_id TEXT PRIMARY KEY,
-        run_id TEXT NOT NULL,
-        task_id TEXT NOT NULL,
-        workspace_id TEXT NOT NULL,
-        environment_id TEXT NOT NULL,
-        step_index INTEGER NOT NULL,
-        tool_id TEXT NOT NULL,
-        canonical_action TEXT NOT NULL,
-        idempotency_key TEXT NOT NULL UNIQUE,
-        worker_id TEXT NOT NULL,
-        dispatch_timestamp TEXT NOT NULL,
-        execution_state TEXT NOT NULL,
-        params_json TEXT,
-        execution_output_json TEXT,
-        error TEXT,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(run_id) REFERENCES autonomy_runs(run_id)
-      );
-    `);
-  }
-
-  public generateIdempotencyKey(
-    runId: string,
-    taskId: string,
-    workspaceId: string,
-    stepIndex: number,
-    canonicalAction: string,
-  ): string {
-    return `idemp:${runId}:${taskId}:${workspaceId}:${stepIndex}:${canonicalAction}`;
-  }
-
-  public saveRun(
-    run: AutonomousRunRecord,
-    stepIndex: number = 0,
-    activeWorkerId?: string,
-    leaseExpiresAtIso?: string,
-    cancellationReason?: string,
-    deadlineIso?: string,
-  ): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO autonomy_runs (
-        run_id, owner_id, workspace_id, task_id, environment_id, status,
-        policy_json, step_index, active_worker_id, lease_expires_at, cancellation_reason,
-        deadline_iso, created_at, updated_at, completed_at, terminal_reason,
-        last_proposal_json, last_verification_result, audit_trail_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      run.runId || "",
-      run.ownerId || "",
-      run.workspaceId || "",
-      run.taskId || "",
-      run.environmentId || "",
-      run.status || "BLOCKED",
-      JSON.stringify(run.policy || {}),
-      stepIndex || 0,
-      activeWorkerId || null,
-      leaseExpiresAtIso || null,
-      cancellationReason || run.terminalReason || null,
-      deadlineIso || null,
-      run.createdAt instanceof Date
-        ? run.createdAt.toISOString()
-        : String(run.createdAt || new Date().toISOString()),
-      run.updatedAt instanceof Date
-        ? run.updatedAt.toISOString()
-        : String(run.updatedAt || new Date().toISOString()),
-      run.completedAt
-        ? run.completedAt instanceof Date
-          ? run.completedAt.toISOString()
-          : String(run.completedAt)
-        : null,
-      run.terminalReason || null,
-      run.lastProposal ? JSON.stringify(run.lastProposal) : null,
-      run.lastVerificationResult || null,
-      JSON.stringify(run.auditTrail || []),
-    );
-  }
-
-  public getRun(runId: string): DurableRunRecord | null {
-    const stmt = this.db.prepare(
-      `SELECT * FROM autonomy_runs WHERE run_id = ?`,
-    );
-    const row = stmt.get(runId) as any;
-    if (!row) return null;
-
-    const run: AutonomousRunRecord = {
-      runId: row.run_id,
-      ownerId: row.owner_id,
-      workspaceId: row.workspace_id,
-      taskId: row.task_id,
-      environmentId: row.environment_id,
-      status: row.status as AutonomyLifecycleState,
-      policy: JSON.parse(row.policy_json),
-      iterationsCount: row.step_index,
-      delegationsCount: 0,
-      actionsCount: row.step_index,
-      retriesCount: 0,
-      terminalReason: row.terminal_reason || undefined,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
-      completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
-      lastProposal: row.last_proposal_json
-        ? JSON.parse(row.last_proposal_json)
-        : undefined,
-      lastVerificationResult: row.last_verification_result || undefined,
-      auditTrail: row.audit_trail_json ? JSON.parse(row.audit_trail_json) : [],
-    };
-
-    return {
-      run,
-      stepIndex: row.step_index,
-      activeWorkerId: row.active_worker_id || undefined,
-      leaseExpiresAtIso: row.lease_expires_at || undefined,
-      cancellationReason: row.cancellation_reason || undefined,
-      deadlineIso: row.deadline_iso || undefined,
-    };
-  }
-
-  public listIncompleteRuns(): DurableRunRecord[] {
-    const stmt = this.db.prepare(`
-      SELECT run_id FROM autonomy_runs
-      WHERE status NOT IN ('COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'LIMIT_REACHED', 'BLOCKED')
-      ORDER BY created_at ASC
-    `);
-
-    const rows = stmt.all() as { run_id: string }[];
-    return rows.map((r) => this.getRun(r.run_id)!).filter(Boolean);
-  }
-
-  public acquireLease(
-    runId: string,
-    workerId: string,
-    leaseDurationMs: number = 30000,
-  ): boolean {
-    const now = new Date();
-    const nowIso = now.toISOString();
-    const leaseExpiresAt = new Date(
-      now.getTime() + leaseDurationMs,
-    ).toISOString();
-
-    this.db.exec("BEGIN TRANSACTION;");
-    try {
-      const stmtSelect = this.db.prepare(
-        `SELECT active_worker_id, lease_expires_at, status FROM autonomy_runs WHERE run_id = ?`,
-      );
-      const row = stmtSelect.get(runId) as any;
-      if (!row) {
-        this.db.exec("COMMIT;");
-        return false;
-      }
-
-      if (TERMINAL_AUTONOMY_STATES.has(row.status as AutonomyLifecycleState)) {
-        this.db.exec("COMMIT;");
-        return false;
-      }
-
-      const isExpired = row.lease_expires_at && row.lease_expires_at <= nowIso;
-      if (
-        !row.active_worker_id ||
-        row.active_worker_id === workerId ||
-        isExpired
-      ) {
-        const stmtUpdate = this.db.prepare(`
-          UPDATE autonomy_runs
-          SET active_worker_id = ?, lease_expires_at = ?, updated_at = ?
-          WHERE run_id = ?
-        `);
-        stmtUpdate.run(workerId, leaseExpiresAt, nowIso, runId);
-        this.db.exec("COMMIT;");
-        return true;
-      }
-
-      this.db.exec("COMMIT;");
-      return false;
-    } catch (err) {
-      this.db.exec("ROLLBACK;");
-      throw err;
-    }
-  }
-
-  public releaseLease(runId: string, workerId: string): void {
-    const stmt = this.db.prepare(`
-      UPDATE autonomy_runs
-      SET active_worker_id = NULL, lease_expires_at = NULL
-      WHERE run_id = ? AND active_worker_id = ?
-    `);
-    stmt.run(runId, workerId);
-  }
-
-  public isLeaseValid(runId: string, workerId: string): boolean {
-    const nowIso = new Date().toISOString();
-    const stmt = this.db.prepare(`
-      SELECT active_worker_id, lease_expires_at FROM autonomy_runs WHERE run_id = ?
-    `);
-    const row = stmt.get(runId) as any;
-    if (!row) return false;
-    if (row.active_worker_id !== workerId) return false;
-    if (row.lease_expires_at && row.lease_expires_at <= nowIso) return false;
-    return true;
-  }
-
-  public saveCheckpoint(checkpoint: ActionCheckpoint): void {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO action_checkpoints (
-        checkpoint_id, run_id, task_id, workspace_id, environment_id, step_index,
-        tool_id, canonical_action, idempotency_key, worker_id, dispatch_timestamp,
-        execution_state, params_json, execution_output_json, error, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      checkpoint.checkpointId,
-      checkpoint.runId,
-      checkpoint.taskId,
-      checkpoint.workspaceId,
-      checkpoint.environmentId,
-      checkpoint.stepIndex,
-      checkpoint.toolId,
-      checkpoint.canonicalAction,
-      checkpoint.idempotencyKey,
-      checkpoint.workerId,
-      checkpoint.dispatchTimestamp,
-      checkpoint.executionState,
-      checkpoint.paramsJson || null,
-      checkpoint.executionOutputJson || null,
-      checkpoint.error || null,
-      checkpoint.updatedAt,
-    );
-  }
-
-  public getCheckpoint(checkpointId: string): ActionCheckpoint | null {
-    const stmt = this.db.prepare(
-      `SELECT * FROM action_checkpoints WHERE checkpoint_id = ?`,
-    );
-    const row = stmt.get(checkpointId) as any;
-    if (!row) return null;
-
-    return {
-      checkpointId: row.checkpoint_id,
-      runId: row.run_id,
-      taskId: row.task_id,
-      workspaceId: row.workspace_id,
-      environmentId: row.environment_id,
-      stepIndex: row.step_index,
-      toolId: row.tool_id,
-      canonicalAction: row.canonical_action,
-      idempotencyKey: row.idempotency_key,
-      workerId: row.worker_id,
-      dispatchTimestamp: row.dispatch_timestamp,
-      executionState: row.execution_state as CheckpointState,
-      paramsJson: row.params_json || undefined,
-      executionOutputJson: row.execution_output_json || undefined,
-      error: row.error || undefined,
-      updatedAt: row.updated_at,
-    };
-  }
-
-  public getCheckpointByIdempotencyKey(
-    idempotencyKey: string,
-  ): ActionCheckpoint | null {
-    const stmt = this.db.prepare(
-      `SELECT * FROM action_checkpoints WHERE idempotency_key = ?`,
-    );
-    const row = stmt.get(idempotencyKey) as any;
-    if (!row) return null;
-
-    return {
-      checkpointId: row.checkpoint_id,
-      runId: row.run_id,
-      taskId: row.task_id,
-      workspaceId: row.workspace_id,
-      environmentId: row.environment_id,
-      stepIndex: row.step_index,
-      toolId: row.tool_id,
-      canonicalAction: row.canonical_action,
-      idempotencyKey: row.idempotency_key,
-      workerId: row.worker_id,
-      dispatchTimestamp: row.dispatch_timestamp,
-      executionState: row.execution_state as CheckpointState,
-      paramsJson: row.params_json || undefined,
-      executionOutputJson: row.execution_output_json || undefined,
-      error: row.error || undefined,
-      updatedAt: row.updated_at,
-    };
-  }
-
-  public listCheckpointsForRun(runId: string): ActionCheckpoint[] {
-    const stmt = this.db.prepare(`
-      SELECT checkpoint_id FROM action_checkpoints WHERE run_id = ? ORDER BY step_index ASC, dispatch_timestamp ASC
-    `);
-
-    const rows = stmt.all(runId) as { checkpoint_id: string }[];
-    return rows
-      .map((r) => this.getCheckpoint(r.checkpoint_id)!)
-      .filter(Boolean);
-  }
-
-  public getLatestCheckpointForRun(runId: string): ActionCheckpoint | null {
-    const stmt = this.db.prepare(`
-      SELECT checkpoint_id FROM action_checkpoints WHERE run_id = ? ORDER BY step_index DESC, updated_at DESC LIMIT 1
-    `);
-
-    const row = stmt.get(runId) as { checkpoint_id: string } | undefined;
-    if (!row) return null;
-    return this.getCheckpoint(row.checkpoint_id);
-  }
-
-  public close(): void {
-    this.db.close();
-  }
-}
-
 export class ControlledAutonomyEngine {
   private runs = new Map<string, AutonomousRunRecord>();
   private activeTaskRuns = new Map<string, string>(); // taskId -> runId
-  public readonly runStore: DurableAutonomyRunStore;
-  public readonly workerId: string;
 
   private allowedStateTransitions = new Map<
     AutonomyLifecycleState,
@@ -792,14 +396,7 @@ export class ControlledAutonomyEngine {
     private memory: DurableOperationalMemory = new DurableOperationalMemory(),
     private environmentManager: EnvironmentManager = new EnvironmentManager(),
     private identityStore?: IdentityStore,
-    runStore?: DurableAutonomyRunStore,
-    workerId?: string,
-  ) {
-    this.runStore = runStore || new DurableAutonomyRunStore();
-    this.workerId =
-      workerId ||
-      `worker_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  }
+  ) {}
 
   public validateStateTransition(
     current: AutonomyLifecycleState,
@@ -1114,12 +711,10 @@ export class ControlledAutonomyEngine {
     this.activeTaskRuns.set(config.taskId, config.runId);
 
     this.transitionRunState(run, "AUTHORIZED");
-    this.runStore.saveRun(run, 0, this.workerId);
-    this.runStore.acquireLease(run.runId, this.workerId);
 
     await this.auditManager.recordEvent(
       "TASK_CREATED",
-      { runId: run.runId, policy: run.policy, workerId: this.workerId },
+      { runId: run.runId, policy: run.policy },
       { workspaceId: run.workspaceId, taskId: run.taskId },
     );
 
@@ -1127,16 +722,7 @@ export class ControlledAutonomyEngine {
   }
 
   public getRun(runId: string): AutonomousRunRecord | undefined {
-    let run = this.runs.get(runId);
-    if (!run) {
-      const durableRecord = this.runStore.getRun(runId);
-      if (durableRecord) {
-        run = durableRecord.run;
-        this.runs.set(runId, run);
-        this.activeTaskRuns.set(run.taskId, runId);
-      }
-    }
-    return run;
+    return this.runs.get(runId);
   }
 
   public validateAIProposal(
@@ -1254,7 +840,7 @@ export class ControlledAutonomyEngine {
     runId: string,
     reason: string,
   ): Promise<AutonomousRunRecord> {
-    const run = this.getRun(runId);
+    const run = this.runs.get(runId);
     if (!run) {
       throw new Error(`Run '${runId}' not found.`);
     }
@@ -1266,13 +852,6 @@ export class ControlledAutonomyEngine {
     run.terminalReason = reason;
     this.transitionRunState(run, "CANCELLED");
     run.completedAt = new Date();
-    this.runStore.saveRun(
-      run,
-      run.iterationsCount,
-      this.workerId,
-      undefined,
-      reason,
-    );
 
     await this.auditManager.recordEvent(
       "DECISION_MADE",
@@ -1287,7 +866,7 @@ export class ControlledAutonomyEngine {
     runId: string,
     proposal: AIProposal,
   ): Promise<AutonomousRunRecord> {
-    const run = this.getRun(runId);
+    const run = this.runs.get(runId);
     if (!run) {
       throw new Error(`Autonomy run '${runId}' not found.`);
     }
@@ -1295,29 +874,6 @@ export class ControlledAutonomyEngine {
     // Fail-Closed Check 1: Immutable terminal check
     if (TERMINAL_AUTONOMY_STATES.has(run.status)) {
       return run;
-    }
-
-    // Worker Lease Check
-    if (!this.runStore.isLeaseValid(run.runId, this.workerId)) {
-      const acquired = this.runStore.acquireLease(run.runId, this.workerId);
-      if (!acquired) {
-        run.terminalReason = `Worker lease '${this.workerId}' invalid or revoked for run '${run.runId}'. Rejecting execution.`;
-        this.transitionRunState(run, "BLOCKED");
-        run.completedAt = new Date();
-        this.runStore.saveRun(
-          run,
-          run.iterationsCount,
-          undefined,
-          undefined,
-          run.terminalReason,
-        );
-        await this.auditManager.recordEvent(
-          "ACTION_FAILED",
-          { reason: run.terminalReason, workerId: this.workerId },
-          { workspaceId: run.workspaceId, taskId: run.taskId },
-        );
-        return run;
-      }
     }
 
     const now = new Date();
@@ -1474,7 +1030,6 @@ export class ControlledAutonomyEngine {
       );
 
       this.transitionRunState(run, "WAITING_FOR_APPROVAL");
-      this.runStore.saveRun(run, run.iterationsCount, this.workerId);
       await this.auditManager.recordEvent(
         "DECISION_MADE",
         { decision: "APPROVAL_REQUIRED", fingerprint: req.id },
@@ -1493,7 +1048,7 @@ export class ControlledAutonomyEngine {
     approverUserId: string,
     workspaceId: string,
   ): Promise<AutonomousRunRecord> {
-    const run = this.getRun(runId);
+    const run = this.runs.get(runId);
     if (!run) {
       throw new Error(`Run '${runId}' not found.`);
     }
@@ -1588,7 +1143,6 @@ export class ControlledAutonomyEngine {
       run.terminalReason = `Max actions limit reached (${run.actionsCount} >= ${run.policy.maxActions}).`;
       this.transitionRunState(run, "LIMIT_REACHED");
       run.completedAt = new Date();
-      this.runStore.saveRun(run, run.iterationsCount, this.workerId);
       await this.auditManager.recordEvent(
         "ACTION_FAILED",
         { reason: run.terminalReason },
@@ -1597,117 +1151,8 @@ export class ControlledAutonomyEngine {
       return run;
     }
 
-    // Worker Lease Check
-    if (!this.runStore.isLeaseValid(run.runId, this.workerId)) {
-      const acquired = this.runStore.acquireLease(run.runId, this.workerId);
-      if (!acquired) {
-        run.terminalReason = `Worker lease '${this.workerId}' invalid or revoked for run '${run.runId}'. Rejecting execution.`;
-        this.transitionRunState(run, "BLOCKED");
-        run.completedAt = new Date();
-        this.runStore.saveRun(
-          run,
-          run.iterationsCount,
-          undefined,
-          undefined,
-          run.terminalReason,
-        );
-        await this.auditManager.recordEvent(
-          "ACTION_FAILED",
-          { reason: run.terminalReason, workerId: this.workerId },
-          { workspaceId: run.workspaceId, taskId: run.taskId },
-        );
-        return run;
-      }
-    }
-
-    let canonicalAction = (proposal.params as any)?.action
-      ? `${proposal.proposedAction}:${(proposal.params as any).action}`
-      : proposal.proposedAction;
-    const tool = this.toolEcosystem.getRegistry().get(proposal.proposedAction);
-    if (tool && typeof tool.resolveCanonicalAction === "function") {
-      canonicalAction = tool.resolveCanonicalAction(proposal.params);
-    }
-
-    const stepIndex = run.iterationsCount;
-    const idempotencyKey = this.runStore.generateIdempotencyKey(
-      run.runId,
-      run.taskId,
-      run.workspaceId,
-      stepIndex,
-      canonicalAction,
-    );
-
-    let checkpoint =
-      this.runStore.getCheckpointByIdempotencyKey(idempotencyKey);
-
-    if (checkpoint) {
-      if (
-        checkpoint.executionState === "EXECUTED" ||
-        checkpoint.executionState === "VERIFIED"
-      ) {
-        const rawOutput = checkpoint.executionOutputJson
-          ? JSON.parse(checkpoint.executionOutputJson)
-          : undefined;
-        return this.processCheckpointOutput(
-          run,
-          proposal,
-          rawOutput,
-          checkpoint,
-        );
-      }
-      if (
-        checkpoint.executionState === "DISPATCHED" ||
-        checkpoint.executionState === "UNKNOWN_IN_FLIGHT"
-      ) {
-        checkpoint.executionState = "UNKNOWN_IN_FLIGHT";
-        checkpoint.updatedAt = new Date().toISOString();
-        this.runStore.saveCheckpoint(checkpoint);
-
-        run.terminalReason = `In-flight action '${proposal.proposedAction}' was DISPATCHED before crash and status is UNKNOWN_IN_FLIGHT. Failing closed to prevent duplicate side effects.`;
-        this.transitionRunState(run, "BLOCKED");
-        run.completedAt = new Date();
-        this.runStore.saveRun(
-          run,
-          stepIndex,
-          this.workerId,
-          undefined,
-          run.terminalReason,
-        );
-
-        await this.auditManager.recordEvent(
-          "ACTION_FAILED",
-          { error: run.terminalReason, checkpoint, idempotencyKey },
-          {
-            workspaceId: run.workspaceId,
-            taskId: run.taskId,
-            severity: "CRITICAL",
-          },
-        );
-        return run;
-      }
-    } else {
-      checkpoint = {
-        checkpointId: `chk_${run.runId}_${stepIndex}_${Date.now()}`,
-        runId: run.runId,
-        taskId: run.taskId,
-        workspaceId: run.workspaceId,
-        environmentId: run.environmentId,
-        stepIndex,
-        toolId: proposal.proposedAction,
-        canonicalAction,
-        idempotencyKey,
-        workerId: this.workerId,
-        dispatchTimestamp: new Date().toISOString(),
-        executionState: "DISPATCHED",
-        paramsJson: JSON.stringify(proposal.params || {}),
-        updatedAt: new Date().toISOString(),
-      };
-      this.runStore.saveCheckpoint(checkpoint);
-    }
-
     run.actionsCount++;
     this.transitionRunState(run, "EXECUTING");
-    this.runStore.saveRun(run, stepIndex, this.workerId);
 
     // Scope selection for execution
     const selectedAgent = this.orchestrator.selectAgentForCapability(
@@ -1719,11 +1164,6 @@ export class ControlledAutonomyEngine {
       run.terminalReason = `No agent available with capability '${proposal.requestedCapability}' for workspace '${run.workspaceId}'.`;
       this.transitionRunState(run, "FAILED");
       run.completedAt = new Date();
-      checkpoint.executionState = "FAILED";
-      checkpoint.error = run.terminalReason;
-      checkpoint.updatedAt = new Date().toISOString();
-      this.runStore.saveCheckpoint(checkpoint);
-      this.runStore.saveRun(run, stepIndex, this.workerId);
       return run;
     }
 
@@ -1741,46 +1181,14 @@ export class ControlledAutonomyEngine {
       execContext,
     );
 
-    checkpoint.executionOutputJson = JSON.stringify(
-      executionResult.output || {},
-    );
-    checkpoint.error = executionResult.error || undefined;
-    checkpoint.executionState = executionResult.success ? "EXECUTED" : "FAILED";
-    checkpoint.updatedAt = new Date().toISOString();
-    this.runStore.saveCheckpoint(checkpoint);
-
-    return this.processCheckpointOutput(
-      run,
-      proposal,
-      executionResult.output,
-      checkpoint,
-      executionResult.success,
-      executionResult.error,
-      selectedAgent,
-    );
-  }
-
-  private async processCheckpointOutput(
-    run: AutonomousRunRecord,
-    proposal: AIProposal,
-    rawOutput: unknown,
-    checkpoint: ActionCheckpoint,
-    executionSuccess: boolean = true,
-    executionError?: string,
-    selectedAgent?: any,
-  ): Promise<AutonomousRunRecord> {
     this.transitionRunState(run, "VERIFYING");
-    const verStatus = this.verifyExecutionResult(run, rawOutput);
+    const verStatus = this.verifyExecutionResult(run, executionResult.output);
     run.lastVerificationResult = verStatus;
 
     if (verStatus === "INCONCLUSIVE") {
       run.terminalReason = `Execution output verification returned INCONCLUSIVE for action '${proposal.proposedAction}'. Failing closed.`;
       this.transitionRunState(run, "FAILED");
       run.completedAt = new Date();
-      checkpoint.executionState = "FAILED";
-      checkpoint.error = run.terminalReason;
-      this.runStore.saveCheckpoint(checkpoint);
-      this.runStore.saveRun(run, run.iterationsCount, this.workerId);
       await this.auditManager.recordEvent(
         "ACTION_FAILED",
         { reason: run.terminalReason },
@@ -1789,17 +1197,16 @@ export class ControlledAutonomyEngine {
       return run;
     }
 
-    if (verStatus === "FAILED" || !executionSuccess) {
+    if (verStatus === "FAILED" || !executionResult.success) {
       if (run.retriesCount < run.policy.maxRetries) {
         run.retriesCount++;
         this.transitionRunState(run, "RETRYING");
-        this.runStore.saveRun(run, run.iterationsCount, this.workerId);
         return run;
       } else {
-        run.terminalReason = executionError || "Action execution failed.";
+        run.terminalReason =
+          executionResult.error || "Action execution failed.";
         this.transitionRunState(run, "FAILED");
         run.completedAt = new Date();
-        this.runStore.saveRun(run, run.iterationsCount, this.workerId);
         await this.auditManager.recordEvent(
           "ACTION_FAILED",
           { reason: run.terminalReason },
@@ -1809,10 +1216,7 @@ export class ControlledAutonomyEngine {
       }
     }
 
-    checkpoint.executionState = "VERIFIED";
-    checkpoint.updatedAt = new Date().toISOString();
-    this.runStore.saveCheckpoint(checkpoint);
-
+    // Determine completion: if proposal is terminal or max iterations reached, complete. Otherwise stay RUNNING for next iteration.
     if (
       proposal.isTerminalProposal ||
       run.iterationsCount >= run.policy.maxIterations
@@ -1823,16 +1227,9 @@ export class ControlledAutonomyEngine {
       this.transitionRunState(run, "RUNNING");
     }
 
-    this.runStore.saveRun(run, run.iterationsCount, this.workerId);
-
-    const agentId = selectedAgent ? selectedAgent.id : "recovered_agent";
-    const provider = selectedAgent
-      ? selectedAgent.provider
-      : "recovered_provider";
-
     await this.auditManager.recordEvent(
       "ACTION_COMPLETED",
-      { runId: run.runId, action: proposal.proposedAction, agentId, provider },
+      { runId: run.runId, action: proposal.proposedAction },
       { workspaceId: run.workspaceId, taskId: run.taskId },
     );
 
@@ -1891,187 +1288,6 @@ export class ControlledAutonomyEngine {
 
   async recoverInterruptedTasks(atTime: Date = new Date()): Promise<{
     recoveredCount: number;
-    resumedTasks: string[];
-    failedRecoveryTasks: string[];
-  }> {
-    const resumedTasks: string[] = [];
-    const failedRecoveryTasks: string[] = [];
-    const nowIso = atTime.toISOString();
-
-    await this.auditManager.recordEvent(
-      "TASK_CREATED",
-      { event: "RECOVERY_STARTED", timestamp: nowIso, workerId: this.workerId },
-      { workspaceId: "SYSTEM", taskId: "RECOVERY" },
-    );
-
-    // 1. Recover incomplete durable runs from runStore
-    const incompleteRuns = this.runStore.listIncompleteRuns();
-
-    for (const record of incompleteRuns) {
-      const run = record.run;
-      const runId = run.runId;
-
-      if (TERMINAL_AUTONOMY_STATES.has(run.status)) {
-        continue;
-      }
-
-      // Re-verify Identity & Workspace Membership
-      if (this.identityStore) {
-        const owner = this.identityStore.getUserById(run.ownerId);
-        if (!owner || owner.status !== "ACTIVE") {
-          run.terminalReason = `Crash recovery blocked: Owner '${run.ownerId}' deactivated or missing.`;
-          this.transitionRunState(run, "BLOCKED");
-          run.completedAt = atTime;
-          this.runStore.saveRun(
-            run,
-            record.stepIndex,
-            undefined,
-            undefined,
-            run.terminalReason,
-          );
-          await this.auditManager.recordEvent(
-            "DECISION_MADE",
-            { decision: "BLOCKED", reason: run.terminalReason },
-            { workspaceId: run.workspaceId, taskId: run.taskId },
-          );
-          failedRecoveryTasks.push(run.taskId);
-          continue;
-        }
-
-        const isMember = this.identityStore.isUserActiveWorkspaceMember(
-          run.ownerId,
-          run.workspaceId,
-        );
-        if (!isMember) {
-          run.terminalReason = `Crash recovery blocked: Owner '${run.ownerId}' is no longer an active member of workspace '${run.workspaceId}'.`;
-          this.transitionRunState(run, "BLOCKED");
-          run.completedAt = atTime;
-          this.runStore.saveRun(
-            run,
-            record.stepIndex,
-            undefined,
-            undefined,
-            run.terminalReason,
-          );
-          await this.auditManager.recordEvent(
-            "DECISION_MADE",
-            { decision: "BLOCKED", reason: run.terminalReason },
-            { workspaceId: run.workspaceId, taskId: run.taskId },
-          );
-          failedRecoveryTasks.push(run.taskId);
-          continue;
-        }
-      }
-
-      // Re-verify Environment
-      const envCheck = this.environmentManager.validateEnvironmentAccess(
-        run.environmentId,
-        run.workspaceId,
-      );
-      if (!envCheck.valid) {
-        run.terminalReason = `Crash recovery blocked: Environment '${run.environmentId}' validation failed (${envCheck.reason}).`;
-        this.transitionRunState(run, "BLOCKED");
-        run.completedAt = atTime;
-        this.runStore.saveRun(
-          run,
-          record.stepIndex,
-          undefined,
-          undefined,
-          run.terminalReason,
-        );
-        await this.auditManager.recordEvent(
-          "DECISION_MADE",
-          { decision: "BLOCKED", reason: run.terminalReason },
-          { workspaceId: run.workspaceId, taskId: run.taskId },
-        );
-        failedRecoveryTasks.push(run.taskId);
-        continue;
-      }
-
-      // Acquire Worker Lease
-      const leaseAcquired = this.runStore.acquireLease(runId, this.workerId);
-      if (!leaseAcquired) {
-        await this.auditManager.recordEvent(
-          "ACTION_FAILED",
-          {
-            error: `Worker lease acquisition failed for run '${runId}' by worker '${this.workerId}'.`,
-          },
-          { workspaceId: run.workspaceId, taskId: run.taskId },
-        );
-        failedRecoveryTasks.push(run.taskId);
-        continue;
-      }
-
-      // Checkpoint reconciliation
-      const latestCheckpoint = this.runStore.getLatestCheckpointForRun(runId);
-      if (latestCheckpoint) {
-        if (
-          latestCheckpoint.executionState === "DISPATCHED" ||
-          latestCheckpoint.executionState === "UNKNOWN_IN_FLIGHT"
-        ) {
-          latestCheckpoint.executionState = "UNKNOWN_IN_FLIGHT";
-          latestCheckpoint.updatedAt = nowIso;
-          this.runStore.saveCheckpoint(latestCheckpoint);
-
-          run.terminalReason = `Action '${latestCheckpoint.toolId}' in step ${latestCheckpoint.stepIndex} was DISPATCHED before crash and status is UNKNOWN_IN_FLIGHT. Cannot safely verify external side-effects. Failing closed.`;
-          this.transitionRunState(run, "BLOCKED");
-          run.completedAt = atTime;
-          this.runStore.saveRun(
-            run,
-            record.stepIndex,
-            this.workerId,
-            undefined,
-            run.terminalReason,
-          );
-
-          await this.auditManager.recordEvent(
-            "ACTION_FAILED",
-            {
-              event: "UNKNOWN_IN_FLIGHT_DETECTED",
-              checkpoint: latestCheckpoint,
-              reason: run.terminalReason,
-            },
-            {
-              workspaceId: run.workspaceId,
-              taskId: run.taskId,
-              severity: "CRITICAL",
-            },
-          );
-          failedRecoveryTasks.push(run.taskId);
-          continue;
-        }
-      }
-
-      // Load run into memory maps
-      this.runs.set(runId, run);
-      this.activeTaskRuns.set(run.taskId, runId);
-      resumedTasks.push(run.taskId);
-
-      await this.auditManager.recordEvent(
-        "TASK_CREATED",
-        {
-          event: "RUN_RECOVERED",
-          runId,
-          taskId: run.taskId,
-          workerId: this.workerId,
-        },
-        { workspaceId: run.workspaceId, taskId: run.taskId },
-      );
-    }
-
-    // 2. Legacy retry state recovery
-    const legacyRes = await this.recoverLegacyRetries(atTime);
-    resumedTasks.push(...legacyRes.resumedTasks);
-    failedRecoveryTasks.push(...legacyRes.failedRecoveryTasks);
-
-    return {
-      recoveredCount: resumedTasks.length,
-      resumedTasks,
-      failedRecoveryTasks,
-    };
-  }
-
-  private async recoverLegacyRetries(atTime: Date): Promise<{
     resumedTasks: string[];
     failedRecoveryTasks: string[];
   }> {
@@ -2219,7 +1435,11 @@ export class ControlledAutonomyEngine {
       }
     }
 
-    return { resumedTasks, failedRecoveryTasks };
+    return {
+      recoveredCount: resumedTasks.length,
+      resumedTasks,
+      failedRecoveryTasks,
+    };
   }
 
   async evaluateAutonomyDecision(

@@ -98,6 +98,23 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
         expect(result.reply).toContain(item.expectedSubstring);
       });
     }
+
+    const guillemetInputs = [
+      "«سلام، اتصال برقرار است.»",
+      "سلام، اتصال برقرار است.",
+      "«سلام»",
+      "CONVERSATION ONLY: لطفاً فقط پاسخ متنی «سلام، اتصال برقرار است.» را برگردان. هیچ ACTION انجام نده.",
+    ];
+
+    for (const text of guillemetInputs) {
+      it(`should classify quoted or punctuated greeting "${text}" as CONVERSATION`, () => {
+        const input: BrainInput = { rawCommandText: text };
+        const result = brain.interpret(input);
+
+        expect(result.intent).toBe("CONVERSATION");
+        expect(result.reply).toBeDefined();
+      });
+    }
   });
 
   describe("Action Classification & Natural Owner Sentences", () => {
@@ -119,6 +136,7 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
       "کد رو اصلاح کن",
       "تستش کن",
       "ببین درست شده یا نه",
+      "«یارتریدر رو بررسی کن»",
     ];
 
     for (const text of naturalOwnerSentences) {
@@ -145,6 +163,8 @@ describe("DeterministicBrain M1 Operator Core Knowledge Capabilities", () => {
       "سایت چیست؟",
       "اطلاعات چیست؟",
       "من درباره سایت سؤال دارم",
+      "«یارتریدر»",
+      "«سرور»",
     ];
 
     for (const text of ambiguousInputs) {
