@@ -34,3 +34,4 @@ export * from "./core/monitoring/index.js";
 export * from "./core/assistant/index.js";
 export * from "./core/improvement/index.js";
 export * from "./core/bootstrap/index.js";
+export * from "./core/coordination/index.js";
