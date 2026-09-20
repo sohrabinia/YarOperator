@@ -98,6 +98,9 @@ export class DurableScheduler {
         workflow_json TEXT,
         status TEXT NOT NULL,
         enabled INTEGER NOT NULL,
+        owner_id TEXT,
+        user_id TEXT,
+        workspace_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );

@@ -259,7 +259,7 @@ export class OwnerCommandReceiver {
     // Preserved command text (Unicode & Persian text supported)
     const preservedText = input.rawCommandText;
 
-    // 5. Brain Interpretation
+    // 5. Environment resolution with fallback for legacy command receiver callers
     const resolvedEnvId = input.environmentId || `env_${input.workspaceId}`;
 
     const brainInput: BrainInput = {
