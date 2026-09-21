@@ -184,7 +184,7 @@ export class Normalizer {
       .toLowerCase()
       .replace(/[\u200B-\u200D\uFEFF]/g, " ") // Replace zero-width spaces / half-spaces with space
       .replace(/[\u200C]/g, " ") // Replace Persian ZWNJ (نیم‌فاصله) with space
-      .replace(/[،,.:;؟!?\-\\_]/g, " ") // Normalize punctuation
+      .replace(/[،,.:;؟!?\-\\_«»"'"`]/g, " ") // Normalize punctuation including Persian guillemets
       .replace(/\s+/g, " ") // Collapse multiple spaces
       .trim();
   }
