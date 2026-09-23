@@ -20,8 +20,100 @@ export interface Notification {
   read: boolean;
 }
 
+import { createRequire } from "node:module";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
+const require = createRequire(import.meta.url);
+
 export class NotificationManager {
   private notifications: Notification[] = [];
+  private db: any = null;
+
+  constructor(dbPath?: string) {
+    if (dbPath) {
+      if (dbPath !== ":memory:") {
+        const parentDir = dirname(dbPath);
+        if (parentDir && parentDir !== ".") {
+          mkdirSync(parentDir, { recursive: true });
+        }
+      }
+      const { DatabaseSync } = require("node:sqlite");
+      this.db = new DatabaseSync(dbPath);
+      this.initSchema();
+      this.rehydrate();
+    }
+  }
+
+  private initSchema(): void {
+    if (!this.db) return;
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        priority TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        workspace_id TEXT,
+        task_id TEXT,
+        metadata_json TEXT,
+        created_at INTEGER NOT NULL,
+        read INTEGER NOT NULL
+      );
+    `);
+  }
+
+  private rehydrate(): void {
+    if (!this.db) return;
+    const stmt = this.db.prepare(
+      `SELECT * FROM notifications ORDER BY created_at ASC`,
+    );
+    const rows = stmt.all() as any[];
+
+    for (const row of rows) {
+      let metadata: Record<string, unknown> | undefined;
+      try {
+        if (row.metadata_json) metadata = JSON.parse(row.metadata_json);
+      } catch {}
+
+      const notif: Notification = {
+        id: row.id,
+        type: row.type as NotificationType,
+        priority: row.priority as NotificationPriority,
+        title: row.title,
+        message: row.message,
+        workspaceId: row.workspace_id || undefined,
+        taskId: row.task_id || undefined,
+        metadata,
+        createdAt: new Date(Number(row.created_at)),
+        read: Boolean(row.read),
+      };
+
+      this.notifications.push(notif);
+    }
+  }
+
+  private persistNotification(notif: Notification): void {
+    if (!this.db) return;
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO notifications (
+        id, type, priority, title, message, workspace_id, task_id, metadata_json, created_at, read
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      notif.id,
+      notif.type,
+      notif.priority,
+      notif.title,
+      notif.message,
+      notif.workspaceId || null,
+      notif.taskId || null,
+      notif.metadata ? JSON.stringify(notif.metadata) : null,
+      notif.createdAt.getTime(),
+      notif.read ? 1 : 0,
+    );
+  }
 
   notify(params: {
     type: NotificationType;
@@ -46,6 +138,7 @@ export class NotificationManager {
     };
 
     this.notifications.push(notification);
+    this.persistNotification(notification);
     return notification;
   }
 
@@ -69,6 +162,15 @@ export class NotificationManager {
     const notif = this.notifications.find((n) => n.id === id);
     if (!notif) return false;
     notif.read = true;
+    this.persistNotification(notif);
     return true;
+  }
+
+  close(): void {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+    }
   }
 }

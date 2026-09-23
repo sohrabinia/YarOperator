@@ -1,6 +1,7 @@
 import { OperatorApiHandler } from "../../api/operator.js";
 import { OwnerManager, OwnerCommandReceiver } from "../owner/index.js";
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
+import { IdentityStore } from "../identity/index.js";
 import {
   AuditManager,
   AuditStore,
@@ -40,12 +41,16 @@ export function bootstrapOperatorApplication(
   options?: BootstrapOptions,
 ): OperatorApiHandler {
   const ownerManager = new OwnerManager();
-  const approvalManager = new ApprovalManager();
-  const policyEngine = new PolicyEngine(approvalManager);
-  const workspacePolicyManager = new WorkspacePolicyManager();
 
   const dbPath =
     options?.dbPath || process.env.OPERATOR_DB_PATH || "operator.db";
+
+  const approvalManager = options?.useInMemoryStores
+    ? new ApprovalManager(":memory:")
+    : new ApprovalManager(dbPath);
+
+  const policyEngine = new PolicyEngine(approvalManager);
+  const workspacePolicyManager = new WorkspacePolicyManager();
 
   const auditStore =
     options?.auditStore ||
@@ -64,7 +69,9 @@ export function bootstrapOperatorApplication(
     process.env.OPERATOR_WORKSPACE_ID ||
     "yartrader";
 
-  const notificationManager = new NotificationManager();
+  const notificationManager = options?.useInMemoryStores
+    ? new NotificationManager(":memory:")
+    : new NotificationManager(dbPath);
   const environmentManager = new EnvironmentManager();
 
   const toolEcosystem = new SecureToolEcosystem(
@@ -213,5 +220,18 @@ export function bootstrapOperatorApplication(
     tokenMap[token] = activeOwnerId;
   }
 
-  return new OperatorApiHandler(receiver, tokenMap);
+  const identityStoreForApi = options?.useInMemoryStores
+    ? new IdentityStore(":memory:")
+    : new IdentityStore(dbPath);
+
+  const apiHandler = new OperatorApiHandler(
+    receiver,
+    undefined,
+    identityStoreForApi,
+  );
+  for (const [t, oId] of Object.entries(tokenMap)) {
+    apiHandler.registerBearerToken(t, oId);
+  }
+
+  return apiHandler;
 }

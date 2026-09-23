@@ -307,16 +307,18 @@ export class IdentityStore {
   }
 
   public createSession(params: {
+    sessionId?: string;
     userId: string;
     ownerId: string;
     ttlMs?: number;
   }): PersistentSession {
-    const sessionId = `sess_${randomBytes(32).toString("hex")}`;
+    const sessionId =
+      params.sessionId || `sess_${randomBytes(32).toString("hex")}`;
     const now = Date.now();
-    const expiresAt = now + (params.ttlMs || 24 * 3600 * 1000);
+    const expiresAt = now + (params.ttlMs ?? 24 * 3600 * 1000);
 
     const stmt = this.db.prepare(`
-      INSERT INTO sessions (session_id, user_id, owner_id, created_at, expires_at)
+      INSERT OR REPLACE INTO sessions (session_id, user_id, owner_id, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?)
     `);
 
@@ -381,6 +383,10 @@ export class IdentityStore {
   }
 
   public close(): void {
-    this.db.close();
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+    }
   }
 }

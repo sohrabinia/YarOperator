@@ -4,6 +4,7 @@ import {
   OwnerCommandResult,
 } from "../core/owner/index.js";
 import { ExecutionContext } from "../core/contracts/index.js";
+import { IdentityStore } from "../core/identity/index.js";
 
 export interface OperatorApiRequest {
   headers: {
@@ -42,25 +43,123 @@ export interface OperatorApiResponse {
       auditEventId?: string;
       details?: unknown;
     };
+    health?: {
+      status: "HEALTHY" | "DEGRADED" | "UNHEALTHY";
+      uptimeMs: number;
+      timestamp: string;
+    };
+    readiness?: {
+      status: "READY" | "NOT_READY";
+      subsystems: {
+        commandReceiver: boolean;
+        identityStore: boolean;
+      };
+      timestamp: string;
+    };
   };
 }
 
 export class OperatorApiHandler {
   private validBearerTokens: Map<string, string> = new Map(); // token -> ownerId
+  private identityStore?: IdentityStore;
 
   constructor(
     private commandReceiver: OwnerCommandReceiver,
     initialTokens?: Record<string, string>,
+    identityStore?: IdentityStore,
   ) {
+    this.identityStore = identityStore;
     if (initialTokens) {
       for (const [token, ownerId] of Object.entries(initialTokens)) {
-        this.validBearerTokens.set(token, ownerId);
+        this.registerBearerToken(token, ownerId);
       }
     }
   }
 
+  public getHealth(): OperatorApiResponse {
+    return {
+      statusCode: 200,
+      body: {
+        success: true,
+        health: {
+          status: "HEALTHY",
+          uptimeMs: Math.floor(process.uptime() * 1000),
+          timestamp: new Date().toISOString(),
+        },
+      },
+    };
+  }
+
+  public getReadiness(): OperatorApiResponse {
+    const commandReceiverReady = Boolean(this.commandReceiver);
+    let identityStoreReady = true;
+
+    if (this.identityStore) {
+      try {
+        this.identityStore.getUserById("ping_test");
+      } catch (err) {
+        identityStoreReady = false;
+      }
+    }
+
+    const isReady = commandReceiverReady && identityStoreReady;
+
+    return {
+      statusCode: isReady ? 200 : 503,
+      body: {
+        success: isReady,
+        readiness: {
+          status: isReady ? "READY" : "NOT_READY",
+          subsystems: {
+            commandReceiver: commandReceiverReady,
+            identityStore: identityStoreReady,
+          },
+          timestamp: new Date().toISOString(),
+        },
+      },
+    };
+  }
+
   public registerBearerToken(token: string, ownerId: string): void {
     this.validBearerTokens.set(token, ownerId);
+    if (this.identityStore) {
+      const existingSession = this.identityStore.getSession(token);
+      if (existingSession) {
+        return;
+      }
+      let user = this.identityStore.getUserById(ownerId);
+      if (!user) {
+        user =
+          this.identityStore.getUserByEmail(`${ownerId}@yartrader.local`) ||
+          this.identityStore.createUser({
+            userId: ownerId,
+            primaryEmail: `${ownerId}@yartrader.local`,
+          });
+      }
+      this.identityStore.createSession({
+        sessionId: token,
+        userId: user.userId,
+        ownerId,
+      });
+    }
+  }
+
+  public getAuthenticatedOwnerId(token: string): string | null {
+    const cachedOwnerId = this.validBearerTokens.get(token);
+
+    if (this.identityStore) {
+      const session = this.identityStore.getSession(token);
+      if (!session) {
+        this.validBearerTokens.delete(token);
+        return null;
+      }
+      if (cachedOwnerId !== session.ownerId) {
+        this.validBearerTokens.set(token, session.ownerId);
+      }
+      return session.ownerId;
+    }
+
+    return cachedOwnerId || null;
   }
 
   public async handleChatRequest(
@@ -91,7 +190,7 @@ export class OperatorApiHandler {
         };
       }
 
-      const authenticatedOwnerId = this.validBearerTokens.get(token);
+      const authenticatedOwnerId = this.getAuthenticatedOwnerId(token);
 
       if (!authenticatedOwnerId) {
         return {

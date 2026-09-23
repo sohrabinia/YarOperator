@@ -1,9 +1,20 @@
 import { ActionSafetyLevel, ToolRequest } from "../contracts/index.js";
 import { createHash } from "crypto";
+import { createRequire } from "node:module";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
+const require = createRequire(import.meta.url);
 
 export interface ApprovalRequest {
   id: string;
   toolId: string;
+  action?: string;
+  workspaceId?: string;
+  environmentId?: string;
+  ownerId?: string;
+  taskId?: string;
+  params?: unknown;
   normalizedParamsHash: string;
   requestedAt: Date;
   expiresAt: Date;
@@ -13,6 +24,108 @@ export interface ApprovalRequest {
 
 export class ApprovalManager {
   private approvals = new Map<string, ApprovalRequest>();
+  private db: any = null;
+
+  constructor(dbPath?: string) {
+    if (dbPath) {
+      if (dbPath !== ":memory:") {
+        const parentDir = dirname(dbPath);
+        if (parentDir && parentDir !== ".") {
+          mkdirSync(parentDir, { recursive: true });
+        }
+      }
+      const { DatabaseSync } = require("node:sqlite");
+      this.db = new DatabaseSync(dbPath);
+      this.initSchema();
+      this.rehydrate();
+    }
+  }
+
+  private initSchema(): void {
+    if (!this.db) return;
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS approvals (
+        fingerprint TEXT PRIMARY KEY,
+        tool_id TEXT NOT NULL,
+        action TEXT,
+        workspace_id TEXT,
+        environment_id TEXT,
+        owner_id TEXT,
+        task_id TEXT,
+        params_json TEXT,
+        normalized_params_hash TEXT NOT NULL,
+        requested_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        approver TEXT
+      );
+    `);
+  }
+
+  private rehydrate(): void {
+    if (!this.db) return;
+    const stmt = this.db.prepare(`SELECT * FROM approvals`);
+    const rows = stmt.all() as any[];
+    const nowMs = Date.now();
+
+    for (const row of rows) {
+      let parsedParams = {};
+      try {
+        if (row.params_json) parsedParams = JSON.parse(row.params_json);
+      } catch {}
+
+      let status = row.status as ApprovalRequest["status"];
+      if (nowMs > Number(row.expires_at) && status === "PENDING") {
+        status = "EXPIRED";
+      }
+
+      const req: ApprovalRequest = {
+        id: row.fingerprint,
+        toolId: row.tool_id,
+        action: row.action || undefined,
+        workspaceId: row.workspace_id || undefined,
+        environmentId: row.environment_id || undefined,
+        ownerId: row.owner_id || undefined,
+        taskId: row.task_id || undefined,
+        params: parsedParams,
+        normalizedParamsHash: row.normalized_params_hash,
+        requestedAt: new Date(Number(row.requested_at)),
+        expiresAt: new Date(Number(row.expires_at)),
+        status,
+        approver: row.approver || undefined,
+      };
+
+      this.approvals.set(row.fingerprint, req);
+    }
+  }
+
+  private persistRecord(req: ApprovalRequest, params?: unknown): void {
+    if (!this.db) return;
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO approvals (
+        fingerprint, tool_id, action, workspace_id, environment_id, owner_id, task_id,
+        params_json, normalized_params_hash, requested_at, expires_at, status, approver
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const paramsJson = JSON.stringify(params ?? req.params ?? {});
+
+    stmt.run(
+      req.id,
+      req.toolId,
+      req.action || null,
+      req.workspaceId || null,
+      req.environmentId || null,
+      req.ownerId || null,
+      req.taskId || null,
+      paramsJson,
+      req.normalizedParamsHash,
+      req.requestedAt.getTime(),
+      req.expiresAt.getTime(),
+      req.status,
+      req.approver || null,
+    );
+  }
 
   private canonicalize(obj: unknown): string {
     if (obj === null || typeof obj !== "object") {
@@ -57,6 +170,8 @@ export class ApprovalManager {
     workspaceId?: string,
     environmentId?: string,
     action?: string,
+    ownerId?: string,
+    taskId?: string,
   ): ApprovalRequest {
     const fingerprint = this.createFingerprint(
       toolIdOrAction,
@@ -69,6 +184,12 @@ export class ApprovalManager {
     const req: ApprovalRequest = {
       id: fingerprint,
       toolId: toolIdOrAction,
+      action,
+      workspaceId,
+      environmentId,
+      ownerId,
+      taskId,
+      params,
       normalizedParamsHash: fingerprint,
       requestedAt: now,
       expiresAt: new Date(now.getTime() + ttlMs),
@@ -76,6 +197,7 @@ export class ApprovalManager {
     };
 
     this.approvals.set(fingerprint, req);
+    this.persistRecord(req, params);
     return req;
   }
 
@@ -85,6 +207,7 @@ export class ApprovalManager {
 
     if (new Date() > req.expiresAt) {
       req.status = "EXPIRED";
+      this.persistRecord(req);
       return false;
     }
 
@@ -92,6 +215,7 @@ export class ApprovalManager {
 
     req.status = "APPROVED";
     req.approver = approver;
+    this.persistRecord(req);
     return true;
   }
 
@@ -100,6 +224,7 @@ export class ApprovalManager {
     if (!req) return false;
 
     req.status = "DENIED";
+    this.persistRecord(req);
     return true;
   }
 
@@ -128,6 +253,7 @@ export class ApprovalManager {
 
     if (new Date() > req.expiresAt) {
       req.status = "EXPIRED";
+      this.persistRecord(req, params);
       return { valid: false, reason: "Approval request has expired." };
     }
 
@@ -147,6 +273,7 @@ export class ApprovalManager {
     }
 
     req.status = "CONSUMED";
+    this.persistRecord(req, params);
     return { valid: true };
   }
 
@@ -171,6 +298,14 @@ export class ApprovalManager {
       return this.approvals.get(fpExact);
     }
     return undefined;
+  }
+
+  close(): void {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+    }
   }
 }
 

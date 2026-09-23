@@ -509,6 +509,43 @@ export class OperatorWebServer {
       return;
     }
 
+    // Health Check Endpoint (Non-mutating Liveness)
+    if (
+      (pathname === "/health" ||
+        pathname === "/api/v1/operator/health" ||
+        pathname === "/Operator/health") &&
+      req.method === "GET"
+    ) {
+      const healthRes = this.apiHandler.getHealth();
+      const payloadBuf = Buffer.from(JSON.stringify(healthRes.body), "utf-8");
+      res.writeHead(healthRes.statusCode, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Length": payloadBuf.length.toString(),
+      });
+      res.end(payloadBuf);
+      return;
+    }
+
+    // Readiness Endpoint (Non-mutating Dependency & Capability Status)
+    if (
+      (pathname === "/readiness" ||
+        pathname === "/api/v1/operator/readiness" ||
+        pathname === "/Operator/readiness") &&
+      req.method === "GET"
+    ) {
+      const readinessRes = this.apiHandler.getReadiness();
+      const payloadBuf = Buffer.from(
+        JSON.stringify(readinessRes.body),
+        "utf-8",
+      );
+      res.writeHead(readinessRes.statusCode, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Length": payloadBuf.length.toString(),
+      });
+      res.end(payloadBuf);
+      return;
+    }
+
     // OIDC Route 1: GET /auth/google — Initiate OIDC Auth Flow (with proxy path aliases)
     if (
       (pathname === "/auth/google" ||
