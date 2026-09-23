@@ -15,7 +15,7 @@ describe("PolicyEngine & ApprovalManager Fail Closed & Security", () => {
   };
 
   beforeEach(() => {
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
   });
 

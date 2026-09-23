@@ -98,7 +98,7 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
   beforeEach(() => {
     agentRegistry = new AgentRegistry();
     orchestrator = new AgentOrchestrator(agentRegistry);
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
 
     const environmentManager = new EnvironmentManager();

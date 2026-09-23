@@ -52,7 +52,7 @@ describe("/Operator Web Interface & API Security Hardening Test Suite", () => {
 
   beforeEach(async () => {
     const ownerManager = new OwnerManager();
-    const approvalManager = new ApprovalManager();
+    const approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
     const auditManager = new AuditManager();
     const notificationManager = new NotificationManager();

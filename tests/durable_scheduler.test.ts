@@ -215,7 +215,7 @@ describe("Phase 8.2 — Durable Scheduler Primitive", () => {
 
     const policyEngine = new PolicyEngine();
     policyEngine.setRule("spy_exec_tool", "SAFE");
-    const approvalManager = new ApprovalManager();
+    const approvalManager = new ApprovalManager(":memory:");
 
     const workspacePolicyManager = new WorkspacePolicyManager();
     workspacePolicyManager.registerPolicy(

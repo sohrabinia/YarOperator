@@ -110,7 +110,7 @@ describe("Phase 8.4 — Crash Recovery & Resume", () => {
     const agentRegistry = new AgentRegistry();
     const orchestrator = new AgentOrchestrator(agentRegistry);
     const policyEngine = new PolicyEngine();
-    const approvalManager = new ApprovalManager();
+    const approvalManager = new ApprovalManager(":memory:");
     const toolRegistry = new ToolRegistry();
 
     const environmentManager = new EnvironmentManager();

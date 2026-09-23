@@ -15,7 +15,7 @@ describe("Phase 30 — Self Improvement Loop", () => {
   let improvementEngine: SelfImprovementEngine;
 
   beforeEach(() => {
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();

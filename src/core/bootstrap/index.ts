@@ -50,6 +50,16 @@ export function bootstrapOperatorApplication(
     );
   }
 
+  if (
+    isProd &&
+    options?.auditStore &&
+    !(options.auditStore instanceof SQLiteAuditStore)
+  ) {
+    throw new Error(
+      "PRODUCTION SECURITY FAILURE: Non-SQLite audit stores are strictly forbidden in production.",
+    );
+  }
+
   const rawDbPath =
     options?.dbPath || process.env.OPERATOR_DB_PATH || "operator.db";
 

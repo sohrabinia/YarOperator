@@ -64,7 +64,7 @@ describe("Owner Command Input Boundary & Bootstrap Path", () => {
 
   beforeEach(() => {
     ownerManager = new OwnerManager();
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();

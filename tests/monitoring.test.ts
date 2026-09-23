@@ -69,7 +69,7 @@ describe("Phase 28 — Production Monitoring & Incident Loop", () => {
     notificationManager = new NotificationManager();
     incidentManager = new IncidentManager(auditManager, notificationManager);
 
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
 
     const environmentManager = new EnvironmentManager();

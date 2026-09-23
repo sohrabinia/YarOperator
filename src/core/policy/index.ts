@@ -25,7 +25,12 @@ export interface ApprovalRequest {
 export class ApprovalManager {
   private db: any = null;
 
-  constructor(dbPath: string = ":memory:") {
+  constructor(dbPath?: string) {
+    if (!dbPath || dbPath.trim().length === 0) {
+      throw new Error(
+        "APPROVAL MANAGER FAILURE: Explicit dbPath must be provided to ApprovalManager.",
+      );
+    }
     if (dbPath !== ":memory:") {
       const parentDir = dirname(dbPath);
       if (parentDir && parentDir !== ".") {

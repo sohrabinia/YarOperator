@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createProductionServer } from "../src/web/index.ts";
 import { bootstrapOperatorApplication } from "../src/core/bootstrap/index.ts";
-import { SQLiteAuditStore } from "../src/core/audit/index.ts";
+import {
+  SQLiteAuditStore,
+  InMemoryAuditStore,
+} from "../src/core/audit/index.ts";
+import { ApprovalManager } from "../src/core/policy/index.ts";
 import { OperatorWebServer } from "../src/web/server.ts";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -159,5 +163,37 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
     expect(queried[0].payload.secret).not.toContain("secret_value_12345");
 
     auditStore.close();
+  });
+
+  it("should fail closed when ApprovalManager is instantiated without explicit dbPath or when production receives in-memory audit store", () => {
+    // 1. ApprovalManager missing dbPath fail-closed
+    expect(() => new (ApprovalManager as any)()).toThrow(
+      "APPROVAL MANAGER FAILURE: Explicit dbPath must be provided to ApprovalManager.",
+    );
+
+    // 2. Production NODE_ENV rejecting in-memory stores
+    const origEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      expect(() =>
+        bootstrapOperatorApplication({
+          useInMemoryStores: true,
+          dbPath: testDbPath,
+        }),
+      ).toThrow(
+        "PRODUCTION SECURITY FAILURE: In-memory store overrides are strictly forbidden in production.",
+      );
+
+      expect(() =>
+        bootstrapOperatorApplication({
+          auditStore: new InMemoryAuditStore(),
+          dbPath: testDbPath,
+        }),
+      ).toThrow(
+        "PRODUCTION SECURITY FAILURE: Non-SQLite audit stores are strictly forbidden in production.",
+      );
+    } finally {
+      process.env.NODE_ENV = origEnv;
+    }
   });
 });
