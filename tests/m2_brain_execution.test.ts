@@ -57,7 +57,7 @@ describe("M2: Brain → Existing Execution Architectural Pipeline", () => {
 
   beforeEach(() => {
     registry = new AgentRegistry();
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
 
     const envManager = new EnvironmentManager();

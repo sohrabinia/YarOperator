@@ -60,6 +60,7 @@ export interface OperatorServerOptions {
   authorizedOwnerEmail?: string;
   allowedOwnerEmails?: Record<string, string>;
   mockJwksPublicKeyPem?: string; // Optional RSA Public Key for test signature verification
+  identityStore?: IdentityStore;
 }
 
 export class OperatorWebServer {
@@ -111,8 +112,14 @@ export class OperatorWebServer {
       [this.authorizedOwnerEmail]: "owner_sohrab",
     };
 
-    const dbPath = process.env.OPERATOR_DB_PATH || "operator.db";
-    this.identityStore = new IdentityStore(dbPath);
+    const resolvedStore =
+      options.identityStore || options.apiHandler.getIdentityStore();
+    if (!resolvedStore) {
+      throw new Error(
+        "SERVER INITIALIZATION FAILURE: Mandatory IdentityStore instance was not provided.",
+      );
+    }
+    this.identityStore = resolvedStore;
     // Seed initial legacy owner identity
     this.identityStore.migrateLegacyOwnerSohrab(this.authorizedOwnerEmail, [
       "yartrader",
@@ -506,6 +513,43 @@ export class OperatorWebServer {
     if (req.method === "OPTIONS") {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    // Health Check Endpoint (Non-mutating Liveness)
+    if (
+      (pathname === "/health" ||
+        pathname === "/api/v1/operator/health" ||
+        pathname === "/Operator/health") &&
+      req.method === "GET"
+    ) {
+      const healthRes = this.apiHandler.getHealth();
+      const payloadBuf = Buffer.from(JSON.stringify(healthRes.body), "utf-8");
+      res.writeHead(healthRes.statusCode, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Length": payloadBuf.length.toString(),
+      });
+      res.end(payloadBuf);
+      return;
+    }
+
+    // Readiness Endpoint (Non-mutating Dependency & Capability Status)
+    if (
+      (pathname === "/readiness" ||
+        pathname === "/api/v1/operator/readiness" ||
+        pathname === "/Operator/readiness") &&
+      req.method === "GET"
+    ) {
+      const readinessRes = this.apiHandler.getReadiness();
+      const payloadBuf = Buffer.from(
+        JSON.stringify(readinessRes.body),
+        "utf-8",
+      );
+      res.writeHead(readinessRes.statusCode, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Length": payloadBuf.length.toString(),
+      });
+      res.end(payloadBuf);
       return;
     }
 

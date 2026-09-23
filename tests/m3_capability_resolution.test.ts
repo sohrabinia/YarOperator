@@ -181,7 +181,7 @@ describe("M3 — Capability Resolution Test Suite", () => {
     it("11. Invalid explicit tool fails closed during Orchestrator tool registry verification", async () => {
       const brainRes = brain.interpret({ rawCommandText: "تست بگیر" });
       const orchestrator = new AgentOrchestrator(registry);
-      const policyEngine = new PolicyEngine(new ApprovalManager());
+      const policyEngine = new PolicyEngine(new ApprovalManager(":memory:"));
       const toolEcosystem = new SecureToolEcosystem();
       orchestrator.setPolicyEngine(policyEngine);
       orchestrator.setToolEcosystem(toolEcosystem);
@@ -272,7 +272,7 @@ describe("M3 — Capability Resolution Test Suite", () => {
     });
 
     it("17. CapabilityResolver never invokes PolicyEngine directly", () => {
-      const approvalManager = new ApprovalManager();
+      const approvalManager = new ApprovalManager(":memory:");
       const policyEngine = new PolicyEngine(approvalManager);
       const evaluateSpy = vi.spyOn(policyEngine, "evaluate");
 

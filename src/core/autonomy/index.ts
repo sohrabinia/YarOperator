@@ -233,6 +233,7 @@ export class DurableAutonomyRunStore {
     }
     const { DatabaseSync } = require("node:sqlite");
     this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.init();
   }
 
@@ -333,7 +334,7 @@ export class DurableAutonomyRunStore {
           ? run.completedAt.toISOString()
           : String(run.completedAt)
         : null,
-      run.terminalReason || null,
+      run.terminalReason || cancellationReason || null,
       run.lastProposal ? JSON.stringify(run.lastProposal) : null,
       run.lastVerificationResult || null,
       JSON.stringify(run.auditTrail || []),
@@ -418,7 +419,9 @@ export class DurableAutonomyRunStore {
         return false;
       }
 
-      const isExpired = row.lease_expires_at && row.lease_expires_at <= nowIso;
+      const isExpired =
+        !row.lease_expires_at ||
+        (row.lease_expires_at && row.lease_expires_at <= nowIso);
       if (
         !row.active_worker_id ||
         row.active_worker_id === workerId ||

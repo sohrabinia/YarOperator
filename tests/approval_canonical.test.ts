@@ -3,7 +3,7 @@ import { ApprovalManager } from "../src/index.js";
 
 describe("ApprovalManager Canonical Fingerprinting", () => {
   it("should generate identical fingerprints for equivalent nested objects with different key insertion orders", () => {
-    const mgr = new ApprovalManager();
+    const mgr = new ApprovalManager(":memory:");
 
     const objA = {
       b: 2,
@@ -32,7 +32,7 @@ describe("ApprovalManager Canonical Fingerprinting", () => {
   });
 
   it("should generate different fingerprints for semantically different parameters", () => {
-    const mgr = new ApprovalManager();
+    const mgr = new ApprovalManager(":memory:");
 
     const objA = { path: "/tmp/file1" };
     const objB = { path: "/tmp/file2" };

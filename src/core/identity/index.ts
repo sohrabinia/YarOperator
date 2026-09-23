@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 
@@ -66,6 +66,7 @@ export class IdentityStore {
     }
     const { DatabaseSync } = require("node:sqlite");
     this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.initSchema();
   }
 
@@ -306,24 +307,31 @@ export class IdentityStore {
     return Boolean(row && row.status === "ACTIVE");
   }
 
+  public hashSessionToken(token: string): string {
+    return createHash("sha256").update(token).digest("hex");
+  }
+
   public createSession(params: {
+    sessionId?: string;
     userId: string;
     ownerId: string;
     ttlMs?: number;
   }): PersistentSession {
-    const sessionId = `sess_${randomBytes(32).toString("hex")}`;
+    const rawSessionId =
+      params.sessionId || `sess_${randomBytes(32).toString("hex")}`;
+    const tokenHash = this.hashSessionToken(rawSessionId);
     const now = Date.now();
-    const expiresAt = now + (params.ttlMs || 24 * 3600 * 1000);
+    const expiresAt = now + (params.ttlMs ?? 24 * 3600 * 1000);
 
     const stmt = this.db.prepare(`
-      INSERT INTO sessions (session_id, user_id, owner_id, created_at, expires_at)
+      INSERT OR REPLACE INTO sessions (session_id, user_id, owner_id, created_at, expires_at)
       VALUES (?, ?, ?, ?, ?)
     `);
 
-    stmt.run(sessionId, params.userId, params.ownerId, now, expiresAt);
+    stmt.run(tokenHash, params.userId, params.ownerId, now, expiresAt);
 
     return {
-      sessionId,
+      sessionId: rawSessionId,
       userId: params.userId,
       ownerId: params.ownerId,
       createdAt: now,
@@ -333,8 +341,10 @@ export class IdentityStore {
 
   public getSession(sessionId: string): PersistentSession | null {
     if (!sessionId) return null;
+    const tokenHash = this.hashSessionToken(sessionId);
+
     const stmt = this.db.prepare(`SELECT * FROM sessions WHERE session_id = ?`);
-    const row = stmt.get(sessionId) as any;
+    const row = stmt.get(tokenHash) as any;
     if (!row) return null;
 
     if (Date.now() > Number(row.expires_at)) {
@@ -343,7 +353,7 @@ export class IdentityStore {
     }
 
     return {
-      sessionId: row.session_id,
+      sessionId,
       userId: row.user_id,
       ownerId: row.owner_id,
       createdAt: Number(row.created_at),
@@ -352,8 +362,9 @@ export class IdentityStore {
   }
 
   public revokeSession(sessionId: string): void {
+    const tokenHash = this.hashSessionToken(sessionId);
     const stmt = this.db.prepare(`DELETE FROM sessions WHERE session_id = ?`);
-    stmt.run(sessionId);
+    stmt.run(tokenHash);
   }
 
   public migrateLegacyOwnerSohrab(
@@ -380,7 +391,23 @@ export class IdentityStore {
     return user;
   }
 
+  public checkIntegrity(): boolean {
+    if (!this.db) return false;
+    try {
+      const stmt = this.db.prepare("PRAGMA quick_check;");
+      const row = stmt.get() as any;
+      const result = row ? Object.values(row)[0] : "";
+      return result === "ok";
+    } catch {
+      return false;
+    }
+  }
+
   public close(): void {
-    this.db.close();
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+    }
   }
 }

@@ -53,7 +53,7 @@ describe("Phase 8.3 — Durable Retry & Failure Semantics", () => {
     agentRegistry = new AgentRegistry();
     orchestrator = new AgentOrchestrator(agentRegistry);
     policyEngine = new PolicyEngine();
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
 
     const registry = new ToolRegistry();
     const failingTool: Tool = {

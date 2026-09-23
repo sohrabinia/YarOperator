@@ -4,6 +4,7 @@ import {
   OwnerCommandResult,
 } from "../core/owner/index.js";
 import { ExecutionContext } from "../core/contracts/index.js";
+import { IdentityStore } from "../core/identity/index.js";
 
 export interface OperatorApiRequest {
   headers: {
@@ -42,25 +43,174 @@ export interface OperatorApiResponse {
       auditEventId?: string;
       details?: unknown;
     };
+    health?: {
+      status: "HEALTHY" | "DEGRADED" | "UNHEALTHY";
+      uptimeMs: number;
+      timestamp: string;
+    };
+    readiness?: {
+      status: "READY" | "NOT_READY";
+      subsystems: {
+        commandReceiver: boolean;
+        identityStore: boolean;
+      };
+      timestamp: string;
+    };
   };
 }
 
 export class OperatorApiHandler {
-  private validBearerTokens: Map<string, string> = new Map(); // token -> ownerId
+  private identityStore: IdentityStore;
 
   constructor(
     private commandReceiver: OwnerCommandReceiver,
     initialTokens?: Record<string, string>,
+    identityStore?: IdentityStore,
   ) {
+    if (!identityStore) {
+      throw new Error(
+        "AUTHENTICATION SECURITY FAILURE: IdentityStore must be provided to OperatorApiHandler.",
+      );
+    }
+    this.identityStore = identityStore;
     if (initialTokens) {
       for (const [token, ownerId] of Object.entries(initialTokens)) {
-        this.validBearerTokens.set(token, ownerId);
+        this.registerBearerToken(token, ownerId);
       }
     }
   }
 
-  public registerBearerToken(token: string, ownerId: string): void {
-    this.validBearerTokens.set(token, ownerId);
+  public getIdentityStore(): IdentityStore {
+    return this.identityStore;
+  }
+
+  public getHealth(): OperatorApiResponse {
+    return {
+      statusCode: 200,
+      body: {
+        success: true,
+        health: {
+          status: "HEALTHY",
+          uptimeMs: Math.floor(process.uptime() * 1000),
+          timestamp: new Date().toISOString(),
+        },
+      },
+    };
+  }
+
+  public getReadiness(): OperatorApiResponse {
+    const commandReceiverReady = Boolean(this.commandReceiver);
+    let identityStoreReady = true;
+
+    if (this.identityStore) {
+      try {
+        identityStoreReady = this.identityStore.checkIntegrity();
+      } catch (err) {
+        identityStoreReady = false;
+      }
+    }
+
+    const isReady = commandReceiverReady && identityStoreReady;
+
+    return {
+      statusCode: isReady ? 200 : 503,
+      body: {
+        success: isReady,
+        readiness: {
+          status: isReady ? "READY" : "NOT_READY",
+          subsystems: {
+            commandReceiver: commandReceiverReady,
+            identityStore: identityStoreReady,
+          },
+          timestamp: new Date().toISOString(),
+        },
+      },
+    };
+  }
+
+  public registerBearerToken(
+    token: string,
+    ownerId: string,
+    defaultWorkspaces: string[] = ["yartrader", "ws_default"],
+  ): void {
+    if (!this.identityStore) {
+      throw new Error(
+        "AUTHENTICATION SECURITY FAILURE: Cannot register bearer token without an authoritative IdentityStore.",
+      );
+    }
+
+    let user = this.identityStore.getUserById(ownerId);
+    if (!user) {
+      user =
+        this.identityStore.getUserByEmail(`${ownerId}@yartrader.local`) ||
+        this.identityStore.createUser({
+          userId: ownerId,
+          primaryEmail: `${ownerId}@yartrader.local`,
+        });
+    }
+    for (const wsId of defaultWorkspaces) {
+      if (!this.identityStore.isUserActiveWorkspaceMember(user.userId, wsId)) {
+        this.identityStore.createWorkspace({
+          workspaceId: wsId,
+          name: `Workspace ${wsId}`,
+          ownerUserId: user.userId,
+        });
+      }
+    }
+    const existingSession = this.identityStore.getSession(token);
+    if (!existingSession) {
+      this.identityStore.createSession({
+        sessionId: token,
+        userId: user.userId,
+        ownerId,
+      });
+    }
+  }
+
+  public getAuthenticatedOwnerId(
+    token: string,
+    workspaceId?: string,
+  ): { ownerId: string | null; error?: string } {
+    if (!this.identityStore) {
+      return {
+        ownerId: null,
+        error:
+          "Unauthorized: IdentityStore unavailable (fail-closed bearer authentication).",
+      };
+    }
+
+    const session = this.identityStore.getSession(token);
+    if (!session) {
+      return {
+        ownerId: null,
+        error: "Unauthorized: Invalid or expired Bearer token.",
+      };
+    }
+
+    // Check UserIdentity status
+    const user = this.identityStore.getUserById(session.userId);
+    if (!user || user.status !== "ACTIVE") {
+      return {
+        ownerId: null,
+        error: `Unauthorized: User identity '${session.userId}' is disabled or non-existent.`,
+      };
+    }
+
+    // Check Workspace Membership if workspaceId is provided
+    if (
+      workspaceId &&
+      !this.identityStore.isUserActiveWorkspaceMember(
+        session.userId,
+        workspaceId,
+      )
+    ) {
+      return {
+        ownerId: null,
+        error: `Forbidden: User '${session.userId}' is not an active member of workspace '${workspaceId}'.`,
+      };
+    }
+
+    return { ownerId: session.ownerId };
   }
 
   public async handleChatRequest(
@@ -91,18 +241,6 @@ export class OperatorApiHandler {
         };
       }
 
-      const authenticatedOwnerId = this.validBearerTokens.get(token);
-
-      if (!authenticatedOwnerId) {
-        return {
-          statusCode: 401,
-          body: {
-            success: false,
-            error: "Unauthorized: Invalid or expired Bearer token.",
-          },
-        };
-      }
-
       // 2. HTTP Input Validation
       const rawBody = req.body;
       if (
@@ -119,6 +257,24 @@ export class OperatorApiHandler {
           },
         };
       }
+
+      // Single Authoritative Auth Path: Token -> Session -> Active User -> Workspace Membership
+      const authResult = this.getAuthenticatedOwnerId(
+        token,
+        rawBody.workspaceId,
+      );
+      if (!authResult.ownerId) {
+        const isForbidden = authResult.error?.startsWith("Forbidden:");
+        return {
+          statusCode: isForbidden ? 403 : 401,
+          body: {
+            success: false,
+            error: authResult.error || "Unauthorized: Authentication failed.",
+          },
+        };
+      }
+
+      const authenticatedOwnerId = authResult.ownerId;
 
       const {
         commandId = `cmd_api_${Date.now()}`,

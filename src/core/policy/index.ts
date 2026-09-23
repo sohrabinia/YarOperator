@@ -1,9 +1,20 @@
 import { ActionSafetyLevel, ToolRequest } from "../contracts/index.js";
 import { createHash } from "crypto";
+import { createRequire } from "node:module";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
+const require = createRequire(import.meta.url);
 
 export interface ApprovalRequest {
   id: string;
   toolId: string;
+  action?: string;
+  workspaceId?: string;
+  environmentId?: string;
+  ownerId?: string;
+  taskId?: string;
+  params?: unknown;
   normalizedParamsHash: string;
   requestedAt: Date;
   expiresAt: Date;
@@ -12,7 +23,120 @@ export interface ApprovalRequest {
 }
 
 export class ApprovalManager {
-  private approvals = new Map<string, ApprovalRequest>();
+  private db: any = null;
+
+  constructor(dbPath?: string) {
+    if (!dbPath || dbPath.trim().length === 0) {
+      throw new Error(
+        "APPROVAL MANAGER FAILURE: Explicit dbPath must be provided to ApprovalManager.",
+      );
+    }
+    if (dbPath !== ":memory:") {
+      const parentDir = dirname(dbPath);
+      if (parentDir && parentDir !== ".") {
+        mkdirSync(parentDir, { recursive: true });
+      }
+    }
+    const { DatabaseSync } = require("node:sqlite");
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+    this.initSchema();
+    this.rehydrate();
+  }
+
+  private initSchema(): void {
+    if (!this.db) return;
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS approvals (
+        fingerprint TEXT PRIMARY KEY,
+        tool_id TEXT NOT NULL,
+        action TEXT,
+        workspace_id TEXT,
+        environment_id TEXT,
+        owner_id TEXT,
+        task_id TEXT,
+        params_json TEXT,
+        normalized_params_hash TEXT NOT NULL,
+        requested_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        approver TEXT
+      );
+    `);
+  }
+
+  private rehydrate(): void {
+    if (!this.db) return;
+    const stmt = this.db.prepare(`SELECT * FROM approvals`);
+    const rows = stmt.all() as any[];
+    const nowMs = Date.now();
+
+    const validStatuses = new Set([
+      "PENDING",
+      "APPROVED",
+      "DENIED",
+      "CONSUMED",
+      "EXPIRED",
+    ]);
+
+    for (const row of rows) {
+      if (row.params_json) {
+        try {
+          JSON.parse(row.params_json);
+        } catch {
+          throw new Error(
+            `PERSISTENCE CORRUPTION FAILURE: Approval record '${row.fingerprint}' contains corrupt JSON parameters.`,
+          );
+        }
+      }
+
+      if (!validStatuses.has(row.status)) {
+        throw new Error(
+          `PERSISTENCE CORRUPTION FAILURE: Approval record '${row.fingerprint}' contains invalid status '${row.status}'.`,
+        );
+      }
+
+      if (nowMs > Number(row.expires_at) && row.status === "PENDING") {
+        this.db
+          .prepare(
+            `UPDATE approvals SET status = 'EXPIRED' WHERE fingerprint = ?`,
+          )
+          .run(row.fingerprint);
+      }
+    }
+  }
+
+  private persistRecord(req: ApprovalRequest, params?: unknown): void {
+    if (!this.db) {
+      throw new Error(
+        "APPROVAL MANAGER PERSISTENCE FAILURE: SQLite database connection is uninitialized or unavailable.",
+      );
+    }
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO approvals (
+        fingerprint, tool_id, action, workspace_id, environment_id, owner_id, task_id,
+        params_json, normalized_params_hash, requested_at, expires_at, status, approver
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const paramsJson = JSON.stringify(params ?? req.params ?? {});
+
+    stmt.run(
+      req.id,
+      req.toolId,
+      req.action || null,
+      req.workspaceId || null,
+      req.environmentId || null,
+      req.ownerId || null,
+      req.taskId || null,
+      paramsJson,
+      req.normalizedParamsHash,
+      req.requestedAt.getTime(),
+      req.expiresAt.getTime(),
+      req.status,
+      req.approver || null,
+    );
+  }
 
   private canonicalize(obj: unknown): string {
     if (obj === null || typeof obj !== "object") {
@@ -57,6 +181,8 @@ export class ApprovalManager {
     workspaceId?: string,
     environmentId?: string,
     action?: string,
+    ownerId?: string,
+    taskId?: string,
   ): ApprovalRequest {
     const fingerprint = this.createFingerprint(
       toolIdOrAction,
@@ -69,22 +195,95 @@ export class ApprovalManager {
     const req: ApprovalRequest = {
       id: fingerprint,
       toolId: toolIdOrAction,
+      action,
+      workspaceId,
+      environmentId,
+      ownerId,
+      taskId,
+      params,
       normalizedParamsHash: fingerprint,
       requestedAt: now,
       expiresAt: new Date(now.getTime() + ttlMs),
       status: "PENDING",
     };
 
-    this.approvals.set(fingerprint, req);
+    this.persistRecord(req, params);
     return req;
   }
 
+  private fetchRecord(fingerprint: string): ApprovalRequest | undefined {
+    if (!this.db) {
+      throw new Error(
+        "APPROVAL MANAGER FAILURE: SQLite database connection is uninitialized or unavailable.",
+      );
+    }
+
+    const stmt = this.db.prepare(
+      `SELECT * FROM approvals WHERE fingerprint = ?`,
+    );
+    const row = stmt.get(fingerprint) as any;
+    if (!row) {
+      return undefined;
+    }
+
+    let parsedParams = {};
+    if (row.params_json) {
+      try {
+        parsedParams = JSON.parse(row.params_json);
+      } catch {
+        throw new Error(
+          `PERSISTENCE CORRUPTION FAILURE: Approval record '${fingerprint}' contains corrupt JSON parameters.`,
+        );
+      }
+    }
+
+    const validStatuses = new Set([
+      "PENDING",
+      "APPROVED",
+      "DENIED",
+      "CONSUMED",
+      "EXPIRED",
+    ]);
+    if (!validStatuses.has(row.status)) {
+      throw new Error(
+        `PERSISTENCE CORRUPTION FAILURE: Approval record '${fingerprint}' contains invalid status '${row.status}'.`,
+      );
+    }
+
+    let status = row.status as ApprovalRequest["status"];
+    if (Date.now() > Number(row.expires_at) && status === "PENDING") {
+      status = "EXPIRED";
+      this.db
+        .prepare(
+          `UPDATE approvals SET status = 'EXPIRED' WHERE fingerprint = ?`,
+        )
+        .run(fingerprint);
+    }
+
+    return {
+      id: row.fingerprint,
+      toolId: row.tool_id,
+      action: row.action || undefined,
+      workspaceId: row.workspace_id || undefined,
+      environmentId: row.environment_id || undefined,
+      ownerId: row.owner_id || undefined,
+      taskId: row.task_id || undefined,
+      params: parsedParams,
+      normalizedParamsHash: row.normalized_params_hash,
+      requestedAt: new Date(Number(row.requested_at)),
+      expiresAt: new Date(Number(row.expires_at)),
+      status,
+      approver: row.approver || undefined,
+    };
+  }
+
   grantApproval(fingerprint: string, approver: string): boolean {
-    const req = this.approvals.get(fingerprint);
+    const req = this.fetchRecord(fingerprint);
     if (!req) return false;
 
     if (new Date() > req.expiresAt) {
       req.status = "EXPIRED";
+      this.persistRecord(req);
       return false;
     }
 
@@ -92,14 +291,16 @@ export class ApprovalManager {
 
     req.status = "APPROVED";
     req.approver = approver;
+    this.persistRecord(req);
     return true;
   }
 
   denyApproval(fingerprint: string): boolean {
-    const req = this.approvals.get(fingerprint);
+    const req = this.fetchRecord(fingerprint);
     if (!req) return false;
 
     req.status = "DENIED";
+    this.persistRecord(req);
     return true;
   }
 
@@ -117,37 +318,57 @@ export class ApprovalManager {
       environmentId,
       action,
     );
-    const req = this.approvals.get(fingerprint);
 
-    if (!req) {
-      return {
-        valid: false,
-        reason: "No approval request found for fingerprint.",
-      };
-    }
+    if (this.db) {
+      const nowMs = Date.now();
+      const stmt = this.db.prepare(`
+        UPDATE approvals
+        SET status = 'CONSUMED'
+        WHERE fingerprint = ? AND status = 'APPROVED' AND expires_at > ?
+      `);
+      const result = stmt.run(fingerprint, nowMs);
 
-    if (new Date() > req.expiresAt) {
-      req.status = "EXPIRED";
-      return { valid: false, reason: "Approval request has expired." };
-    }
+      const changes =
+        typeof result.changes === "bigint"
+          ? Number(result.changes)
+          : (result.changes ?? 0);
 
-    if (req.status === "CONSUMED") {
-      return {
-        valid: false,
-        reason:
-          "Approval single-use token already consumed (replay attack protection).",
-      };
-    }
+      if (changes === 1) {
+        // Atomic consumption succeeded
+        return { valid: true };
+      }
 
-    if (req.status !== "APPROVED") {
+      // Consumption failed — fetch record to give exact fail-closed reason
+      const req = this.fetchRecord(fingerprint);
+      if (!req) {
+        return {
+          valid: false,
+          reason: "No approval request found for fingerprint.",
+        };
+      }
+
+      if (nowMs > req.expiresAt.getTime()) {
+        return { valid: false, reason: "Approval request has expired." };
+      }
+
+      if (req.status === "CONSUMED") {
+        return {
+          valid: false,
+          reason:
+            "Approval single-use token already consumed (replay attack protection).",
+        };
+      }
+
       return {
         valid: false,
         reason: `Approval status is '${req.status}', expected 'APPROVED'.`,
       };
     }
 
-    req.status = "CONSUMED";
-    return { valid: true };
+    return {
+      valid: false,
+      reason: "ApprovalManager persistence unavailable (fail-closed).",
+    };
   }
 
   get(
@@ -157,7 +378,7 @@ export class ApprovalManager {
     environmentId?: string,
     action?: string,
   ): ApprovalRequest | undefined {
-    const direct = this.approvals.get(fingerprintOrToolId);
+    const direct = this.fetchRecord(fingerprintOrToolId);
     if (direct) return direct;
 
     if (params !== undefined) {
@@ -168,9 +389,17 @@ export class ApprovalManager {
         environmentId,
         action,
       );
-      return this.approvals.get(fpExact);
+      return this.fetchRecord(fpExact);
     }
     return undefined;
+  }
+
+  close(): void {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+    }
   }
 }
 

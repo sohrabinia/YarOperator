@@ -19,6 +19,7 @@ import {
   WorkspacePolicy,
 } from "../src/core/workspace/policy.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
+import { IdentityStore } from "../src/core/identity/index.js";
 
 class MockChatTool implements Tool {
   metadata = {
@@ -62,7 +63,7 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
 
   beforeEach(() => {
     ownerManager = new OwnerManager();
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
     auditManager = new AuditManager();
     notificationManager = new NotificationManager();
@@ -137,9 +138,12 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
       orchestrator,
     );
 
-    apiHandler = new OperatorApiHandler(commandReceiver, {
-      [bearerToken]: "owner_sohrab",
-    });
+    const identityStore = new IdentityStore(":memory:");
+    apiHandler = new OperatorApiHandler(
+      commandReceiver,
+      { [bearerToken]: "owner_sohrab" },
+      identityStore,
+    );
 
     agentRegistry.registerAgent({
       id: "jules_autonomy_agent",

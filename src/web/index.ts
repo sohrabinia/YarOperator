@@ -34,6 +34,7 @@ export async function createProductionServer(options?: {
     googleRedirectUri: options?.googleRedirectUri,
     authorizedOwnerEmail: options?.authorizedOwnerEmail,
     mockJwksPublicKeyPem: options?.mockJwksPublicKeyPem,
+    identityStore: apiHandler.getIdentityStore(),
   });
 
   const actualPort = await server.start();

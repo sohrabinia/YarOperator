@@ -55,7 +55,7 @@ describe("M10 External AI Coordination Security & Regression Test Suite", () => 
 
   beforeEach(() => {
     identityStore = new IdentityStore(":memory:");
-    approvalManager = new ApprovalManager();
+    approvalManager = new ApprovalManager(":memory:");
     policyEngine = new PolicyEngine(approvalManager);
     auditManager = new AuditManager(new InMemoryAuditStore());
 
