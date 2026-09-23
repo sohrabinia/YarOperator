@@ -69,11 +69,31 @@ export class ApprovalManager {
     const rows = stmt.all() as any[];
     const nowMs = Date.now();
 
+    const validStatuses = new Set([
+      "PENDING",
+      "APPROVED",
+      "DENIED",
+      "CONSUMED",
+      "EXPIRED",
+    ]);
+
     for (const row of rows) {
       let parsedParams = {};
-      try {
-        if (row.params_json) parsedParams = JSON.parse(row.params_json);
-      } catch {}
+      if (row.params_json) {
+        try {
+          parsedParams = JSON.parse(row.params_json);
+        } catch {
+          throw new Error(
+            `PERSISTENCE CORRUPTION FAILURE: Approval record '${row.fingerprint}' contains corrupt JSON parameters.`,
+          );
+        }
+      }
+
+      if (!validStatuses.has(row.status)) {
+        throw new Error(
+          `PERSISTENCE CORRUPTION FAILURE: Approval record '${row.fingerprint}' contains invalid status '${row.status}'.`,
+        );
+      }
 
       let status = row.status as ApprovalRequest["status"];
       if (nowMs > Number(row.expires_at) && status === "PENDING") {
@@ -214,9 +234,28 @@ export class ApprovalManager {
       }
 
       let parsedParams = {};
-      try {
-        if (row.params_json) parsedParams = JSON.parse(row.params_json);
-      } catch {}
+      if (row.params_json) {
+        try {
+          parsedParams = JSON.parse(row.params_json);
+        } catch {
+          throw new Error(
+            `PERSISTENCE CORRUPTION FAILURE: Approval record '${fingerprint}' contains corrupt JSON parameters.`,
+          );
+        }
+      }
+
+      const validStatuses = new Set([
+        "PENDING",
+        "APPROVED",
+        "DENIED",
+        "CONSUMED",
+        "EXPIRED",
+      ]);
+      if (!validStatuses.has(row.status)) {
+        throw new Error(
+          `PERSISTENCE CORRUPTION FAILURE: Approval record '${fingerprint}' contains invalid status '${row.status}'.`,
+        );
+      }
 
       let status = row.status as ApprovalRequest["status"];
       if (Date.now() > Number(row.expires_at) && status === "PENDING") {

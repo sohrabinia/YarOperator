@@ -71,11 +71,45 @@ export class NotificationManager {
     );
     const rows = stmt.all() as any[];
 
+    const validTypes = new Set<NotificationType>([
+      "TASK_COMPLETED",
+      "TASK_FAILED",
+      "APPROVAL_REQUIRED",
+      "ESCALATION",
+      "STATUS_UPDATE",
+      "SUMMARY_REPORT",
+    ]);
+
+    const validPriorities = new Set<NotificationPriority>([
+      "LOW",
+      "MEDIUM",
+      "HIGH",
+      "URGENT",
+    ]);
+
     for (const row of rows) {
       let metadata: Record<string, unknown> | undefined;
-      try {
-        if (row.metadata_json) metadata = JSON.parse(row.metadata_json);
-      } catch {}
+      if (row.metadata_json) {
+        try {
+          metadata = JSON.parse(row.metadata_json);
+        } catch {
+          throw new Error(
+            `PERSISTENCE CORRUPTION FAILURE: Notification record '${row.id}' contains corrupt JSON metadata.`,
+          );
+        }
+      }
+
+      if (!validTypes.has(row.type as NotificationType)) {
+        throw new Error(
+          `PERSISTENCE CORRUPTION FAILURE: Notification record '${row.id}' contains invalid type '${row.type}'.`,
+        );
+      }
+
+      if (!validPriorities.has(row.priority as NotificationPriority)) {
+        throw new Error(
+          `PERSISTENCE CORRUPTION FAILURE: Notification record '${row.id}' contains invalid priority '${row.priority}'.`,
+        );
+      }
 
       const notif: Notification = {
         id: row.id,

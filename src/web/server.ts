@@ -60,6 +60,7 @@ export interface OperatorServerOptions {
   authorizedOwnerEmail?: string;
   allowedOwnerEmails?: Record<string, string>;
   mockJwksPublicKeyPem?: string; // Optional RSA Public Key for test signature verification
+  identityStore?: IdentityStore;
 }
 
 export class OperatorWebServer {
@@ -111,14 +112,21 @@ export class OperatorWebServer {
       [this.authorizedOwnerEmail]: "owner_sohrab",
     };
 
-    const rawDbPath = process.env.OPERATOR_DB_PATH || "operator.db";
-    if (process.env.NODE_ENV === "production" && !path.isAbsolute(rawDbPath)) {
-      throw new Error(
-        `PRODUCTION SECURITY FAILURE: OPERATOR_DB_PATH ('${rawDbPath}') must resolve to an absolute path in production.`,
-      );
+    if (options.identityStore) {
+      this.identityStore = options.identityStore;
+    } else {
+      const rawDbPath = process.env.OPERATOR_DB_PATH || "operator.db";
+      if (
+        process.env.NODE_ENV === "production" &&
+        !path.isAbsolute(rawDbPath)
+      ) {
+        throw new Error(
+          `PRODUCTION SECURITY FAILURE: OPERATOR_DB_PATH ('${rawDbPath}') must resolve to an absolute path in production.`,
+        );
+      }
+      const dbPath = rawDbPath;
+      this.identityStore = new IdentityStore(dbPath);
     }
-    const dbPath = rawDbPath;
-    this.identityStore = new IdentityStore(dbPath);
     // Seed initial legacy owner identity
     this.identityStore.migrateLegacyOwnerSohrab(this.authorizedOwnerEmail, [
       "yartrader",

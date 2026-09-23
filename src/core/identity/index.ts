@@ -391,6 +391,18 @@ export class IdentityStore {
     return user;
   }
 
+  public checkIntegrity(): boolean {
+    if (!this.db) return false;
+    try {
+      const stmt = this.db.prepare("PRAGMA quick_check;");
+      const row = stmt.get() as any;
+      const result = row ? Object.values(row)[0] : "";
+      return result === "ok";
+    } catch {
+      return false;
+    }
+  }
+
   public close(): void {
     if (this.db) {
       try {

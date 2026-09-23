@@ -49,7 +49,7 @@ describe("Phase 7: Corruption / Fail-Closed Testing", () => {
     identityStore.close();
   });
 
-  it("2. corrupt approval request in SQLite fails closed", () => {
+  it("2. corrupt approval request in SQLite fails closed and throws persistence error", () => {
     const rawDb = new DatabaseSync(dbPath);
     rawDb.exec(`
       CREATE TABLE approvals (
@@ -74,19 +74,12 @@ describe("Phase 7: Corruption / Fail-Closed Testing", () => {
     `);
     rawDb.close();
 
-    const approvalManager = new ApprovalManager(dbPath);
-    const res = approvalManager.consumeApproval(
-      "terminal_execute",
-      {},
-      "ws_a",
-      "env_a",
+    expect(() => new ApprovalManager(dbPath)).toThrow(
+      "PERSISTENCE CORRUPTION FAILURE",
     );
-    expect(res.valid).toBe(false);
-
-    approvalManager.close();
   });
 
-  it("3. corrupt notification metadata parses safely without throwing", () => {
+  it("3. corrupt notification metadata fails closed and throws persistence error", () => {
     const rawDb = new DatabaseSync(dbPath);
     rawDb.exec(`
       CREATE TABLE notifications (
@@ -108,14 +101,8 @@ describe("Phase 7: Corruption / Fail-Closed Testing", () => {
     `);
     rawDb.close();
 
-    const notificationManager = new NotificationManager(dbPath);
-    const list = notificationManager.listNotifications({
-      workspaceId: "yartrader",
-    });
-
-    expect(list.length).toBe(1);
-    expect(list[0].metadata).toBeUndefined();
-
-    notificationManager.close();
+    expect(() => new NotificationManager(dbPath)).toThrow(
+      "PERSISTENCE CORRUPTION FAILURE",
+    );
   });
 });

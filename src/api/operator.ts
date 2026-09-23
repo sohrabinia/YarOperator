@@ -76,6 +76,10 @@ export class OperatorApiHandler {
     }
   }
 
+  public getIdentityStore(): IdentityStore | undefined {
+    return this.identityStore;
+  }
+
   public getHealth(): OperatorApiResponse {
     return {
       statusCode: 200,
@@ -96,7 +100,7 @@ export class OperatorApiHandler {
 
     if (this.identityStore) {
       try {
-        this.identityStore.getUserById("ping_test");
+        identityStoreReady = this.identityStore.checkIntegrity();
       } catch (err) {
         identityStoreReady = false;
       }

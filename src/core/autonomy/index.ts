@@ -334,7 +334,7 @@ export class DurableAutonomyRunStore {
           ? run.completedAt.toISOString()
           : String(run.completedAt)
         : null,
-      run.terminalReason || null,
+      run.terminalReason || cancellationReason || null,
       run.lastProposal ? JSON.stringify(run.lastProposal) : null,
       run.lastVerificationResult || null,
       JSON.stringify(run.auditTrail || []),
@@ -419,7 +419,9 @@ export class DurableAutonomyRunStore {
         return false;
       }
 
-      const isExpired = row.lease_expires_at && row.lease_expires_at <= nowIso;
+      const isExpired =
+        !row.lease_expires_at ||
+        (row.lease_expires_at && row.lease_expires_at <= nowIso);
       if (
         !row.active_worker_id ||
         row.active_worker_id === workerId ||

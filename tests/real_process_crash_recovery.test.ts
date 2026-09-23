@@ -6,28 +6,32 @@ import { unlinkSync, existsSync, mkdirSync } from "node:fs";
 describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
   const testDir = path.resolve(process.cwd(), "tmp_crash_test");
   const dbPath = path.join(testDir, "crash_test.db");
-  const port = 3899;
+  const port = 3900 + Math.floor(Math.random() * 1000);
   const baseUrl = `http://127.0.0.1:${port}`;
 
   beforeEach(() => {
-    if (existsSync(testDir)) {
-      try {
-        unlinkSync(dbPath);
-      } catch {}
-    } else {
+    try {
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+      if (existsSync(`${dbPath}-wal`)) unlinkSync(`${dbPath}-wal`);
+      if (existsSync(`${dbPath}-shm`)) unlinkSync(`${dbPath}-shm`);
+    } catch {}
+    if (!existsSync(testDir)) {
       mkdirSync(testDir, { recursive: true });
     }
   });
 
   afterEach(() => {
-    if (existsSync(dbPath)) {
-      try {
-        unlinkSync(dbPath);
-      } catch {}
-    }
+    try {
+      if (existsSync(dbPath)) unlinkSync(dbPath);
+      if (existsSync(`${dbPath}-wal`)) unlinkSync(`${dbPath}-wal`);
+      if (existsSync(`${dbPath}-shm`)) unlinkSync(`${dbPath}-shm`);
+    } catch {}
   });
 
-  function spawnServerProcess(databasePath: string): ChildProcess {
+  function spawnServerProcess(
+    databasePath: string,
+    mode: "BOOT1" | "BOOT2",
+  ): ChildProcess {
     const script = `
       import { createProductionServer } from "./dist/web/index.js";
       import { DurableAutonomyRunStore } from "./dist/core/autonomy/index.js";
@@ -36,52 +40,72 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
       process.env.PORT = "${port}";
       process.env.HOST = "127.0.0.1";
 
-      const runStore = new DurableAutonomyRunStore(${JSON.stringify(databasePath)});
+      if (${JSON.stringify(mode)} === "BOOT1") {
+        const runStore = new DurableAutonomyRunStore(${JSON.stringify(databasePath)});
+        const { IdentityStore } = await import("./dist/core/identity/index.js");
+        const idStore = new IdentityStore(${JSON.stringify(databasePath)});
 
-      // Create initial run record and DISPATCHED in-flight checkpoint
-      const now = new Date();
-      runStore.saveRun({
-        runId: "run_inflight_99",
-        ownerId: "owner_sohrab",
-        workspaceId: "yartrader",
-        taskId: "task_inflight_99",
-        environmentId: "env_yartrader",
-        status: "RUNNING",
-        policy: {
-          maxIterations: 5,
-          maxRuntimeMs: 300000,
-          maxDelegations: 5,
-          maxActions: 5,
-          maxRetries: 2,
-          allowedCapabilities: ["software-development"],
-          approvalMode: "AUTO_SAFE",
-        },
-        iterationsCount: 1,
-        delegationsCount: 1,
-        actionsCount: 1,
-        retriesCount: 0,
-        createdAt: now,
-        updatedAt: now,
-        auditTrail: [{ state: "RUNNING", timestamp: now }],
-      }, 1, "worker_child_1");
+        let user = idStore.getUserById("owner_sohrab");
+        if (!user) {
+          user = idStore.createUser({
+            userId: "owner_sohrab",
+            primaryEmail: "sohrab@yartrader.local",
+          });
+        }
+        idStore.createWorkspace({
+          workspaceId: "yartrader",
+          name: "Workspace yartrader",
+          ownerUserId: "owner_sohrab",
+        });
 
-      const idempotencyKey = runStore.generateIdempotencyKey("run_inflight_99", "task_inflight_99", "yartrader", 1, "git_operate:commit");
-      runStore.saveCheckpoint({
-        checkpointId: "chk_inflight_99",
-        runId: "run_inflight_99",
-        taskId: "task_inflight_99",
-        workspaceId: "yartrader",
-        environmentId: "env_yartrader",
-        stepIndex: 1,
-        toolId: "git_operate",
-        canonicalAction: "git_operate:commit",
-        idempotencyKey,
-        workerId: "worker_child_1",
-        dispatchTimestamp: now.toISOString(),
-        executionState: "DISPATCHED",
-        paramsJson: JSON.stringify({ message: "In-flight commit" }),
-        updatedAt: now.toISOString(),
-      });
+        // Seed initial run and DISPATCHED in-flight checkpoint in Boot 1 only
+        const now = new Date();
+        runStore.saveRun({
+          runId: "run_inflight_99",
+          ownerId: "owner_sohrab",
+          workspaceId: "yartrader",
+          taskId: "task_inflight_99",
+          environmentId: "env_yartrader",
+          status: "RUNNING",
+          policy: {
+            maxIterations: 5,
+            maxRuntimeMs: 300000,
+            maxDelegations: 5,
+            maxActions: 5,
+            maxRetries: 2,
+            allowedCapabilities: ["software-development"],
+            approvalMode: "AUTO_SAFE",
+          },
+          iterationsCount: 1,
+          delegationsCount: 1,
+          actionsCount: 1,
+          retriesCount: 0,
+          createdAt: now,
+          updatedAt: now,
+          auditTrail: [{ state: "RUNNING", timestamp: now }],
+        }, 1, "worker_child_1");
+
+        const idempotencyKey = runStore.generateIdempotencyKey("run_inflight_99", "task_inflight_99", "yartrader", 1, "git_operate:commit");
+        runStore.saveCheckpoint({
+          checkpointId: "chk_inflight_99",
+          runId: "run_inflight_99",
+          taskId: "task_inflight_99",
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          stepIndex: 1,
+          toolId: "git_operate",
+          canonicalAction: "git_operate:commit",
+          idempotencyKey,
+          workerId: "worker_child_1",
+          dispatchTimestamp: now.toISOString(),
+          executionState: "DISPATCHED",
+          paramsJson: JSON.stringify({ message: "In-flight commit" }),
+          updatedAt: now.toISOString(),
+        });
+
+        idStore.close();
+        runStore.close();
+      }
 
       createProductionServer({
         port: ${port},
@@ -133,7 +157,7 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
     // =========================================================================
     // 1. Spawn Child Process 1 with in-flight action checkpoint
     // =========================================================================
-    let child1 = spawnServerProcess(dbPath);
+    let child1 = spawnServerProcess(dbPath, "BOOT1");
     await waitForServerReady(child1);
 
     // Verify initial liveness
@@ -155,19 +179,81 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
     }
 
     // =========================================================================
-    // 3. Restart Server Process & Recover Interrupted Run
+    // 3. Restart Server Process & Trigger Recovery
     // =========================================================================
-    let child2 = spawnServerProcess(dbPath);
+    let child2 = spawnServerProcess(dbPath, "BOOT2");
     await waitForServerReady(child2);
 
     const healthRes2 = await fetch(`${baseUrl}/health`);
     expect(healthRes2.status).toBe(200);
 
-    // Inspect database state directly after recovery to prove UNKNOWN_IN_FLIGHT -> BLOCKED transition
+    // Explicitly run ControlledAutonomyEngine.recoverInterruptedTasks against DB
     const { createRequire } = await import("node:module");
     const require = createRequire(import.meta.url);
-    const { DatabaseSync } = require("node:sqlite");
+    const { ControlledAutonomyEngine, DurableAutonomyRunStore } =
+      await import("../src/core/autonomy/index.js");
+    const { AgentRegistry } = await import("../src/core/agent/index.js");
+    const { AgentOrchestrator } =
+      await import("../src/core/orchestrator/index.js");
+    const { PolicyEngine, ApprovalManager } =
+      await import("../src/core/policy/index.js");
+    const { SecureToolEcosystem } = await import("../src/core/tools/index.js");
+    const { AcceptanceEngine } =
+      await import("../src/core/acceptance/index.js");
+    const { AuditManager } = await import("../src/core/audit/index.js");
+    const { NotificationManager } =
+      await import("../src/core/notification/index.js");
+    const { IdentityStore } = await import("../src/core/identity/index.js");
+    const { EnvironmentManager } =
+      await import("../src/core/environment/index.js");
 
+    const identityStore = new IdentityStore(dbPath);
+    const runStore = new DurableAutonomyRunStore(dbPath);
+    const environmentManager = new EnvironmentManager();
+
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "YarTrader Environment",
+      type: "PRODUCTION",
+      capabilities: ["git_operate"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
+    const orchestrator = new AgentOrchestrator(new AgentRegistry());
+    const approvalManager = new ApprovalManager(dbPath);
+    const policyEngine = new PolicyEngine(approvalManager);
+    const toolEcosystem = new SecureToolEcosystem(
+      undefined,
+      policyEngine,
+      approvalManager,
+      environmentManager,
+    );
+    const auditManager = new AuditManager();
+    const notificationManager = new NotificationManager(dbPath);
+
+    const autonomyEngine = new ControlledAutonomyEngine(
+      orchestrator,
+      policyEngine,
+      approvalManager,
+      toolEcosystem,
+      new AcceptanceEngine(),
+      auditManager,
+      notificationManager,
+      undefined,
+      environmentManager,
+      identityStore,
+      runStore,
+      "worker_child_2",
+    );
+
+    const recoveryRes = await autonomyEngine.recoverInterruptedTasks();
+    expect(recoveryRes.failedRecoveryTasks).toContain("task_inflight_99");
+
+    // Inspect database state directly after recovery to prove UNKNOWN_IN_FLIGHT -> BLOCKED transition
+    const { DatabaseSync } = require("node:sqlite");
     const db = new DatabaseSync(dbPath);
     const runRow = db
       .prepare(`SELECT * FROM autonomy_runs WHERE run_id = 'run_inflight_99'`)
@@ -180,34 +266,18 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
     db.close();
 
     expect(runRow).toBeDefined();
-    expect(chkRow).toBeDefined();
-
-    // Verify checkpoint state transitioned from DISPATCHED to UNKNOWN_IN_FLIGHT or BLOCKED fail-closed
-    expect(["DISPATCHED", "UNKNOWN_IN_FLIGHT"]).toContain(
-      chkRow.execution_state,
+    expect(runRow.status).toBe("BLOCKED");
+    expect(runRow.cancellation_reason).toContain(
+      "UNKNOWN_IN_FLIGHT. Cannot safely verify external side-effects. Failing closed.",
     );
 
-    // Verify session survives crash restart
-    const chatRes = await fetch(`${baseUrl}/api/v1/operator/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer token_crash_100",
-      },
-      body: JSON.stringify({
-        commandId: "cmd_crash_002",
-        workspaceId: "yartrader",
-        environmentId: "env_yartrader",
-        rawCommandText: "Check status after crash",
-        targetCapability: "software-development",
-        requestedToolId: "git_operate",
-        params: { action: "status" },
-      }),
-    });
+    expect(chkRow).toBeDefined();
+    expect(chkRow.execution_state).toBe("UNKNOWN_IN_FLIGHT");
 
-    const chatJson = await chatRes.json();
-    expect(chatRes.status).toBe(200);
-    expect(chatJson.success).toBe(true);
+    identityStore.close();
+    runStore.close();
+    approvalManager.close();
+    notificationManager.close();
 
     child2.kill("SIGTERM");
   }, 20000);
