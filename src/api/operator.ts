@@ -60,14 +60,19 @@ export interface OperatorApiResponse {
 }
 
 export class OperatorApiHandler {
-  private identityStore?: IdentityStore;
+  private identityStore: IdentityStore;
 
   constructor(
     private commandReceiver: OwnerCommandReceiver,
     initialTokens?: Record<string, string>,
     identityStore?: IdentityStore,
   ) {
-    this.identityStore = identityStore ?? new IdentityStore(":memory:");
+    if (!identityStore) {
+      throw new Error(
+        "AUTHENTICATION SECURITY FAILURE: IdentityStore must be provided to OperatorApiHandler.",
+      );
+    }
+    this.identityStore = identityStore;
     if (initialTokens) {
       for (const [token, ownerId] of Object.entries(initialTokens)) {
         this.registerBearerToken(token, ownerId);
@@ -75,7 +80,7 @@ export class OperatorApiHandler {
     }
   }
 
-  public getIdentityStore(): IdentityStore | undefined {
+  public getIdentityStore(): IdentityStore {
     return this.identityStore;
   }
 

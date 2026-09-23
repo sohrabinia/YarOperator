@@ -23,7 +23,6 @@ export interface ApprovalRequest {
 }
 
 export class ApprovalManager {
-  private approvals = new Map<string, ApprovalRequest>();
   private db: any = null;
 
   constructor(dbPath: string = ":memory:") {
@@ -76,10 +75,9 @@ export class ApprovalManager {
     ]);
 
     for (const row of rows) {
-      let parsedParams = {};
       if (row.params_json) {
         try {
-          parsedParams = JSON.parse(row.params_json);
+          JSON.parse(row.params_json);
         } catch {
           throw new Error(
             `PERSISTENCE CORRUPTION FAILURE: Approval record '${row.fingerprint}' contains corrupt JSON parameters.`,
@@ -93,28 +91,13 @@ export class ApprovalManager {
         );
       }
 
-      let status = row.status as ApprovalRequest["status"];
-      if (nowMs > Number(row.expires_at) && status === "PENDING") {
-        status = "EXPIRED";
+      if (nowMs > Number(row.expires_at) && row.status === "PENDING") {
+        this.db
+          .prepare(
+            `UPDATE approvals SET status = 'EXPIRED' WHERE fingerprint = ?`,
+          )
+          .run(row.fingerprint);
       }
-
-      const req: ApprovalRequest = {
-        id: row.fingerprint,
-        toolId: row.tool_id,
-        action: row.action || undefined,
-        workspaceId: row.workspace_id || undefined,
-        environmentId: row.environment_id || undefined,
-        ownerId: row.owner_id || undefined,
-        taskId: row.task_id || undefined,
-        params: parsedParams,
-        normalizedParamsHash: row.normalized_params_hash,
-        requestedAt: new Date(Number(row.requested_at)),
-        expiresAt: new Date(Number(row.expires_at)),
-        status,
-        approver: row.approver || undefined,
-      };
-
-      this.approvals.set(row.fingerprint, req);
     }
   }
 
@@ -215,76 +198,74 @@ export class ApprovalManager {
       status: "PENDING",
     };
 
-    this.approvals.set(fingerprint, req);
     this.persistRecord(req, params);
     return req;
   }
 
   private fetchRecord(fingerprint: string): ApprovalRequest | undefined {
-    if (this.db) {
-      const stmt = this.db.prepare(
-        `SELECT * FROM approvals WHERE fingerprint = ?`,
+    if (!this.db) {
+      throw new Error(
+        "APPROVAL MANAGER FAILURE: SQLite database connection is uninitialized or unavailable.",
       );
-      const row = stmt.get(fingerprint) as any;
-      if (!row) {
-        this.approvals.delete(fingerprint);
-        return undefined;
-      }
+    }
 
-      let parsedParams = {};
-      if (row.params_json) {
-        try {
-          parsedParams = JSON.parse(row.params_json);
-        } catch {
-          throw new Error(
-            `PERSISTENCE CORRUPTION FAILURE: Approval record '${fingerprint}' contains corrupt JSON parameters.`,
-          );
-        }
-      }
+    const stmt = this.db.prepare(
+      `SELECT * FROM approvals WHERE fingerprint = ?`,
+    );
+    const row = stmt.get(fingerprint) as any;
+    if (!row) {
+      return undefined;
+    }
 
-      const validStatuses = new Set([
-        "PENDING",
-        "APPROVED",
-        "DENIED",
-        "CONSUMED",
-        "EXPIRED",
-      ]);
-      if (!validStatuses.has(row.status)) {
+    let parsedParams = {};
+    if (row.params_json) {
+      try {
+        parsedParams = JSON.parse(row.params_json);
+      } catch {
         throw new Error(
-          `PERSISTENCE CORRUPTION FAILURE: Approval record '${fingerprint}' contains invalid status '${row.status}'.`,
+          `PERSISTENCE CORRUPTION FAILURE: Approval record '${fingerprint}' contains corrupt JSON parameters.`,
         );
       }
-
-      let status = row.status as ApprovalRequest["status"];
-      if (Date.now() > Number(row.expires_at) && status === "PENDING") {
-        status = "EXPIRED";
-        this.db
-          .prepare(
-            `UPDATE approvals SET status = 'EXPIRED' WHERE fingerprint = ?`,
-          )
-          .run(fingerprint);
-      }
-
-      const req: ApprovalRequest = {
-        id: row.fingerprint,
-        toolId: row.tool_id,
-        action: row.action || undefined,
-        workspaceId: row.workspace_id || undefined,
-        environmentId: row.environment_id || undefined,
-        ownerId: row.owner_id || undefined,
-        taskId: row.task_id || undefined,
-        params: parsedParams,
-        normalizedParamsHash: row.normalized_params_hash,
-        requestedAt: new Date(Number(row.requested_at)),
-        expiresAt: new Date(Number(row.expires_at)),
-        status,
-        approver: row.approver || undefined,
-      };
-
-      this.approvals.set(fingerprint, req);
-      return req;
     }
-    return this.approvals.get(fingerprint);
+
+    const validStatuses = new Set([
+      "PENDING",
+      "APPROVED",
+      "DENIED",
+      "CONSUMED",
+      "EXPIRED",
+    ]);
+    if (!validStatuses.has(row.status)) {
+      throw new Error(
+        `PERSISTENCE CORRUPTION FAILURE: Approval record '${fingerprint}' contains invalid status '${row.status}'.`,
+      );
+    }
+
+    let status = row.status as ApprovalRequest["status"];
+    if (Date.now() > Number(row.expires_at) && status === "PENDING") {
+      status = "EXPIRED";
+      this.db
+        .prepare(
+          `UPDATE approvals SET status = 'EXPIRED' WHERE fingerprint = ?`,
+        )
+        .run(fingerprint);
+    }
+
+    return {
+      id: row.fingerprint,
+      toolId: row.tool_id,
+      action: row.action || undefined,
+      workspaceId: row.workspace_id || undefined,
+      environmentId: row.environment_id || undefined,
+      ownerId: row.owner_id || undefined,
+      taskId: row.task_id || undefined,
+      params: parsedParams,
+      normalizedParamsHash: row.normalized_params_hash,
+      requestedAt: new Date(Number(row.requested_at)),
+      expiresAt: new Date(Number(row.expires_at)),
+      status,
+      approver: row.approver || undefined,
+    };
   }
 
   grantApproval(fingerprint: string, approver: string): boolean {
@@ -345,10 +326,6 @@ export class ApprovalManager {
 
       if (changes === 1) {
         // Atomic consumption succeeded
-        const updated = this.fetchRecord(fingerprint);
-        if (updated) {
-          this.approvals.set(fingerprint, updated);
-        }
         return { valid: true };
       }
 

@@ -15,6 +15,7 @@ import {
 import { AgentRegistry } from "../src/core/agent/index.js";
 import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import { ExecutionContext } from "../src/core/contracts/index.js";
+import { IdentityStore } from "../src/core/identity/index.js";
 
 class TerminalMockTool implements Tool {
   metadata = {
@@ -107,9 +108,12 @@ describe("/Operator Web Interface & API Security Hardening Test Suite", () => {
       available: true,
     });
 
-    const apiHandler = new OperatorApiHandler(receiver, {
-      [token]: "owner_sohrab",
-    });
+    const identityStore = new IdentityStore(":memory:");
+    const apiHandler = new OperatorApiHandler(
+      receiver,
+      { [token]: "owner_sohrab" },
+      identityStore,
+    );
 
     server = new OperatorWebServer({
       port: 0,
