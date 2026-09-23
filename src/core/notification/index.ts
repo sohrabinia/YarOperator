@@ -40,6 +40,7 @@ export class NotificationManager {
       }
       const { DatabaseSync } = require("node:sqlite");
       this.db = new DatabaseSync(dbPath);
+      this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
       this.initSchema();
       this.rehydrate();
     }
@@ -148,6 +149,10 @@ export class NotificationManager {
     priority?: NotificationPriority;
     unreadOnly?: boolean;
   }): Notification[] {
+    if (this.db) {
+      this.notifications = [];
+      this.rehydrate();
+    }
     return this.notifications.filter((n) => {
       if (filter?.workspaceId && n.workspaceId !== filter.workspaceId)
         return false;
@@ -159,10 +164,35 @@ export class NotificationManager {
   }
 
   markAsRead(id: string): boolean {
-    const notif = this.notifications.find((n) => n.id === id);
+    let notif = this.notifications.find((n) => n.id === id);
+    if (this.db) {
+      const stmt = this.db.prepare(`SELECT * FROM notifications WHERE id = ?`);
+      const row = stmt.get(id) as any;
+      if (!row) return false;
+
+      let metadata: Record<string, unknown> | undefined;
+      try {
+        if (row.metadata_json) metadata = JSON.parse(row.metadata_json);
+      } catch {}
+
+      notif = {
+        id: row.id,
+        type: row.type as NotificationType,
+        priority: row.priority as NotificationPriority,
+        title: row.title,
+        message: row.message,
+        workspaceId: row.workspace_id || undefined,
+        taskId: row.task_id || undefined,
+        metadata,
+        createdAt: new Date(Number(row.created_at)),
+        read: true,
+      };
+      this.persistNotification(notif);
+      return true;
+    }
+
     if (!notif) return false;
     notif.read = true;
-    this.persistNotification(notif);
     return true;
   }
 

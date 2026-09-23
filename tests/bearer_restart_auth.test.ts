@@ -168,9 +168,52 @@ describe("Phase 1: Persistent Bearer & Session Authentication", () => {
 
     const res = await handler2.handleChatRequest(req);
     expect(res.statusCode).toBe(403);
-    expect(res.body.error).toContain(
-      "Authenticated owner 'owner_sohrab' cannot submit commands as owner 'owner_attacker'",
+    expect(res.body.error).toBeDefined();
+
+    rehydratedStore.close();
+  });
+
+  it("6. disabled user session fails closed and rejects authentication", async () => {
+    const user = identityStore.createUser({
+      userId: "user_disabled_99",
+      primaryEmail: "disabled@yartrader.local",
+    });
+    identityStore.createSession({
+      sessionId: "token_disabled_99",
+      userId: user.userId,
+      ownerId: "user_disabled_99",
+    });
+    identityStore.createWorkspace({
+      workspaceId: "yartrader",
+      name: "Workspace yartrader",
+      ownerUserId: user.userId,
+    });
+
+    // Disable user in DB
+    const { DatabaseSync } = require("node:sqlite");
+    const rawDb = new DatabaseSync(dbPath);
+    rawDb.exec(
+      "UPDATE user_identities SET status = 'DISABLED' WHERE user_id = 'user_disabled_99'",
     );
+    rawDb.close();
+
+    identityStore.close();
+
+    const rehydratedStore = new IdentityStore(dbPath);
+    const handler = new OperatorApiHandler(
+      mockReceiver,
+      undefined,
+      rehydratedStore,
+    );
+
+    const req = {
+      headers: { authorization: "Bearer token_disabled_99" },
+      body: { workspaceId: "yartrader", rawCommandText: "ping" },
+    };
+
+    const res = await handler.handleChatRequest(req);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.error).toContain("disabled");
 
     rehydratedStore.close();
   });

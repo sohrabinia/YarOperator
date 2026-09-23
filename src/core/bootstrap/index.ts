@@ -1,3 +1,4 @@
+import path from "node:path";
 import { OperatorApiHandler } from "../../api/operator.js";
 import { OwnerManager, OwnerCommandReceiver } from "../owner/index.js";
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
@@ -42,8 +43,17 @@ export function bootstrapOperatorApplication(
 ): OperatorApiHandler {
   const ownerManager = new OwnerManager();
 
-  const dbPath =
+  const isProd = process.env.NODE_ENV === "production";
+  const rawDbPath =
     options?.dbPath || process.env.OPERATOR_DB_PATH || "operator.db";
+
+  if (isProd && !options?.useInMemoryStores && !path.isAbsolute(rawDbPath)) {
+    throw new Error(
+      `PRODUCTION SECURITY FAILURE: OPERATOR_DB_PATH ('${rawDbPath}') must resolve to an absolute path in production.`,
+    );
+  }
+
+  const dbPath = rawDbPath;
 
   const approvalManager = options?.useInMemoryStores
     ? new ApprovalManager(":memory:")

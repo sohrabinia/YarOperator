@@ -23,6 +23,7 @@ export class OperationalStateStore {
     }
     const { DatabaseSync } = require("node:sqlite");
     this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
     this.init();
   }
 

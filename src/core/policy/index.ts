@@ -36,6 +36,7 @@ export class ApprovalManager {
       }
       const { DatabaseSync } = require("node:sqlite");
       this.db = new DatabaseSync(dbPath);
+      this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
       this.initSchema();
       this.rehydrate();
     }
@@ -201,8 +202,56 @@ export class ApprovalManager {
     return req;
   }
 
+  private fetchRecord(fingerprint: string): ApprovalRequest | undefined {
+    if (this.db) {
+      const stmt = this.db.prepare(
+        `SELECT * FROM approvals WHERE fingerprint = ?`,
+      );
+      const row = stmt.get(fingerprint) as any;
+      if (!row) {
+        this.approvals.delete(fingerprint);
+        return undefined;
+      }
+
+      let parsedParams = {};
+      try {
+        if (row.params_json) parsedParams = JSON.parse(row.params_json);
+      } catch {}
+
+      let status = row.status as ApprovalRequest["status"];
+      if (Date.now() > Number(row.expires_at) && status === "PENDING") {
+        status = "EXPIRED";
+        this.db
+          .prepare(
+            `UPDATE approvals SET status = 'EXPIRED' WHERE fingerprint = ?`,
+          )
+          .run(fingerprint);
+      }
+
+      const req: ApprovalRequest = {
+        id: row.fingerprint,
+        toolId: row.tool_id,
+        action: row.action || undefined,
+        workspaceId: row.workspace_id || undefined,
+        environmentId: row.environment_id || undefined,
+        ownerId: row.owner_id || undefined,
+        taskId: row.task_id || undefined,
+        params: parsedParams,
+        normalizedParamsHash: row.normalized_params_hash,
+        requestedAt: new Date(Number(row.requested_at)),
+        expiresAt: new Date(Number(row.expires_at)),
+        status,
+        approver: row.approver || undefined,
+      };
+
+      this.approvals.set(fingerprint, req);
+      return req;
+    }
+    return this.approvals.get(fingerprint);
+  }
+
   grantApproval(fingerprint: string, approver: string): boolean {
-    const req = this.approvals.get(fingerprint);
+    const req = this.fetchRecord(fingerprint);
     if (!req) return false;
 
     if (new Date() > req.expiresAt) {
@@ -220,7 +269,7 @@ export class ApprovalManager {
   }
 
   denyApproval(fingerprint: string): boolean {
-    const req = this.approvals.get(fingerprint);
+    const req = this.fetchRecord(fingerprint);
     if (!req) return false;
 
     req.status = "DENIED";
@@ -242,7 +291,7 @@ export class ApprovalManager {
       environmentId,
       action,
     );
-    const req = this.approvals.get(fingerprint);
+    const req = this.fetchRecord(fingerprint);
 
     if (!req) {
       return {
@@ -284,7 +333,7 @@ export class ApprovalManager {
     environmentId?: string,
     action?: string,
   ): ApprovalRequest | undefined {
-    const direct = this.approvals.get(fingerprintOrToolId);
+    const direct = this.fetchRecord(fingerprintOrToolId);
     if (direct) return direct;
 
     if (params !== undefined) {
@@ -295,7 +344,7 @@ export class ApprovalManager {
         environmentId,
         action,
       );
-      return this.approvals.get(fpExact);
+      return this.fetchRecord(fpExact);
     }
     return undefined;
   }

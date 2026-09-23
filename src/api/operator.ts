@@ -120,13 +120,13 @@ export class OperatorApiHandler {
     };
   }
 
-  public registerBearerToken(token: string, ownerId: string): void {
+  public registerBearerToken(
+    token: string,
+    ownerId: string,
+    defaultWorkspaces: string[] = ["yartrader", "ws_default"],
+  ): void {
     this.validBearerTokens.set(token, ownerId);
     if (this.identityStore) {
-      const existingSession = this.identityStore.getSession(token);
-      if (existingSession) {
-        return;
-      }
       let user = this.identityStore.getUserById(ownerId);
       if (!user) {
         user =
@@ -136,30 +136,78 @@ export class OperatorApiHandler {
             primaryEmail: `${ownerId}@yartrader.local`,
           });
       }
-      this.identityStore.createSession({
-        sessionId: token,
-        userId: user.userId,
-        ownerId,
-      });
+      for (const wsId of defaultWorkspaces) {
+        if (
+          !this.identityStore.isUserActiveWorkspaceMember(user.userId, wsId)
+        ) {
+          this.identityStore.createWorkspace({
+            workspaceId: wsId,
+            name: `Workspace ${wsId}`,
+            ownerUserId: user.userId,
+          });
+        }
+      }
+      const existingSession = this.identityStore.getSession(token);
+      if (!existingSession) {
+        this.identityStore.createSession({
+          sessionId: token,
+          userId: user.userId,
+          ownerId,
+        });
+      }
     }
   }
 
-  public getAuthenticatedOwnerId(token: string): string | null {
-    const cachedOwnerId = this.validBearerTokens.get(token);
-
+  public getAuthenticatedOwnerId(
+    token: string,
+    workspaceId?: string,
+  ): { ownerId: string | null; error?: string } {
     if (this.identityStore) {
       const session = this.identityStore.getSession(token);
       if (!session) {
         this.validBearerTokens.delete(token);
-        return null;
+        return {
+          ownerId: null,
+          error: "Unauthorized: Invalid or expired Bearer token.",
+        };
       }
-      if (cachedOwnerId !== session.ownerId) {
-        this.validBearerTokens.set(token, session.ownerId);
+
+      // Check UserIdentity status
+      const user = this.identityStore.getUserById(session.userId);
+      if (!user || user.status !== "ACTIVE") {
+        this.validBearerTokens.delete(token);
+        return {
+          ownerId: null,
+          error: `Unauthorized: User identity '${session.userId}' is disabled or non-existent.`,
+        };
       }
-      return session.ownerId;
+
+      // Check Workspace Membership if workspaceId is provided
+      if (
+        workspaceId &&
+        !this.identityStore.isUserActiveWorkspaceMember(
+          session.userId,
+          workspaceId,
+        )
+      ) {
+        return {
+          ownerId: null,
+          error: `Forbidden: User '${session.userId}' is not an active member of workspace '${workspaceId}'.`,
+        };
+      }
+
+      this.validBearerTokens.set(token, session.ownerId);
+      return { ownerId: session.ownerId };
     }
 
-    return cachedOwnerId || null;
+    const cachedOwnerId = this.validBearerTokens.get(token);
+    if (!cachedOwnerId) {
+      return {
+        ownerId: null,
+        error: "Unauthorized: Invalid or expired Bearer token.",
+      };
+    }
+    return { ownerId: cachedOwnerId };
   }
 
   public async handleChatRequest(
@@ -190,18 +238,6 @@ export class OperatorApiHandler {
         };
       }
 
-      const authenticatedOwnerId = this.getAuthenticatedOwnerId(token);
-
-      if (!authenticatedOwnerId) {
-        return {
-          statusCode: 401,
-          body: {
-            success: false,
-            error: "Unauthorized: Invalid or expired Bearer token.",
-          },
-        };
-      }
-
       // 2. HTTP Input Validation
       const rawBody = req.body;
       if (
@@ -218,6 +254,24 @@ export class OperatorApiHandler {
           },
         };
       }
+
+      // Single Authoritative Auth Path: Token -> Session -> Active User -> Workspace Membership
+      const authResult = this.getAuthenticatedOwnerId(
+        token,
+        rawBody.workspaceId,
+      );
+      if (!authResult.ownerId) {
+        const isForbidden = authResult.error?.startsWith("Forbidden:");
+        return {
+          statusCode: isForbidden ? 403 : 401,
+          body: {
+            success: false,
+            error: authResult.error || "Unauthorized: Authentication failed.",
+          },
+        };
+      }
+
+      const authenticatedOwnerId = authResult.ownerId;
 
       const {
         commandId = `cmd_api_${Date.now()}`,

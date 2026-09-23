@@ -79,6 +79,8 @@ describe("YarOperator Phase 27: Controlled Autonomy Engine with Real Tool Execut
   const mockContext: ExecutionContext = {
     executionId: "autonomy_exec_1",
     timestamp: new Date(),
+    workspaceId: "yartrader",
+    environmentId: "env_yartrader",
   };
 
   const createBudget = (
