@@ -172,8 +172,10 @@ export class NotificationManager {
       read: false,
     };
 
+    if (this.db) {
+      this.persistNotification(notification);
+    }
     this.notifications.push(notification);
-    this.persistNotification(notification);
     return notification;
   }
 

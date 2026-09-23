@@ -102,7 +102,11 @@ export class ApprovalManager {
   }
 
   private persistRecord(req: ApprovalRequest, params?: unknown): void {
-    if (!this.db) return;
+    if (!this.db) {
+      throw new Error(
+        "APPROVAL MANAGER PERSISTENCE FAILURE: SQLite database connection is uninitialized or unavailable.",
+      );
+    }
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO approvals (
         fingerprint, tool_id, action, workspace_id, environment_id, owner_id, task_id,

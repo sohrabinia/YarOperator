@@ -44,10 +44,16 @@ export function bootstrapOperatorApplication(
   const ownerManager = new OwnerManager();
 
   const isProd = process.env.NODE_ENV === "production";
+  if (isProd && options?.useInMemoryStores) {
+    throw new Error(
+      "PRODUCTION SECURITY FAILURE: In-memory store overrides are strictly forbidden in production.",
+    );
+  }
+
   const rawDbPath =
     options?.dbPath || process.env.OPERATOR_DB_PATH || "operator.db";
 
-  if (isProd && !options?.useInMemoryStores && !path.isAbsolute(rawDbPath)) {
+  if (isProd && !path.isAbsolute(rawDbPath)) {
     throw new Error(
       `PRODUCTION SECURITY FAILURE: OPERATOR_DB_PATH ('${rawDbPath}') must resolve to an absolute path in production.`,
     );
