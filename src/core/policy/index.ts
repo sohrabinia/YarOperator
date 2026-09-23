@@ -26,20 +26,18 @@ export class ApprovalManager {
   private approvals = new Map<string, ApprovalRequest>();
   private db: any = null;
 
-  constructor(dbPath?: string) {
-    if (dbPath) {
-      if (dbPath !== ":memory:") {
-        const parentDir = dirname(dbPath);
-        if (parentDir && parentDir !== ".") {
-          mkdirSync(parentDir, { recursive: true });
-        }
+  constructor(dbPath: string = ":memory:") {
+    if (dbPath !== ":memory:") {
+      const parentDir = dirname(dbPath);
+      if (parentDir && parentDir !== ".") {
+        mkdirSync(parentDir, { recursive: true });
       }
-      const { DatabaseSync } = require("node:sqlite");
-      this.db = new DatabaseSync(dbPath);
-      this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
-      this.initSchema();
-      this.rehydrate();
     }
+    const { DatabaseSync } = require("node:sqlite");
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+    this.initSchema();
+    this.rehydrate();
   }
 
   private initSchema(): void {
@@ -381,38 +379,10 @@ export class ApprovalManager {
       };
     }
 
-    // Pure In-Memory Fallback
-    const req = this.approvals.get(fingerprint);
-
-    if (!req) {
-      return {
-        valid: false,
-        reason: "No approval request found for fingerprint.",
-      };
-    }
-
-    if (new Date() > req.expiresAt) {
-      req.status = "EXPIRED";
-      return { valid: false, reason: "Approval request has expired." };
-    }
-
-    if (req.status === "CONSUMED") {
-      return {
-        valid: false,
-        reason:
-          "Approval single-use token already consumed (replay attack protection).",
-      };
-    }
-
-    if (req.status !== "APPROVED") {
-      return {
-        valid: false,
-        reason: `Approval status is '${req.status}', expected 'APPROVED'.`,
-      };
-    }
-
-    req.status = "CONSUMED";
-    return { valid: true };
+    return {
+      valid: false,
+      reason: "ApprovalManager persistence unavailable (fail-closed).",
+    };
   }
 
   get(

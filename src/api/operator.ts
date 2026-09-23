@@ -67,7 +67,7 @@ export class OperatorApiHandler {
     initialTokens?: Record<string, string>,
     identityStore?: IdentityStore,
   ) {
-    this.identityStore = identityStore || new IdentityStore(":memory:");
+    this.identityStore = identityStore ?? new IdentityStore(":memory:");
     if (initialTokens) {
       for (const [token, ownerId] of Object.entries(initialTokens)) {
         this.registerBearerToken(token, ownerId);
