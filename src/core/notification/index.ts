@@ -164,33 +164,25 @@ export class NotificationManager {
   }
 
   markAsRead(id: string): boolean {
-    let notif = this.notifications.find((n) => n.id === id);
     if (this.db) {
-      const stmt = this.db.prepare(`SELECT * FROM notifications WHERE id = ?`);
-      const row = stmt.get(id) as any;
-      if (!row) return false;
+      const stmt = this.db.prepare(
+        `UPDATE notifications SET read = 1 WHERE id = ?`,
+      );
+      const res = stmt.run(id);
+      const changes =
+        typeof res.changes === "bigint"
+          ? Number(res.changes)
+          : (res.changes ?? 0);
 
-      let metadata: Record<string, unknown> | undefined;
-      try {
-        if (row.metadata_json) metadata = JSON.parse(row.metadata_json);
-      } catch {}
-
-      notif = {
-        id: row.id,
-        type: row.type as NotificationType,
-        priority: row.priority as NotificationPriority,
-        title: row.title,
-        message: row.message,
-        workspaceId: row.workspace_id || undefined,
-        taskId: row.task_id || undefined,
-        metadata,
-        createdAt: new Date(Number(row.created_at)),
-        read: true,
-      };
-      this.persistNotification(notif);
-      return true;
+      if (changes > 0) {
+        const memoryNotif = this.notifications.find((n) => n.id === id);
+        if (memoryNotif) memoryNotif.read = true;
+        return true;
+      }
+      return false;
     }
 
+    const notif = this.notifications.find((n) => n.id === id);
     if (!notif) return false;
     notif.read = true;
     return true;

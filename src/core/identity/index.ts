@@ -343,11 +343,8 @@ export class IdentityStore {
     if (!sessionId) return null;
     const tokenHash = this.hashSessionToken(sessionId);
 
-    // Support lookup by hash or legacy raw token if already in DB
-    const stmt = this.db.prepare(
-      `SELECT * FROM sessions WHERE session_id = ? OR session_id = ?`,
-    );
-    const row = stmt.get(tokenHash, sessionId) as any;
+    const stmt = this.db.prepare(`SELECT * FROM sessions WHERE session_id = ?`);
+    const row = stmt.get(tokenHash) as any;
     if (!row) return null;
 
     if (Date.now() > Number(row.expires_at)) {
@@ -366,10 +363,8 @@ export class IdentityStore {
 
   public revokeSession(sessionId: string): void {
     const tokenHash = this.hashSessionToken(sessionId);
-    const stmt = this.db.prepare(
-      `DELETE FROM sessions WHERE session_id = ? OR session_id = ?`,
-    );
-    stmt.run(tokenHash, sessionId);
+    const stmt = this.db.prepare(`DELETE FROM sessions WHERE session_id = ?`);
+    stmt.run(tokenHash);
   }
 
   public migrateLegacyOwnerSohrab(

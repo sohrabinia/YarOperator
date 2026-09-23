@@ -111,7 +111,13 @@ export class OperatorWebServer {
       [this.authorizedOwnerEmail]: "owner_sohrab",
     };
 
-    const dbPath = process.env.OPERATOR_DB_PATH || "operator.db";
+    const rawDbPath = process.env.OPERATOR_DB_PATH || "operator.db";
+    if (process.env.NODE_ENV === "production" && !path.isAbsolute(rawDbPath)) {
+      throw new Error(
+        `PRODUCTION SECURITY FAILURE: OPERATOR_DB_PATH ('${rawDbPath}') must resolve to an absolute path in production.`,
+      );
+    }
+    const dbPath = rawDbPath;
     this.identityStore = new IdentityStore(dbPath);
     // Seed initial legacy owner identity
     this.identityStore.migrateLegacyOwnerSohrab(this.authorizedOwnerEmail, [

@@ -291,7 +291,59 @@ export class ApprovalManager {
       environmentId,
       action,
     );
-    const req = this.fetchRecord(fingerprint);
+
+    if (this.db) {
+      const nowMs = Date.now();
+      const stmt = this.db.prepare(`
+        UPDATE approvals
+        SET status = 'CONSUMED'
+        WHERE fingerprint = ? AND status = 'APPROVED' AND expires_at > ?
+      `);
+      const result = stmt.run(fingerprint, nowMs);
+
+      const changes =
+        typeof result.changes === "bigint"
+          ? Number(result.changes)
+          : (result.changes ?? 0);
+
+      if (changes === 1) {
+        // Atomic consumption succeeded
+        const updated = this.fetchRecord(fingerprint);
+        if (updated) {
+          this.approvals.set(fingerprint, updated);
+        }
+        return { valid: true };
+      }
+
+      // Consumption failed — fetch record to give exact fail-closed reason
+      const req = this.fetchRecord(fingerprint);
+      if (!req) {
+        return {
+          valid: false,
+          reason: "No approval request found for fingerprint.",
+        };
+      }
+
+      if (nowMs > req.expiresAt.getTime()) {
+        return { valid: false, reason: "Approval request has expired." };
+      }
+
+      if (req.status === "CONSUMED") {
+        return {
+          valid: false,
+          reason:
+            "Approval single-use token already consumed (replay attack protection).",
+        };
+      }
+
+      return {
+        valid: false,
+        reason: `Approval status is '${req.status}', expected 'APPROVED'.`,
+      };
+    }
+
+    // Pure In-Memory Fallback
+    const req = this.approvals.get(fingerprint);
 
     if (!req) {
       return {
@@ -302,7 +354,6 @@ export class ApprovalManager {
 
     if (new Date() > req.expiresAt) {
       req.status = "EXPIRED";
-      this.persistRecord(req, params);
       return { valid: false, reason: "Approval request has expired." };
     }
 
@@ -322,7 +373,6 @@ export class ApprovalManager {
     }
 
     req.status = "CONSUMED";
-    this.persistRecord(req, params);
     return { valid: true };
   }
 
