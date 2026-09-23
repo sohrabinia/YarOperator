@@ -60,7 +60,6 @@ export interface OperatorApiResponse {
 }
 
 export class OperatorApiHandler {
-  private validBearerTokens: Map<string, string> = new Map(); // token -> ownerId
   private identityStore?: IdentityStore;
 
   constructor(
@@ -68,7 +67,7 @@ export class OperatorApiHandler {
     initialTokens?: Record<string, string>,
     identityStore?: IdentityStore,
   ) {
-    this.identityStore = identityStore;
+    this.identityStore = identityStore || new IdentityStore(":memory:");
     if (initialTokens) {
       for (const [token, ownerId] of Object.entries(initialTokens)) {
         this.registerBearerToken(token, ownerId);
@@ -129,36 +128,37 @@ export class OperatorApiHandler {
     ownerId: string,
     defaultWorkspaces: string[] = ["yartrader", "ws_default"],
   ): void {
-    this.validBearerTokens.set(token, ownerId);
-    if (this.identityStore) {
-      let user = this.identityStore.getUserById(ownerId);
-      if (!user) {
-        user =
-          this.identityStore.getUserByEmail(`${ownerId}@yartrader.local`) ||
-          this.identityStore.createUser({
-            userId: ownerId,
-            primaryEmail: `${ownerId}@yartrader.local`,
-          });
-      }
-      for (const wsId of defaultWorkspaces) {
-        if (
-          !this.identityStore.isUserActiveWorkspaceMember(user.userId, wsId)
-        ) {
-          this.identityStore.createWorkspace({
-            workspaceId: wsId,
-            name: `Workspace ${wsId}`,
-            ownerUserId: user.userId,
-          });
-        }
-      }
-      const existingSession = this.identityStore.getSession(token);
-      if (!existingSession) {
-        this.identityStore.createSession({
-          sessionId: token,
-          userId: user.userId,
-          ownerId,
+    if (!this.identityStore) {
+      throw new Error(
+        "AUTHENTICATION SECURITY FAILURE: Cannot register bearer token without an authoritative IdentityStore.",
+      );
+    }
+
+    let user = this.identityStore.getUserById(ownerId);
+    if (!user) {
+      user =
+        this.identityStore.getUserByEmail(`${ownerId}@yartrader.local`) ||
+        this.identityStore.createUser({
+          userId: ownerId,
+          primaryEmail: `${ownerId}@yartrader.local`,
+        });
+    }
+    for (const wsId of defaultWorkspaces) {
+      if (!this.identityStore.isUserActiveWorkspaceMember(user.userId, wsId)) {
+        this.identityStore.createWorkspace({
+          workspaceId: wsId,
+          name: `Workspace ${wsId}`,
+          ownerUserId: user.userId,
         });
       }
+    }
+    const existingSession = this.identityStore.getSession(token);
+    if (!existingSession) {
+      this.identityStore.createSession({
+        sessionId: token,
+        userId: user.userId,
+        ownerId,
+      });
     }
   }
 
@@ -166,52 +166,46 @@ export class OperatorApiHandler {
     token: string,
     workspaceId?: string,
   ): { ownerId: string | null; error?: string } {
-    if (this.identityStore) {
-      const session = this.identityStore.getSession(token);
-      if (!session) {
-        this.validBearerTokens.delete(token);
-        return {
-          ownerId: null,
-          error: "Unauthorized: Invalid or expired Bearer token.",
-        };
-      }
-
-      // Check UserIdentity status
-      const user = this.identityStore.getUserById(session.userId);
-      if (!user || user.status !== "ACTIVE") {
-        this.validBearerTokens.delete(token);
-        return {
-          ownerId: null,
-          error: `Unauthorized: User identity '${session.userId}' is disabled or non-existent.`,
-        };
-      }
-
-      // Check Workspace Membership if workspaceId is provided
-      if (
-        workspaceId &&
-        !this.identityStore.isUserActiveWorkspaceMember(
-          session.userId,
-          workspaceId,
-        )
-      ) {
-        return {
-          ownerId: null,
-          error: `Forbidden: User '${session.userId}' is not an active member of workspace '${workspaceId}'.`,
-        };
-      }
-
-      this.validBearerTokens.set(token, session.ownerId);
-      return { ownerId: session.ownerId };
+    if (!this.identityStore) {
+      return {
+        ownerId: null,
+        error:
+          "Unauthorized: IdentityStore unavailable (fail-closed bearer authentication).",
+      };
     }
 
-    const cachedOwnerId = this.validBearerTokens.get(token);
-    if (!cachedOwnerId) {
+    const session = this.identityStore.getSession(token);
+    if (!session) {
       return {
         ownerId: null,
         error: "Unauthorized: Invalid or expired Bearer token.",
       };
     }
-    return { ownerId: cachedOwnerId };
+
+    // Check UserIdentity status
+    const user = this.identityStore.getUserById(session.userId);
+    if (!user || user.status !== "ACTIVE") {
+      return {
+        ownerId: null,
+        error: `Unauthorized: User identity '${session.userId}' is disabled or non-existent.`,
+      };
+    }
+
+    // Check Workspace Membership if workspaceId is provided
+    if (
+      workspaceId &&
+      !this.identityStore.isUserActiveWorkspaceMember(
+        session.userId,
+        workspaceId,
+      )
+    ) {
+      return {
+        ownerId: null,
+        error: `Forbidden: User '${session.userId}' is not an active member of workspace '${workspaceId}'.`,
+      };
+    }
+
+    return { ownerId: session.ownerId };
   }
 
   public async handleChatRequest(
