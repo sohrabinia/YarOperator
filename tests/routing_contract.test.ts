@@ -122,7 +122,7 @@ describe("Production Routing Contract Validation Test Suite", () => {
     expect(content).toContain('rule name="YarOperator Auth Route"');
     expect(content).toContain('rule name="YarTrader Catch-All Route"');
 
-    expect(content).toContain('url="http://127.0.0.1:3000/auth/{R:1}"');
+    expect(content).toContain('url="http://127.0.0.1:3000/auth{R:1}"');
     expect(content).toContain('url="http://127.0.0.1:8000/{R:1}"');
     expect(content).toContain('appendQueryString="true"');
   });
