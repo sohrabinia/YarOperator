@@ -78,7 +78,6 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as any;
-    console.log("DEBUG body:", JSON.stringify(body, null, 2));
     expect(body.success).toBe(true);
     expect(body.result.status).toBe("COMPLETED");
     expect(body.result.resolvedToolId).toBe("git_operate");
