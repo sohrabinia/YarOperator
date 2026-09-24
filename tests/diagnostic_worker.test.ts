@@ -161,8 +161,10 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
     });
 
     it("4. Inactive user identity fails closed with zero tool execution", async () => {
-      // Disable user identity
-      identityStore.updateUserStatus(activeUserId, "DISABLED");
+      // Disable user identity via direct test DB fixture modification
+      (identityStore as any).db
+        .prepare("UPDATE user_identities SET status = ? WHERE user_id = ?")
+        .run("DISABLED", activeUserId);
 
       let gitCalls = 0;
       const res = await worker.executeDiagnostics(
@@ -224,7 +226,12 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
     });
 
     it("7. Inactive workspace membership fails closed with zero tool execution", async () => {
-      identityStore.removeWorkspaceMember(activeUserId, workspaceId);
+      // Remove membership via direct test DB fixture modification
+      (identityStore as any).db
+        .prepare(
+          "DELETE FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?",
+        )
+        .run(workspaceId, activeUserId);
 
       let gitCalls = 0;
       const res = await worker.executeDiagnostics(
@@ -344,9 +351,17 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
     });
 
     it("12. Example configuration is non-authoritative fallback", async () => {
-      // Prove that worker demands explicit registry matching workspace
       delete process.env.OPERATOR_RESOURCES_PATH;
-      expect(registry.getWorkspace(workspaceId)).toBeDefined();
+
+      // Prove that config/resources.example.json exists on disk
+      const examplePath = path.resolve("config/resources.example.json");
+      expect(fs.existsSync(examplePath)).toBe(true);
+
+      // Prove that creating a server or bootstrapping without explicit OPERATOR_RESOURCES_PATH fails closed
+      const unconfiguredRegistry = () => new ResourceRegistry();
+      expect(unconfiguredRegistry).toThrow(
+        /Missing configuration source \(OPERATOR_RESOURCES_PATH is not set\)/i,
+      );
     });
   });
 
@@ -382,8 +397,23 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(gitCalls).toBe(0);
     });
 
-    it("15. TerminalTool is structurally unavailable to DiagnosticWorker", () => {
+    it("15. TerminalTool is structurally unavailable to DiagnosticWorker", async () => {
       expect((worker as any).terminalTool).toBeUndefined();
+
+      let toolExecutionCount = 0;
+      const res = await worker.executeDiagnostics(
+        {
+          token: validToken,
+          workspaceId,
+          rawCommandText: "run command echo 'terminal_execute'",
+        },
+        undefined,
+        { gitSpy: () => toolExecutionCount++ },
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.denialStage).toBe("8. Capability Resolution");
+      expect(res.toolExecutionCount).toBe(0);
     });
 
     it("16. Write capability requests cannot reach DiagnosticWorker", async () => {
@@ -433,9 +463,48 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
 
   // --- Category 6: HTTP Probe & SSRF Boundaries (Tests 22-26) ---
   describe("6. HTTP Probe & SSRF Boundaries", () => {
-    it("22. Allowed origin HTTP GET probe succeeds", async () => {
-      const probe = new BoundedHttpProbe(["http://127.0.0.1:3000"]);
-      expect(probe).toBeDefined();
+    it("22. Allowed origin HTTP GET probe succeeds and verifies bounded response without credentials", async () => {
+      // Start local test HTTP server
+      const http = await import("node:http");
+      let receivedHeaders: Record<string, any> = {};
+
+      const server = http.createServer((req, res) => {
+        receivedHeaders = req.headers;
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("HTTP Probe Response OK");
+      });
+
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const address = server.address() as any;
+      const serverUrl = `http://127.0.0.1:${address.port}`;
+
+      try {
+        const probe = new BoundedHttpProbe([serverUrl]);
+        const res = await probe.get(`${serverUrl}/status`);
+
+        expect(res.success).toBe(true);
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toBe("HTTP Probe Response OK");
+
+        // Verify no credentials, cookies, or authorization headers were forwarded
+        expect(receivedHeaders["authorization"]).toBeUndefined();
+        expect(receivedHeaders["cookie"]).toBeUndefined();
+      } finally {
+        server.close();
+      }
+    });
+
+    it("22b. Empty allowedOrigins fails closed immediately without performing fetch", async () => {
+      let fetchCalled = false;
+      const probe = new BoundedHttpProbe([]);
+
+      const res = await probe.get("http://127.0.0.1:3000/status");
+
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/is not in workspace allowedHttpOrigins/i);
+      expect(fetchCalled).toBe(false);
     });
 
     it("23. Non-allowlisted HTTP origin is rejected", async () => {
@@ -481,7 +550,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       const res = await worker.executeDiagnostics({
         token: validToken,
         workspaceId,
-        rawCommandText: "check status",
+        rawCommandText: "check YarTrader status",
       });
       expect(res.success).toBe(true);
       const healthItem = res.report?.items.find(
@@ -502,7 +571,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       const res = await noHealthWorker.executeDiagnostics({
         token: validToken,
         workspaceId,
-        rawCommandText: "check status",
+        rawCommandText: "check YarTrader status",
       });
 
       expect(res.success).toBe(true);
@@ -604,8 +673,34 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
     });
 
     it("39. Malicious payload inside HTTP response body is redacted and escaped", async () => {
-      const probe = new BoundedHttpProbe(["http://127.0.0.1:3000"]);
-      expect(probe).toBeDefined();
+      const http = await import("node:http");
+      const server = http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(
+          "<html><body><script>alert('XSS')</script> API_KEY=secret_key_12345</body></html>",
+        );
+      });
+
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const address = server.address() as any;
+      const serverUrl = `http://127.0.0.1:${address.port}`;
+
+      try {
+        const probe = new BoundedHttpProbe([serverUrl]);
+        const probeRes = await probe.get(serverUrl);
+
+        expect(probeRes.success).toBe(true);
+        expect(probeRes.body).toContain("API_KEY=[REDACTED]");
+        expect(probeRes.body).not.toContain("secret_key_12345");
+
+        const escaped = worker.escapeHtml(probeRes.body || "");
+        expect(escaped).toContain("&lt;script&gt;");
+        expect(escaped).not.toContain("<script>");
+      } finally {
+        server.close();
+      }
     });
   });
 

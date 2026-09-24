@@ -295,20 +295,6 @@ export class IdentityStore {
     };
   }
 
-  public updateUserStatus(userId: string, status: "ACTIVE" | "DISABLED"): void {
-    const stmt = this.db.prepare(
-      `UPDATE user_identities SET status = ?, updated_at = ? WHERE user_id = ?`,
-    );
-    stmt.run(status, Date.now(), userId);
-  }
-
-  public removeWorkspaceMember(userId: string, workspaceId: string): void {
-    const stmt = this.db.prepare(
-      `DELETE FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?`,
-    );
-    stmt.run(workspaceId, userId);
-  }
-
   public isUserActiveWorkspaceMember(
     userId: string,
     workspaceId: string,

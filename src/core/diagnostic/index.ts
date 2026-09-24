@@ -90,7 +90,7 @@ export class BoundedHttpProbe {
         );
       });
 
-      if (!isAllowedOrigin && this.allowedOrigins.length > 0) {
+      if (!isAllowedOrigin) {
         return {
           success: false,
           error: `HTTP PROBE DENIED: Destination origin '${origin}' is not in workspace allowedHttpOrigins.`,
@@ -248,30 +248,17 @@ export class DiagnosticWorker {
 
   public isDiagnosticIntent(rawText: string): boolean {
     const norm = DiagnosticWorker.normalizeIntentText(rawText).toLowerCase();
-    const diagnosticKeywords = [
+    const exactRequiredIntents = [
       "check yartrader status",
       "yartrader status",
       "check yartrader",
       "وضعیت yartrader رو بررسی کن",
       "وضعیت یارتریدر",
       "وضعیت یار تریدر",
-      "check status",
-      "وضعیت رو بررسی کن",
     ];
 
-    if (diagnosticKeywords.some((kw) => norm.includes(kw))) {
+    if (exactRequiredIntents.some((kw) => norm === kw || norm.includes(kw))) {
       return true;
-    }
-
-    // Dynamic workspace match check
-    const matchedWs = this.resolveWorkspaceFromIntent(rawText);
-    if (matchedWs) {
-      return (
-        norm.includes("status") ||
-        norm.includes("check") ||
-        norm.includes("وضعیت") ||
-        norm.includes("بررسی")
-      );
     }
 
     return false;
