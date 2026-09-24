@@ -8,19 +8,21 @@ document.addEventListener("DOMContentLoaded", () => {
   const logoutBtn = document.getElementById("logoutBtn");
   const userBadge = document.getElementById("userBadge");
   const userEmail = document.getElementById("userEmail");
+  const avatarLetter = document.getElementById("avatarLetter");
   const messagesList = document.getElementById("messagesList");
   const welcomeBanner = document.getElementById("welcomeBanner");
   const thinkingBar = document.getElementById("thinkingBar");
-  const connectionPill = document.getElementById("connectionPill");
-  const statusLabel = document.getElementById("statusLabel");
+  const healthBadge = document.getElementById("healthBadge");
+  const healthText = document.getElementById("healthText");
+  const suggestionChips = document.getElementById("suggestionChips");
 
   let isSubmitting = false;
   let currentUser = null;
 
-  // Auto-resize textarea
+  // Auto-resize textarea according to text height
   chatInput.addEventListener("input", () => {
     chatInput.style.height = "auto";
-    chatInput.style.height = `${Math.min(chatInput.scrollHeight, 150)}px`;
+    chatInput.style.height = `${Math.min(chatInput.scrollHeight, 160)}px`;
   });
 
   // Handle keyboard submit: Enter = send, Shift + Enter = newline
@@ -33,8 +35,53 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Check auth session on page load
+  // Suggestion chips handler
+  if (suggestionChips) {
+    suggestionChips.addEventListener("click", (e) => {
+      const btn = e.target.closest(".chip-btn");
+      if (!btn) return;
+      const cmd = btn.getAttribute("data-command");
+      if (cmd) {
+        chatInput.value = cmd;
+        chatInput.focus();
+        chatInput.dispatchEvent(new Event("input"));
+      }
+    });
+  }
+
+  // Initialize page & check health + auth
+  checkHealthStatus();
   checkAuthSession();
+
+  async function checkHealthStatus() {
+    try {
+      const res = await fetch("/health", { method: "GET" });
+      if (res.ok) {
+        const data = await res.json();
+        const healthStatus = data.health ? data.health.status : null;
+        if (healthBadge) healthBadge.classList.remove("degraded", "unhealthy", "offline");
+
+        if (healthStatus === "HEALTHY") {
+          if (healthText) healthText.textContent = "سیستم آماده";
+        } else if (healthStatus === "DEGRADED") {
+          if (healthBadge) healthBadge.classList.add("degraded");
+          if (healthText) healthText.textContent = "کارکرد با اختلال (Degraded)";
+        } else if (healthStatus === "UNHEALTHY") {
+          if (healthBadge) healthBadge.classList.add("unhealthy");
+          if (healthText) healthText.textContent = "سیستم ناپایدار (Unhealthy)";
+        } else {
+          if (healthBadge) healthBadge.classList.add("unhealthy");
+          if (healthText) healthText.textContent = "وضعیت ناشناخته";
+        }
+      } else {
+        if (healthBadge) healthBadge.classList.add("offline");
+        if (healthText) healthText.textContent = "ارتباط ناموفق";
+      }
+    } catch (err) {
+      if (healthBadge) healthBadge.classList.add("offline");
+      if (healthText) healthText.textContent = "قطع ارتباط سرور";
+    }
+  }
 
   async function checkAuthSession() {
     try {
@@ -46,6 +93,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (loginBtn) loginBtn.classList.add("hidden");
         if (userBadge) userBadge.classList.remove("hidden");
         if (userEmail) userEmail.textContent = currentUser.email;
+        if (avatarLetter && currentUser.email) {
+          avatarLetter.textContent = currentUser.email.charAt(0).toUpperCase();
+        }
       } else {
         currentUser = null;
         if (loginBtn) loginBtn.classList.remove("hidden");
@@ -73,7 +123,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (!messageText || isSubmitting) return;
 
-    // Hide welcome banner on first message
+    // Hide welcome banner on first submitted message
     if (welcomeBanner) {
       welcomeBanner.style.display = "none";
     }
@@ -87,7 +137,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setSubmittingState(true);
 
     try {
-      // 2. Submit request to POST /api/v1/operator/chat (authenticated via session cookie)
+      // 2. Submit request to POST /api/v1/operator/chat
       const response = await fetch("/api/v1/operator/chat", {
         method: "POST",
         headers: {
@@ -95,7 +145,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
         body: JSON.stringify({
           workspaceId: "yartrader",
-          environmentId: "development",
+          environmentId: "env_yartrader",
           rawCommandText: messageText
         })
       });
@@ -121,12 +171,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (submitting) {
       thinkingBar.classList.remove("hidden");
-      connectionPill.classList.add("thinking");
-      statusLabel.textContent = "در حال پردازش";
+      if (healthBadge) healthBadge.classList.add("busy");
+      if (healthText) healthText.textContent = "در حال پردازش";
     } else {
       thinkingBar.classList.add("hidden");
-      connectionPill.classList.remove("thinking");
-      statusLabel.textContent = "آماده";
+      if (healthBadge) healthBadge.classList.remove("busy");
+      if (healthText) healthText.textContent = "سیستم آماده";
     }
   }
 
@@ -136,9 +186,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const header = document.createElement("div");
     header.className = "message-header";
+    const timeStr = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
     header.innerHTML = `
       <span class="message-author">مالک (Owner)</span>
-      <span>${new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</span>
+      <span class="message-time">${timeStr}</span>
     `;
 
     const content = document.createElement("div");
@@ -156,17 +207,25 @@ document.addEventListener("DOMContentLoaded", () => {
     msgDiv.className = "message-item operator";
 
     const status = result.status || "SAFE";
+    const timeStr = new Date().toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' });
+
     const header = document.createElement("div");
     header.className = "message-header";
     header.innerHTML = `
-      <span class="message-author">YarOperator</span>
+      <span class="message-author">
+        <svg width="14" height="14" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M 20 20 L 50 50 L 50 85" stroke="#D4AF37" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M 80 20 L 50 50" stroke="#D4AF37" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        YarOperator
+      </span>
       <span class="status-badge ${status}">${translateStatus(status)}</span>
     `;
 
     const content = document.createElement("div");
     content.className = "message-content";
 
-    // Executive Assistant Personality-driven response formatting
+    // Executive Assistant response text formulation
     let textOutput = "";
 
     if (
@@ -179,20 +238,20 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (status === "COMPLETED") {
       textOutput = "حتماً. اقدام درخواستی با موفقیت انجام شد.";
     } else if (status === "APPROVAL_REQUIRED") {
-      textOutput = "برای این اقدام به تأیید شما نیاز دارم. فعلاً متوقف می‌مانم.";
+      textOutput = "برای انجام این اقدام به تأیید شما نیاز دارم. فعلاً متوقف می‌مانم.";
     } else if (status === "BLOCKED") {
-      textOutput = "این اقدام در محدوده اختیار فعلی من نیست و نمی‌توانم آن را اجرا کنم.";
+      textOutput = "این اقدام در محدوده اختیار فعلی من نیست و اجازه اجرای آن را ندارم.";
     } else if (status === "FAILED") {
-      textOutput = "در اجرای درخواست مشکلی پیش آمد. اقدام انجام نشده است.";
+      textOutput = "در اجرای درخواست مشکلی پیش آمد و اقدام انجام نشد.";
     } else {
-      textOutput = "درخواست شما دریافت شد.";
+      textOutput = "درخواست شما دریافت شد و بررسی گردید.";
     }
 
     content.textContent = textOutput;
     msgDiv.appendChild(header);
     msgDiv.appendChild(content);
 
-    // Safe Execution Details / Command Output Display
+    // Render tool execution output if present
     if (result.details && result.details.executedSteps) {
       const lastStep = result.details.executedSteps[result.details.executedSteps.length - 1];
       if (lastStep && lastStep.toolOutput) {
