@@ -58,14 +58,28 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await fetch("/health", { method: "GET" });
       if (res.ok) {
         const data = await res.json();
-        if (data.status === "ok" && healthText) {
-          healthText.textContent = "سیستم آماده";
+        const healthStatus = data.health ? data.health.status : null;
+        if (healthBadge) healthBadge.classList.remove("degraded", "unhealthy", "offline");
+
+        if (healthStatus === "HEALTHY") {
+          if (healthText) healthText.textContent = "سیستم آماده";
+        } else if (healthStatus === "DEGRADED") {
+          if (healthBadge) healthBadge.classList.add("degraded");
+          if (healthText) healthText.textContent = "کارکرد با اختلال (Degraded)";
+        } else if (healthStatus === "UNHEALTHY") {
+          if (healthBadge) healthBadge.classList.add("unhealthy");
+          if (healthText) healthText.textContent = "سیستم ناپایدار (Unhealthy)";
+        } else {
+          if (healthBadge) healthBadge.classList.add("unhealthy");
+          if (healthText) healthText.textContent = "وضعیت ناشناخته";
         }
+      } else {
+        if (healthBadge) healthBadge.classList.add("offline");
+        if (healthText) healthText.textContent = "ارتباط ناموفق";
       }
     } catch (err) {
-      if (healthText) {
-        healthText.textContent = "ارتباط محدود";
-      }
+      if (healthBadge) healthBadge.classList.add("offline");
+      if (healthText) healthText.textContent = "قطع ارتباط سرور";
     }
   }
 
@@ -131,7 +145,7 @@ document.addEventListener("DOMContentLoaded", () => {
         },
         body: JSON.stringify({
           workspaceId: "yartrader",
-          environmentId: "development",
+          environmentId: "env_yartrader",
           rawCommandText: messageText
         })
       });

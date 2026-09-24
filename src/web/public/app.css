@@ -164,6 +164,17 @@ html, body {
   box-shadow: 0 0 8px var(--state-safe);
 }
 
+.system-health-badge.degraded .health-dot {
+  background-color: var(--state-approval);
+  box-shadow: 0 0 8px var(--state-approval);
+}
+
+.system-health-badge.unhealthy .health-dot,
+.system-health-badge.offline .health-dot {
+  background-color: var(--state-blocked);
+  box-shadow: 0 0 8px var(--state-blocked);
+}
+
 .system-health-badge.busy .health-dot {
   background-color: var(--state-approval);
   box-shadow: 0 0 8px var(--state-approval);
