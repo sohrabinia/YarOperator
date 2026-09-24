@@ -538,5 +538,120 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       expect(events[0].payload.code).toBe("CROSS_WORKSPACE_ACCESS");
       expect(events[0].workspaceId).toBe("ws1");
     });
+
+    it("32. missing OPERATOR_RESOURCES_PATH causes bootstrap to fail closed without process.cwd() fallback", () => {
+      const origEnv = process.env.OPERATOR_RESOURCES_PATH;
+      delete process.env.OPERATOR_RESOURCES_PATH;
+      try {
+        const apiHandler = bootstrapOperatorApplication({
+          useInMemoryStores: true,
+        });
+        const readinessRes = apiHandler.getReadiness();
+        expect(readinessRes.body.readiness.status).toBe("NOT_READY");
+        expect(readinessRes.body.readiness.subsystems.resourceRegistry).toBe(
+          false,
+        );
+      } finally {
+        if (origEnv) process.env.OPERATOR_RESOURCES_PATH = origEnv;
+      }
+    });
+
+    it("33. audit persistence failure during bootstrap causes readiness to fail closed", async () => {
+      const failingAuditStore = {
+        save: async () => {
+          throw new Error("Simulated audit persistence database write failure");
+        },
+        query: async () => [],
+      };
+
+      const apiHandler = bootstrapOperatorApplication({
+        useInMemoryStores: true,
+        auditStore: failingAuditStore as any,
+        resourceRegistryConfig: {
+          workspaces: [{ workspaceId: "ws1", allowedRoots: [workspace1Dir] }],
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      const readinessRes = apiHandler.getReadiness();
+      expect(readinessRes.body.readiness.status).toBe("NOT_READY");
+      expect(readinessRes.body.readiness.subsystems.resourceRegistry).toBe(
+        false,
+      );
+    });
+
+    it("34. Case A - valid explicit registry produces READY state", async () => {
+      const apiHandler = bootstrapOperatorApplication({
+        useInMemoryStores: true,
+        resourceRegistryConfig: {
+          defaultWorkspaceId: "ws1",
+          workspaces: [{ workspaceId: "ws1", allowedRoots: [workspace1Dir] }],
+        },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      const readinessRes = apiHandler.getReadiness();
+      expect(readinessRes.body.readiness.status).toBe("READY");
+      expect(readinessRes.body.readiness.subsystems.resourceRegistry).toBe(
+        true,
+      );
+    });
+
+    it("35. Case B - missing OPERATOR_RESOURCES_PATH produces NOT_READY state", () => {
+      const origEnv = process.env.OPERATOR_RESOURCES_PATH;
+      delete process.env.OPERATOR_RESOURCES_PATH;
+      try {
+        const apiHandler = bootstrapOperatorApplication({
+          useInMemoryStores: true,
+        });
+        const readinessRes = apiHandler.getReadiness();
+        expect(readinessRes.body.readiness.status).toBe("NOT_READY");
+        expect(readinessRes.body.readiness.subsystems.resourceRegistry).toBe(
+          false,
+        );
+      } finally {
+        if (origEnv) process.env.OPERATOR_RESOURCES_PATH = origEnv;
+      }
+    });
+
+    it("36. Case C - malformed registry produces NOT_READY state", () => {
+      const malformedPath = path.join(tempDir, "bad.json");
+      fs.writeFileSync(malformedPath, "{ malformed json...", "utf-8");
+
+      const apiHandler = bootstrapOperatorApplication({
+        useInMemoryStores: true,
+        resourcesPath: malformedPath,
+      });
+      const readinessRes = apiHandler.getReadiness();
+      expect(readinessRes.body.readiness.status).toBe("NOT_READY");
+      expect(readinessRes.body.readiness.subsystems.resourceRegistry).toBe(
+        false,
+      );
+    });
+
+    it("37. Case D - audit failure produces NOT_READY state", async () => {
+      const failingAuditStore = {
+        save: async () => {
+          throw new Error("Audit store IO error");
+        },
+        query: async () => [],
+      };
+
+      const apiHandler = bootstrapOperatorApplication({
+        useInMemoryStores: true,
+        auditStore: failingAuditStore as any,
+        resourceRegistryConfig: {
+          workspaces: [{ workspaceId: "ws1", allowedRoots: [workspace1Dir] }],
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      const readinessRes = apiHandler.getReadiness();
+      expect(readinessRes.body.readiness.status).toBe("NOT_READY");
+      expect(readinessRes.body.readiness.subsystems.resourceRegistry).toBe(
+        false,
+      );
+    });
   });
 });

@@ -7,14 +7,13 @@
       "workspaceId": "yartrader",
       "aliases": ["trader", "ws_yartrader"],
       "allowedRoots": [
-        "C:\\Projects\\YarTrader",
-        "/var/operator/workspaces/yartrader"
+        "/app"
       ],
       "repositories": [
         {
           "repositoryId": "sohrabinia/YarTrader",
           "workspaceId": "yartrader",
-          "root": "C:\\Projects\\YarTrader"
+          "root": "/app"
         }
       ],
       "environments": [
@@ -31,14 +30,13 @@
       "workspaceId": "ws_default",
       "aliases": ["default"],
       "allowedRoots": [
-        "C:\\Projects\\YarOperator",
-        "/var/operator/workspaces/default"
+        "/app"
       ],
       "repositories": [
         {
           "repositoryId": "sohrabinia/YarOperator",
           "workspaceId": "ws_default",
-          "root": "C:\\Projects\\YarOperator"
+          "root": "/app"
         }
       ],
       "environments": [

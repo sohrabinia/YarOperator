@@ -161,7 +161,8 @@ export class ResourceResolver {
 
     // If requested path is relative, resolve it relative to primary workspace allowed root
     if (!this.pathAdapter.isAbsolute(targetNormalized)) {
-      const primaryRoot = ws.allowedRoots[0];
+      const primaryRoot =
+        ws.allowedRoots.find((r) => fs.existsSync(r)) || ws.allowedRoots[0];
       targetNormalized = this.pathAdapter.resolve(primaryRoot, rawPath);
     }
 

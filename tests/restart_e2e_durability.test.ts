@@ -27,6 +27,7 @@ describe("Phase 6: Restart / Crash End-to-End Integration Durability Test", () =
       bearerToken: "token_e2e_session_1001",
       ownerId: "owner_sohrab",
       defaultWorkspaceId: "yartrader",
+      resourcesPath: "config/resources.example.json",
     });
 
     server = new OperatorWebServer({
@@ -75,6 +76,7 @@ describe("Phase 6: Restart / Crash End-to-End Integration Durability Test", () =
       dbPath,
       ownerId: "owner_sohrab",
       defaultWorkspaceId: "yartrader",
+      resourcesPath: "config/resources.example.json",
     });
 
     server = new OperatorWebServer({

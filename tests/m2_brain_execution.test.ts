@@ -319,6 +319,7 @@ describe("M2: Brain → Existing Execution Architectural Pipeline", () => {
       bearerToken: "token_m2_test",
       defaultWorkspaceId: "yartrader",
       useInMemoryStores: true,
+      resourcesPath: "config/resources.example.json",
     });
 
     const req: OperatorApiRequest = {

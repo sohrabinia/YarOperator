@@ -422,7 +422,7 @@ export class ResourceRegistry {
     return createHash("sha256").update(this.getRawBytes()).digest("hex");
   }
 
-  public async auditBootstrap(auditManager?: AuditManager): Promise<string> {
+  public auditBootstrap(auditManager?: AuditManager): Promise<string> | string {
     const hash = this.calculateSha256();
     const workspaceIds = this.config.workspaces.map((w) => w.workspaceId);
     const environmentIds: string[] = [];
@@ -435,7 +435,7 @@ export class ResourceRegistry {
     }
 
     if (auditManager) {
-      await auditManager.recordEvent(
+      const p = auditManager.recordEvent(
         "REGISTRY_BOOTSTRAP_SUCCESS",
         {
           configPathIdentifier: this.getLoadedPath(),
@@ -446,6 +446,9 @@ export class ResourceRegistry {
         },
         { severity: "LOW" },
       );
+      if (p && typeof (p as any).then === "function") {
+        return (p as any).then(() => hash);
+      }
     }
 
     return hash;
