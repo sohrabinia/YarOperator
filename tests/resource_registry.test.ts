@@ -491,8 +491,8 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
 
   // --- Runtime & Audit Tests (29-31) ---
   describe("5. Runtime Readiness & SHA-256 Audit Events", () => {
-    it("29. registry failure cannot produce false READY", () => {
-      const apiHandler = bootstrapOperatorApplication({
+    it("29. registry failure cannot produce false READY", async () => {
+      const apiHandler = await bootstrapOperatorApplication({
         useInMemoryStores: true,
         resourcesPath: path.join(tempDir, "invalid_non_existent.json"),
       });
@@ -539,11 +539,11 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       expect(events[0].workspaceId).toBe("ws1");
     });
 
-    it("32. missing OPERATOR_RESOURCES_PATH causes bootstrap to fail closed without process.cwd() fallback", () => {
+    it("32. missing OPERATOR_RESOURCES_PATH causes bootstrap to fail closed without process.cwd() fallback", async () => {
       const origEnv = process.env.OPERATOR_RESOURCES_PATH;
       delete process.env.OPERATOR_RESOURCES_PATH;
       try {
-        const apiHandler = bootstrapOperatorApplication({
+        const apiHandler = await bootstrapOperatorApplication({
           useInMemoryStores: true,
         });
         const readinessRes = apiHandler.getReadiness();
@@ -564,15 +564,13 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
         query: async () => [],
       };
 
-      const apiHandler = bootstrapOperatorApplication({
+      const apiHandler = await bootstrapOperatorApplication({
         useInMemoryStores: true,
         auditStore: failingAuditStore as any,
         resourceRegistryConfig: {
           workspaces: [{ workspaceId: "ws1", allowedRoots: [workspace1Dir] }],
         },
       });
-
-      await new Promise((r) => setTimeout(r, 20));
 
       const readinessRes = apiHandler.getReadiness();
       expect(readinessRes.body.readiness.status).toBe("NOT_READY");
@@ -582,14 +580,13 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
     });
 
     it("34. Case A - valid explicit registry produces READY state", async () => {
-      const apiHandler = bootstrapOperatorApplication({
+      const apiHandler = await bootstrapOperatorApplication({
         useInMemoryStores: true,
         resourceRegistryConfig: {
           defaultWorkspaceId: "ws1",
           workspaces: [{ workspaceId: "ws1", allowedRoots: [workspace1Dir] }],
         },
       });
-      await new Promise((r) => setTimeout(r, 10));
       const readinessRes = apiHandler.getReadiness();
       expect(readinessRes.body.readiness.status).toBe("READY");
       expect(readinessRes.body.readiness.subsystems.resourceRegistry).toBe(
@@ -597,11 +594,11 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       );
     });
 
-    it("35. Case B - missing OPERATOR_RESOURCES_PATH produces NOT_READY state", () => {
+    it("35. Case B - missing OPERATOR_RESOURCES_PATH produces NOT_READY state", async () => {
       const origEnv = process.env.OPERATOR_RESOURCES_PATH;
       delete process.env.OPERATOR_RESOURCES_PATH;
       try {
-        const apiHandler = bootstrapOperatorApplication({
+        const apiHandler = await bootstrapOperatorApplication({
           useInMemoryStores: true,
         });
         const readinessRes = apiHandler.getReadiness();
@@ -614,11 +611,11 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       }
     });
 
-    it("36. Case C - malformed registry produces NOT_READY state", () => {
+    it("36. Case C - malformed registry produces NOT_READY state", async () => {
       const malformedPath = path.join(tempDir, "bad.json");
       fs.writeFileSync(malformedPath, "{ malformed json...", "utf-8");
 
-      const apiHandler = bootstrapOperatorApplication({
+      const apiHandler = await bootstrapOperatorApplication({
         useInMemoryStores: true,
         resourcesPath: malformedPath,
       });
@@ -637,15 +634,13 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
         query: async () => [],
       };
 
-      const apiHandler = bootstrapOperatorApplication({
+      const apiHandler = await bootstrapOperatorApplication({
         useInMemoryStores: true,
         auditStore: failingAuditStore as any,
         resourceRegistryConfig: {
           workspaces: [{ workspaceId: "ws1", allowedRoots: [workspace1Dir] }],
         },
       });
-
-      await new Promise((r) => setTimeout(r, 20));
 
       const readinessRes = apiHandler.getReadiness();
       expect(readinessRes.body.readiness.status).toBe("NOT_READY");

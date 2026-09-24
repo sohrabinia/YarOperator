@@ -22,7 +22,7 @@ describe("Phase 6: Restart / Crash End-to-End Integration Durability Test", () =
     // =========================================================================
     // BOOT 1: Initial Application Startup
     // =========================================================================
-    let apiHandler1 = bootstrapOperatorApplication({
+    let apiHandler1 = await bootstrapOperatorApplication({
       dbPath,
       bearerToken: "token_e2e_session_1001",
       ownerId: "owner_sohrab",
@@ -72,7 +72,7 @@ describe("Phase 6: Restart / Crash End-to-End Integration Durability Test", () =
     // =========================================================================
     // BOOT 2: Rehydrate Application from Same Persistence DB
     // =========================================================================
-    let apiHandler2 = bootstrapOperatorApplication({
+    let apiHandler2 = await bootstrapOperatorApplication({
       dbPath,
       ownerId: "owner_sohrab",
       defaultWorkspaceId: "yartrader",

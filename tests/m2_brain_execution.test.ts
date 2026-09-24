@@ -314,7 +314,7 @@ describe("M2: Brain → Existing Execution Architectural Pipeline", () => {
   });
 
   it("11. Real HTTP Application Path integration verification", async () => {
-    const handler = bootstrapOperatorApplication({
+    const handler = await bootstrapOperatorApplication({
       ownerId: "owner_sohrab",
       bearerToken: "token_m2_test",
       defaultWorkspaceId: "yartrader",

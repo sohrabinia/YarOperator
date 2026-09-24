@@ -49,9 +49,9 @@ export interface BootstrapOptions {
   resourcesPath?: string;
 }
 
-export function bootstrapOperatorApplication(
+export async function bootstrapOperatorApplication(
   options?: BootstrapOptions,
-): OperatorApiHandler {
+): Promise<OperatorApiHandler> {
   const ownerManager = new OwnerManager();
 
   const isProd = process.env.NODE_ENV === "production";
@@ -178,33 +178,13 @@ export function bootstrapOperatorApplication(
     });
 
     resourceResolver = new ResourceResolver(resourceRegistry, auditManager);
-    registryReady = true;
 
-    const auditRes = resourceRegistry.auditBootstrap(auditManager);
-    if (auditRes && typeof (auditRes as any).then === "function") {
-      (auditRes as any).catch((err: any) => {
-        registryReady = false;
-        try {
-          auditManager
-            .recordEvent(
-              "REGISTRY_BOOTSTRAP_FAILURE",
-              {
-                error: err.message,
-                configPathIdentifier:
-                  options?.resourcesPath ||
-                  process.env.OPERATOR_RESOURCES_PATH ||
-                  "none",
-              },
-              { severity: "CRITICAL" },
-            )
-            .catch(() => {});
-        } catch {}
-      });
-    }
+    await resourceRegistry.auditBootstrap(auditManager);
+    registryReady = true;
   } catch (err: any) {
     registryReady = false;
     try {
-      auditManager.recordEvent(
+      await auditManager.recordEvent(
         "REGISTRY_BOOTSTRAP_FAILURE",
         {
           error: err.message,

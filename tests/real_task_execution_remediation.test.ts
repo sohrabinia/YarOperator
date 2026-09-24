@@ -40,13 +40,14 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
   const bearerToken = "valid_test_bearer_token_789";
   let apiHandler: OperatorApiHandler;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.restoreAllMocks();
-    apiHandler = bootstrapOperatorApplication({
+    apiHandler = await bootstrapOperatorApplication({
       bearerToken,
       ownerId: "owner_sohrab",
       defaultWorkspaceId: "yartrader",
       useInMemoryStores: true,
+      resourcesPath: "config/resources.example.json",
     });
   });
 

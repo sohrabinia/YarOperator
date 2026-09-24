@@ -86,10 +86,11 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
   });
 
   it("should enforce negative E2E security boundaries: unauthorized token, workspace mismatch, environment boundary, and policy gates", async () => {
-    const apiHandler = bootstrapOperatorApplication({
+    const apiHandler = await bootstrapOperatorApplication({
       bearerToken: "valid_owner_bearer_token_123",
       ownerId: "owner_sohrab",
       useInMemoryStores: true,
+      resourcesPath: "config/resources.example.json",
     });
 
     // 1. Unauthorized Bearer Token Gate
@@ -165,7 +166,7 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
     auditStore.close();
   });
 
-  it("should fail closed when ApprovalManager is instantiated without explicit dbPath or when production receives in-memory audit store", () => {
+  it("should fail closed when ApprovalManager is instantiated without explicit dbPath or when production receives in-memory audit store", async () => {
     // 1. ApprovalManager missing dbPath fail-closed
     expect(() => new (ApprovalManager as any)()).toThrow(
       "APPROVAL MANAGER FAILURE: Explicit dbPath must be provided to ApprovalManager.",
@@ -175,21 +176,21 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
     const origEnv = process.env.NODE_ENV;
     try {
       process.env.NODE_ENV = "production";
-      expect(() =>
+      await expect(
         bootstrapOperatorApplication({
           useInMemoryStores: true,
           dbPath: testDbPath,
         }),
-      ).toThrow(
+      ).rejects.toThrow(
         "PRODUCTION SECURITY FAILURE: In-memory store overrides are strictly forbidden in production.",
       );
 
-      expect(() =>
+      await expect(
         bootstrapOperatorApplication({
           auditStore: new InMemoryAuditStore(),
           dbPath: testDbPath,
         }),
-      ).toThrow(
+      ).rejects.toThrow(
         "PRODUCTION SECURITY FAILURE: Non-SQLite audit stores are strictly forbidden in production.",
       );
     } finally {
