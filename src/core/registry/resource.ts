@@ -57,7 +57,11 @@ export class ResourceRegistry {
       }
       try {
         this.rawBytes = fs.readFileSync(configInput);
-        const parsed = JSON.parse(this.rawBytes.toString("utf-8"));
+        const cleanCwd = path.resolve(process.cwd()).replace(/\\/g, "\\\\");
+        const interpolated = this.rawBytes
+          .toString("utf-8")
+          .replace(/\$\{CWD\}/g, cleanCwd);
+        const parsed = JSON.parse(interpolated);
         this.config = parsed;
       } catch (err: any) {
         if (err instanceof SyntaxError) {
@@ -70,8 +74,13 @@ export class ResourceRegistry {
         );
       }
     } else if (configInput) {
-      this.config = configInput;
-      this.rawBytes = Buffer.from(JSON.stringify(configInput), "utf-8");
+      const cleanCwd = path.resolve(process.cwd()).replace(/\\/g, "\\\\");
+      const jsonStr = JSON.stringify(configInput).replace(
+        /\$\{CWD\}/g,
+        cleanCwd,
+      );
+      this.config = JSON.parse(jsonStr);
+      this.rawBytes = Buffer.from(JSON.stringify(this.config), "utf-8");
       this.loadedPath = "in-memory";
     } else {
       const envPath = process.env.OPERATOR_RESOURCES_PATH;
@@ -88,7 +97,11 @@ export class ResourceRegistry {
       }
       try {
         this.rawBytes = fs.readFileSync(envPath);
-        this.config = JSON.parse(this.rawBytes.toString("utf-8"));
+        const cleanCwd = path.resolve(process.cwd()).replace(/\\/g, "\\\\");
+        const interpolated = this.rawBytes
+          .toString("utf-8")
+          .replace(/\$\{CWD\}/g, cleanCwd);
+        this.config = JSON.parse(interpolated);
       } catch (err: any) {
         if (err instanceof SyntaxError) {
           throw new Error(
