@@ -649,4 +649,138 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       );
     });
   });
+
+  // --- Authoritative Resolver Security & Anti-Bypass Tests ---
+  describe("6. Authoritative Resolver Security & Anti-Bypass Tests", () => {
+    it("38. metadata.resourceResolver cannot replace or override authoritative tool resolver", async () => {
+      // Authoritative resolver for ws1 (workspace1Dir)
+      const authRegistry = new ResourceRegistry({
+        workspaces: [{ workspaceId: "ws1", allowedRoots: [workspace1Dir] }],
+      });
+      const authResolver = new ResourceResolver(authRegistry, auditManager);
+
+      // Malicious fake resolver attempting to authorize workspace2Dir for ws1
+      const fakeRegistry = new ResourceRegistry({
+        workspaces: [{ workspaceId: "ws1", allowedRoots: [workspace2Dir] }],
+      });
+      const fakeResolver = new ResourceResolver(fakeRegistry, auditManager);
+
+      const gitTool = new GitTool(authResolver);
+
+      // Attempt execution passing fakeResolver in metadata attempting to access workspace2Dir
+      const res = await gitTool.execute(
+        { action: "status", cwd: workspace2Dir },
+        {
+          executionId: "exec_bypass_1",
+          timestamp: new Date(),
+          workspaceId: "ws1",
+          metadata: { resourceResolver: fakeResolver },
+        },
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/escapes authorized workspace roots/i);
+    });
+
+    it("39. workspace mismatch between pre-resolved resource and context workspace fails closed", async () => {
+      const authRegistry = new ResourceRegistry({
+        workspaces: [
+          { workspaceId: "ws1", allowedRoots: [workspace1Dir] },
+          { workspaceId: "ws2", allowedRoots: [workspace2Dir] },
+        ],
+      });
+      const authResolver = new ResourceResolver(authRegistry, auditManager);
+
+      // Pre-resolved resource generated for ws2
+      const resWs2 = authResolver.resolveResource("ws2", workspace2Dir);
+      expect(resWs2.success).toBe(true);
+
+      const gitTool = new GitTool(authResolver);
+
+      // Attempt executing gitTool with context workspaceId "ws1" but passing ws2's pre-resolved resource
+      if (resWs2.success) {
+        const res = await gitTool.execute(
+          { action: "status" },
+          {
+            executionId: "exec_ws_mismatch",
+            timestamp: new Date(),
+            workspaceId: "ws1", // Mismatch!
+            metadata: { resolvedResource: resWs2.resource },
+          },
+        );
+
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/does not match context workspace/i);
+      }
+    });
+
+    it("40. pre-resolved resource is re-verified through authoritative resolver and rejected if invalid for context workspace", async () => {
+      const authRegistry = new ResourceRegistry({
+        workspaces: [
+          { workspaceId: "ws1", allowedRoots: [workspace1Dir] },
+          { workspaceId: "ws2", allowedRoots: [workspace2Dir] },
+        ],
+      });
+      const authResolver = new ResourceResolver(authRegistry, auditManager);
+
+      const resWs2 = authResolver.resolveResource("ws2", workspace2Dir);
+      expect(resWs2.success).toBe(true);
+
+      if (resWs2.success) {
+        // Copy resWs2.resource (retaining Symbol brand) but forge workspaceId to "ws1"
+        const forgedResource = Object.assign({}, resWs2.resource, {
+          workspaceId: "ws1",
+        });
+
+        const terminalTool = new TerminalTool(authResolver);
+
+        const res = await terminalTool.execute(
+          { command: "echo", args: ["test"] },
+          {
+            executionId: "exec_forged",
+            timestamp: new Date(),
+            workspaceId: "ws1",
+            metadata: {
+              resolvedResource: forgedResource,
+            },
+          },
+        );
+
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/failed authoritative resolution/i);
+      }
+    });
+
+    it("41. absence of authoritative resolver fails closed", async () => {
+      const gitToolNoResolver = new GitTool();
+      const resGit = await gitToolNoResolver.execute(
+        { action: "status", cwd: workspace1Dir },
+        {
+          executionId: "exec_no_resolver",
+          timestamp: new Date(),
+          workspaceId: "ws1",
+        },
+      );
+
+      expect(resGit.success).toBe(false);
+      expect(resGit.error).toMatch(
+        /Authoritative ResourceResolver is required for GitTool execution/i,
+      );
+
+      const terminalToolNoResolver = new TerminalTool();
+      const resTerm = await terminalToolNoResolver.execute(
+        { command: "echo", args: ["hi"] },
+        {
+          executionId: "exec_no_resolver_term",
+          timestamp: new Date(),
+          workspaceId: "ws1",
+        },
+      );
+
+      expect(resTerm.success).toBe(false);
+      expect(resTerm.error).toMatch(
+        /Authoritative ResourceResolver is required for TerminalTool execution/i,
+      );
+    });
+  });
 });

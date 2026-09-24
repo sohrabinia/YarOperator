@@ -23,6 +23,11 @@ export class SecureToolEcosystem {
 
   public setResourceResolver(resolver: ResourceResolver): void {
     this.resourceResolver = resolver;
+    for (const tool of this.registry.list()) {
+      if (typeof (tool as any).setResourceResolver === "function") {
+        (tool as any).setResourceResolver(resolver);
+      }
+    }
   }
 
   public getResourceResolver(): ResourceResolver | undefined {
@@ -52,6 +57,12 @@ export class SecureToolEcosystem {
   }
 
   registerTool(tool: Tool): void {
+    if (
+      this.resourceResolver &&
+      typeof (tool as any).setResourceResolver === "function"
+    ) {
+      (tool as any).setResourceResolver(this.resourceResolver);
+    }
     this.registry.register(tool);
   }
 
@@ -209,8 +220,6 @@ export class SecureToolEcosystem {
       ...context,
       metadata: {
         ...context.metadata,
-        resourceResolver:
-          this.resourceResolver || context.metadata?.resourceResolver,
         approved: true,
       },
     };

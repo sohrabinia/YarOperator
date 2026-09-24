@@ -28,7 +28,7 @@ describe("Git, GitHub and Jules Worker Tools", () => {
   };
 
   it("should perform real Git status and execute Git operations", async () => {
-    const gitTool = new GitTool();
+    const gitTool = new GitTool(testResolver);
     const statusRes = await gitTool.execute({ action: "status" }, mockContext);
     expect(statusRes.success).toBe(true);
     expect(statusRes.output?.output).toBeDefined();
@@ -41,7 +41,7 @@ describe("Git, GitHub and Jules Worker Tools", () => {
   });
 
   it("should prevent shell command injection when parameters contain metacharacters", async () => {
-    const gitTool = new GitTool();
+    const gitTool = new GitTool(testResolver);
     // Attempt shell injection in branch name
     const res = await gitTool.execute(
       {

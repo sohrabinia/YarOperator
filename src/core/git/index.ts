@@ -83,15 +83,13 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
     params: GitOperationParams,
     context: ExecutionContext,
   ): Promise<ToolResult<GitOperationResult>> {
-    const resolver =
-      (context.metadata?.resourceResolver as ResourceResolver) ||
-      this.resourceResolver;
+    const resolver = this.resourceResolver;
 
     if (!resolver) {
       return {
         success: false,
         error:
-          "RESOURCE RESOLUTION FAILURE: ResourceResolver is required for GitTool execution.",
+          "RESOURCE RESOLUTION FAILURE: Authoritative ResourceResolver is required for GitTool execution.",
       };
     }
 
@@ -110,13 +108,25 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
       context.metadata?.resolvedResource &&
       isResolvedResource(context.metadata.resolvedResource)
     ) {
-      resolvedResource = context.metadata.resolvedResource as ResolvedResource;
-      if (resolvedResource.workspaceId !== wsId) {
+      const preResolved = context.metadata.resolvedResource as ResolvedResource;
+      if (preResolved.workspaceId !== wsId) {
         return {
           success: false,
-          error: `Git operation rejected: Pre-resolved resource workspace '${resolvedResource.workspaceId}' does not match context workspace '${wsId}'.`,
+          error: `Git operation rejected: Pre-resolved resource workspace '${preResolved.workspaceId}' does not match context workspace '${wsId}'.`,
         };
       }
+      // Re-verify canonical path through authoritative resolver to ensure single-authority validation
+      const verification = resolver.resolveResource(
+        wsId,
+        preResolved.canonicalPath,
+      );
+      if (!verification.success) {
+        return {
+          success: false,
+          error: `Git operation rejected: Pre-resolved resource failed authoritative resolution: ${verification.error}`,
+        };
+      }
+      resolvedResource = verification.resource;
     } else {
       const targetPath = params.cwd || ".";
       const res = resolver.resolveResource(wsId, targetPath);
