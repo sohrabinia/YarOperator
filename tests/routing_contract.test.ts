@@ -61,7 +61,7 @@ describe("Production Routing Contract Validation Test Suite", () => {
         },
         body: JSON.stringify({
           workspaceId: "yartrader",
-          rawCommandText: "وضعیت سیستم",
+          rawCommandText: "check operator runtime health",
         }),
       },
     );

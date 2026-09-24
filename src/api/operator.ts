@@ -475,10 +475,12 @@ export class OperatorApiHandler {
         }
       }
 
+      const isSuccessfulStatus = status === "COMPLETED" || status === "SAFE";
+
       return {
         statusCode: 200,
         body: {
-          success: true,
+          success: isSuccessfulStatus,
           result: {
             commandId: receiverResult.commandId,
             accepted: true,

@@ -150,6 +150,7 @@ export class AgentOrchestrator {
       workspaceId,
       targetCapability: request.targetCapability,
       requestedToolId: request.requestedToolId,
+      rawCommandText: request.rawCommandText,
     });
 
     if (capRes.status !== "RESOLVED" || !capRes.resolvedCapability) {

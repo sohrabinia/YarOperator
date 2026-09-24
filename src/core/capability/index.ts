@@ -6,6 +6,74 @@ export interface CapabilityResolutionRequest {
   workspaceId?: string;
   targetCapability?: string;
   requestedToolId?: string;
+  rawCommandText?: string;
+}
+
+export function isHealthReadinessIntent(text?: string): boolean {
+  if (!text) return false;
+  const norm = text.toLowerCase().trim();
+
+  // Negative checks for non-health operational contexts
+  if (
+    norm.includes("git") ||
+    norm.includes("branch") ||
+    norm.includes("commit") ||
+    norm.includes("pull request") ||
+    norm.includes("pr ") ||
+    norm.includes(" pr") ||
+    norm.includes("build") ||
+    norm.includes("test") ||
+    norm.includes("logs") ||
+    norm.includes("code")
+  ) {
+    return false;
+  }
+
+  // Positive English patterns
+  const hasHealth = norm.includes("health");
+  const hasReadiness = norm.includes("readiness");
+  const hasOperator = norm.includes("operator");
+  const hasRuntime = norm.includes("runtime");
+
+  if (hasOperator && (hasHealth || hasReadiness)) return true;
+  if (hasRuntime && (hasHealth || hasReadiness)) return true;
+  if (
+    hasHealth &&
+    (norm.includes("system") ||
+      norm.includes("check") ||
+      norm.includes("report"))
+  )
+    return true;
+  if (
+    hasReadiness &&
+    (norm.includes("status") ||
+      norm.includes("report") ||
+      norm.includes("check"))
+  )
+    return true;
+
+  // Positive Persian patterns
+  if (
+    norm.includes("سلامت") &&
+    (norm.includes("اپراتور") ||
+      norm.includes("اوپراتور") ||
+      norm.includes("سیستم") ||
+      norm.includes("بررسی"))
+  ) {
+    return true;
+  }
+
+  if (
+    norm.includes("آمادگی") &&
+    (norm.includes("اپراتور") ||
+      norm.includes("اوپراتور") ||
+      norm.includes("سیستم") ||
+      norm.includes("وضعیت"))
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export interface CapabilityResolutionResult {
@@ -55,9 +123,29 @@ export class CapabilityResolver {
     }
 
     // 3. ACTION Intent Resolution
-    // Precedence 1: Explicit targetCapability
-    // Precedence 2: Brain-derived actionGoal mapping
+    // Precedence 1: Explicit targetCapability / requestedToolId
+    // Precedence 2: Operational Health/Readiness Intent -> system-monitoring / operator_health
+    // Precedence 3: Brain-derived actionGoal mapping
     let capability: string | undefined = targetCapability;
+    let toolId: string | undefined = requestedToolId;
+
+    const commandTextCandidate =
+      request.rawCommandText ||
+      brainResult.plan?.goal ||
+      (brainResult as any).rawCommandText;
+
+    if (
+      !capability &&
+      !toolId &&
+      isHealthReadinessIntent(commandTextCandidate)
+    ) {
+      capability = "system-monitoring";
+      toolId = "operator_health";
+    }
+
+    if (capability === "system-monitoring" && !toolId) {
+      toolId = "operator_health";
+    }
 
     if (!capability && brainResult.actionGoal) {
       capability =
@@ -88,11 +176,11 @@ export class CapabilityResolver {
       };
     }
 
-    // Preserve explicit requestedToolId if supplied
+    // Preserve explicit requestedToolId if supplied or resolved
     return {
       status: "RESOLVED",
       resolvedCapability: capability,
-      resolvedToolId: requestedToolId,
+      resolvedToolId: toolId,
     };
   }
 }
