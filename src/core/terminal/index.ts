@@ -6,6 +6,12 @@ import {
 } from "../contracts/index.js";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { ResourceRegistry } from "../registry/resource.js";
+import {
+  ResourceResolver,
+  ResolvedResource,
+  isResolvedResource,
+} from "../registry/resolver.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -40,10 +46,73 @@ export class TerminalTool implements Tool<TerminalParams, TerminalOutput> {
   private sensitiveKeyPattern =
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
 
+  constructor(private resourceResolver?: ResourceResolver) {}
+
+  public setResourceResolver(resolver: ResourceResolver): void {
+    this.resourceResolver = resolver;
+  }
+
   async execute(
     params: TerminalParams,
     context: ExecutionContext,
   ): Promise<ToolResult<TerminalOutput>> {
+    const resolver = this.resourceResolver;
+
+    if (!resolver) {
+      return {
+        success: false,
+        error:
+          "RESOURCE RESOLUTION FAILURE: Authoritative ResourceResolver is required for TerminalTool execution.",
+      };
+    }
+
+    const wsId = context.workspaceId;
+    if (!wsId) {
+      return {
+        success: false,
+        error:
+          "RESOURCE RESOLUTION FAILURE: workspaceId is required in ExecutionContext for TerminalTool.",
+      };
+    }
+
+    let resolvedResource: ResolvedResource;
+
+    if (
+      context.metadata?.resolvedResource &&
+      isResolvedResource(context.metadata.resolvedResource)
+    ) {
+      const preResolved = context.metadata.resolvedResource as ResolvedResource;
+      if (preResolved.workspaceId !== wsId) {
+        return {
+          success: false,
+          error: `Terminal execution rejected: Pre-resolved resource workspace '${preResolved.workspaceId}' does not match context workspace '${wsId}'.`,
+        };
+      }
+      // Re-verify canonical path through authoritative resolver to ensure single-authority validation
+      const verification = resolver.resolveResource(
+        wsId,
+        preResolved.canonicalPath,
+      );
+      if (!verification.success) {
+        return {
+          success: false,
+          error: `Terminal execution rejected: Pre-resolved resource failed authoritative resolution: ${verification.error}`,
+        };
+      }
+      resolvedResource = verification.resource;
+    } else {
+      const targetPath = params.cwd || ".";
+      const res = resolver.resolveResource(wsId, targetPath);
+      if (!res.success) {
+        return {
+          success: false,
+          error: `Terminal execution rejected: ${res.error}`,
+        };
+      }
+      resolvedResource = res.resource;
+    }
+
+    const targetCwd = resolvedResource.canonicalPath;
     const cmd = (params.command || "").trim();
     if (!cmd) {
       return {
@@ -66,7 +135,7 @@ export class TerminalTool implements Tool<TerminalParams, TerminalOutput> {
 
     try {
       const { stdout, stderr } = await execFileAsync(cmd, args, {
-        cwd: params.cwd,
+        cwd: targetCwd,
         timeout,
         shell: false,
         env: { ...process.env, ...params.env },

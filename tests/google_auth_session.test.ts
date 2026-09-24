@@ -37,9 +37,10 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
       e: jwk.e,
     };
 
-    const apiHandler = bootstrapOperatorApplication({
+    const apiHandler = await bootstrapOperatorApplication({
       ownerId: "owner_sohrab",
       bearerToken: MOCK_BEARER_TOKEN,
+      resourcesPath: "config/resources.example.json",
     });
 
     server = new OperatorWebServer({

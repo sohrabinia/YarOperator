@@ -30,6 +30,11 @@ import {
   WorkspacePolicyManager,
   WorkspacePolicy,
 } from "../workspace/policy.js";
+import {
+  ResourceRegistry,
+  ResourceRegistryConfig,
+} from "../registry/resource.js";
+import { ResourceResolver } from "../registry/resolver.js";
 
 export interface BootstrapOptions {
   ownerId?: string;
@@ -40,11 +45,13 @@ export interface BootstrapOptions {
   dbPath?: string;
   auditStore?: AuditStore;
   useInMemoryStores?: boolean;
+  resourceRegistryConfig?: ResourceRegistryConfig | string;
+  resourcesPath?: string;
 }
 
-export function bootstrapOperatorApplication(
+export async function bootstrapOperatorApplication(
   options?: BootstrapOptions,
-): OperatorApiHandler {
+): Promise<OperatorApiHandler> {
   const ownerManager = new OwnerManager();
 
   const isProd = process.env.NODE_ENV === "production";
@@ -150,17 +157,69 @@ export function bootstrapOperatorApplication(
     : new IdentityStore(dbPath);
 
   let receiver: OwnerCommandReceiver | undefined;
+  let registryReady = false;
+  let resourceRegistry: ResourceRegistry | undefined;
+  let resourceResolver: ResourceResolver | undefined;
+
+  try {
+    const registryInput =
+      options?.resourceRegistryConfig ||
+      options?.resourcesPath ||
+      process.env.OPERATOR_RESOURCES_PATH;
+
+    if (!registryInput) {
+      throw new Error(
+        "RESOURCE REGISTRY BOOTSTRAP FAILURE: Missing mandatory OPERATOR_RESOURCES_PATH environment variable or registry configuration.",
+      );
+    }
+
+    resourceRegistry = new ResourceRegistry(registryInput, {
+      skipFsCheck: options?.useInMemoryStores ?? false,
+    });
+
+    resourceResolver = new ResourceResolver(resourceRegistry, auditManager);
+
+    await resourceRegistry.auditBootstrap(auditManager);
+    registryReady = true;
+  } catch (err: any) {
+    registryReady = false;
+    try {
+      await auditManager.recordEvent(
+        "REGISTRY_BOOTSTRAP_FAILURE",
+        {
+          error: err.message,
+          configPathIdentifier:
+            options?.resourcesPath ||
+            process.env.OPERATOR_RESOURCES_PATH ||
+            "none",
+        },
+        { severity: "CRITICAL" },
+      );
+    } catch {
+      // Audit failure logging caught fail-closed
+    }
+  }
 
   const sharedHealthProvider = new SystemHealthProvider(
     () => Boolean(receiver),
     () => identityStoreForApi,
+    undefined,
+    () => registryReady,
   );
 
   const healthTool = new OperatorHealthTool(sharedHealthProvider);
 
+  const gitTool = new GitTool();
+  const terminalTool = new TerminalTool();
+  if (resourceResolver) {
+    gitTool.setResourceResolver(resourceResolver);
+    terminalTool.setResourceResolver(resourceResolver);
+    toolEcosystem.setResourceResolver(resourceResolver);
+  }
+
   const defaultTools = [
-    new TerminalTool(),
-    new GitTool(),
+    terminalTool,
+    gitTool,
     new GitHubTool(),
     new JulesWorkerAdapter(),
     new BrowserTool(),
@@ -180,11 +239,14 @@ export function bootstrapOperatorApplication(
   );
 
   for (const wsId of defaultWorkspaces) {
+    const wsConfig = resourceRegistry?.getWorkspace(wsId);
+    const allowedRoots = wsConfig ? wsConfig.allowedRoots : [];
+
     workspacePolicyManager.registerPolicy(
       new WorkspacePolicy({
         workspaceId: wsId,
         allowedTools: registeredToolIds,
-        allowedRoots: [process.cwd()],
+        allowedRoots,
       }),
     );
 

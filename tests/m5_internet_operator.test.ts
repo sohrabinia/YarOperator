@@ -17,11 +17,12 @@ describe("M5 Internet Operator Core Verification Suite", () => {
 
   describe("Browser Core (1-10)", () => {
     it("1. browser_operate and web-browsing capability are registered in bootstrapped application", async () => {
-      const handler = bootstrapOperatorApplication({
+      const handler = await bootstrapOperatorApplication({
         bearerToken: "test-token-001",
         ownerId: "owner_default",
         defaultWorkspaceId: "yartrader",
         useInMemoryStores: true,
+        resourcesPath: "config/resources.example.json",
       });
 
       const req: OperatorApiRequest = {
@@ -45,11 +46,12 @@ describe("M5 Internet Operator Core Verification Suite", () => {
     });
 
     it("2. web-browsing capability resolves through bootstrapped execution path", async () => {
-      const handler = bootstrapOperatorApplication({
+      const handler = await bootstrapOperatorApplication({
         bearerToken: "test-token-002",
         ownerId: "owner_default",
         defaultWorkspaceId: "yartrader",
         useInMemoryStores: true,
+        resourcesPath: "config/resources.example.json",
       });
 
       const req: OperatorApiRequest = {
@@ -285,11 +287,12 @@ describe("M5 Internet Operator Core Verification Suite", () => {
 
   describe("Security & Boundaries (17-22)", () => {
     it("17. browser_operate navigation is SAFE under actual bootstrapped policy engine", async () => {
-      const handler = bootstrapOperatorApplication({
+      const handler = await bootstrapOperatorApplication({
         bearerToken: "test-token-17",
         ownerId: "owner_default",
         defaultWorkspaceId: "yartrader",
         useInMemoryStores: true,
+        resourcesPath: "config/resources.example.json",
       });
 
       const safeReq: OperatorApiRequest = {
@@ -349,11 +352,12 @@ describe("M5 Internet Operator Core Verification Suite", () => {
     });
 
     it("20. unknown web tool is BLOCKED by PolicyEngine default rule under bootstrapped handler", async () => {
-      const handler = bootstrapOperatorApplication({
+      const handler = await bootstrapOperatorApplication({
         bearerToken: "test-token-20",
         ownerId: "owner_default",
         defaultWorkspaceId: "yartrader",
         useInMemoryStores: true,
+        resourcesPath: "config/resources.example.json",
       });
 
       const req: OperatorApiRequest = {
@@ -376,11 +380,12 @@ describe("M5 Internet Operator Core Verification Suite", () => {
     });
 
     it("21. no raw-text capability/tool inference introduced into DeterministicBrain", async () => {
-      const handler = bootstrapOperatorApplication({
+      const handler = await bootstrapOperatorApplication({
         bearerToken: "test-token-21",
         ownerId: "owner_default",
         defaultWorkspaceId: "yartrader",
         useInMemoryStores: true,
+        resourcesPath: "config/resources.example.json",
       });
 
       // Command without targetCapability/requestedToolId
@@ -403,11 +408,12 @@ describe("M5 Internet Operator Core Verification Suite", () => {
     });
 
     it("22. M2/M3/M4 integration works through bootstrapped handler with web-research execution", async () => {
-      const handler = bootstrapOperatorApplication({
+      const handler = await bootstrapOperatorApplication({
         bearerToken: "test-token-22",
         ownerId: "owner_default",
         defaultWorkspaceId: "yartrader",
         useInMemoryStores: true,
+        resourcesPath: "config/resources.example.json",
       });
 
       const req: OperatorApiRequest = {

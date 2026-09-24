@@ -13,9 +13,14 @@ export async function createProductionServer(options?: {
   authorizedOwnerEmail?: string;
   mockJwksPublicKeyPem?: string;
 }): Promise<{ server: OperatorWebServer; port: number }> {
-  const apiHandler = bootstrapOperatorApplication({
+  const defaultResourcesPath = path.resolve("config/resources.example.json");
+  const resourcesPath =
+    process.env.OPERATOR_RESOURCES_PATH || defaultResourcesPath;
+
+  const apiHandler = await bootstrapOperatorApplication({
     bearerToken: options?.bearerToken,
     ownerId: options?.ownerId,
+    resourcesPath,
   });
 
   const targetPort =

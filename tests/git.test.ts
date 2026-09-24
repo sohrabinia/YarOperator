@@ -5,15 +5,30 @@ import {
   JulesWorkerAdapter,
   ExecutionContext,
 } from "../src/index.js";
+import { ResourceRegistry } from "../src/core/registry/resource.js";
+import { ResourceResolver } from "../src/core/registry/resolver.js";
 
 describe("Git, GitHub and Jules Worker Tools", () => {
+  const testRegistry = new ResourceRegistry({
+    workspaces: [
+      {
+        workspaceId: "ws_default",
+        aliases: ["yartrader"],
+        allowedRoots: [process.cwd()],
+      },
+    ],
+  });
+  const testResolver = new ResourceResolver(testRegistry);
+
   const mockContext: ExecutionContext = {
     executionId: "git_123",
     timestamp: new Date(),
+    workspaceId: "ws_default",
+    metadata: { resourceResolver: testResolver },
   };
 
   it("should perform real Git status and execute Git operations", async () => {
-    const gitTool = new GitTool();
+    const gitTool = new GitTool(testResolver);
     const statusRes = await gitTool.execute({ action: "status" }, mockContext);
     expect(statusRes.success).toBe(true);
     expect(statusRes.output?.output).toBeDefined();
@@ -26,7 +41,7 @@ describe("Git, GitHub and Jules Worker Tools", () => {
   });
 
   it("should prevent shell command injection when parameters contain metacharacters", async () => {
-    const gitTool = new GitTool();
+    const gitTool = new GitTool(testResolver);
     // Attempt shell injection in branch name
     const res = await gitTool.execute(
       {

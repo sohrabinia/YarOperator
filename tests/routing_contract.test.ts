@@ -10,9 +10,10 @@ describe("Production Routing Contract Validation Test Suite", () => {
   const BEARER_TOKEN = "routing_test_token_123";
 
   beforeAll(async () => {
-    const apiHandler = bootstrapOperatorApplication({
+    const apiHandler = await bootstrapOperatorApplication({
       ownerId: "owner_sohrab",
       bearerToken: BEARER_TOKEN,
+      resourcesPath: "config/resources.example.json",
     });
 
     server = new OperatorWebServer({

@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "YarOperator Resource / Environment Registry Configuration Template",
+  "defaultWorkspaceId": "yartrader",
+  "workspaces": [
+    {
+      "workspaceId": "yartrader",
+      "aliases": ["trader", "ws_yartrader"],
+      "allowedRoots": [
+        "${CWD}"
+      ],
+      "repositories": [
+        {
+          "repositoryId": "sohrabinia/YarTrader",
+          "workspaceId": "yartrader",
+          "root": "${CWD}"
+        }
+      ],
+      "environments": [
+        {
+          "environmentId": "env_yartrader",
+          "name": "YarTrader Primary Environment",
+          "type": "PRODUCTION"
+        }
+      ],
+      "allowedServices": ["yartrader_api"],
+      "allowedHttpOrigins": ["https://api.yartrader.com"]
+    },
+    {
+      "workspaceId": "ws_default",
+      "aliases": ["default"],
+      "allowedRoots": [
+        "${CWD}"
+      ],
+      "repositories": [
+        {
+          "repositoryId": "sohrabinia/YarOperator",
+          "workspaceId": "ws_default",
+          "root": "${CWD}"
+        }
+      ],
+      "environments": [
+        {
+          "environmentId": "env_ws_default",
+          "name": "Default Operator Environment",
+          "type": "LOCAL"
+        }
+      ],
+      "allowedServices": ["operator_service"],
+      "allowedHttpOrigins": ["http://localhost:3000"]
+    }
+  ]
+}

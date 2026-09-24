@@ -61,16 +61,10 @@ export class WorkspacePolicy {
     const resolvedTarget = resolve(targetPath);
 
     if (this.config.allowedRoots.length === 0) {
-      // If no roots explicitly configured, default to current working directory or process root
-      const defaultRoot = resolve(process.cwd());
-      const rel = relative(defaultRoot, resolvedTarget);
-      if (rel.startsWith("..") || isAbsolute(rel)) {
-        return {
-          allowed: false,
-          reason: `Target path '${targetPath}' escapes default workspace root '${defaultRoot}'.`,
-        };
-      }
-      return { allowed: true, resolvedPath: resolvedTarget };
+      return {
+        allowed: false,
+        reason: `Workspace '${this.config.workspaceId}' has zero authorized roots configured (fail-closed).`,
+      };
     }
 
     const isInsideAllowedRoot = this.config.allowedRoots.some((allowedRoot) => {

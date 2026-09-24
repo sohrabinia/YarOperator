@@ -1,15 +1,29 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { TerminalTool, ExecutionContext } from "../src/index.js";
+import { ResourceRegistry } from "../src/core/registry/resource.js";
+import { ResourceResolver } from "../src/core/registry/resolver.js";
 
 describe("TerminalTool Operator", () => {
   let terminalTool: TerminalTool;
+  const testRegistry = new ResourceRegistry({
+    workspaces: [
+      {
+        workspaceId: "ws_default",
+        allowedRoots: [process.cwd()],
+      },
+    ],
+  });
+  const testResolver = new ResourceResolver(testRegistry);
+
   const mockContext: ExecutionContext = {
     executionId: "term_123",
     timestamp: new Date(),
+    workspaceId: "ws_default",
+    metadata: { resourceResolver: testResolver },
   };
 
   beforeEach(() => {
-    terminalTool = new TerminalTool();
+    terminalTool = new TerminalTool(testResolver);
   });
 
   it("should execute allowed command and return stdout", async () => {

@@ -9,6 +9,7 @@ export {
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
 import { EnvironmentManager } from "../environment/index.js";
 import { WorkspacePolicyManager } from "../workspace/policy.js";
+import { ResourceResolver } from "../registry/resolver.js";
 
 export class SecureToolEcosystem {
   constructor(
@@ -17,7 +18,21 @@ export class SecureToolEcosystem {
     private approvalManager?: ApprovalManager,
     private environmentManager?: EnvironmentManager,
     private workspacePolicyManager?: WorkspacePolicyManager,
+    private resourceResolver?: ResourceResolver,
   ) {}
+
+  public setResourceResolver(resolver: ResourceResolver): void {
+    this.resourceResolver = resolver;
+    for (const tool of this.registry.list()) {
+      if (typeof (tool as any).setResourceResolver === "function") {
+        (tool as any).setResourceResolver(resolver);
+      }
+    }
+  }
+
+  public getResourceResolver(): ResourceResolver | undefined {
+    return this.resourceResolver;
+  }
 
   public setEnvironmentManager(envManager: EnvironmentManager): void {
     this.environmentManager = envManager;
@@ -42,6 +57,12 @@ export class SecureToolEcosystem {
   }
 
   registerTool(tool: Tool): void {
+    if (
+      this.resourceResolver &&
+      typeof (tool as any).setResourceResolver === "function"
+    ) {
+      (tool as any).setResourceResolver(this.resourceResolver);
+    }
     this.registry.register(tool);
   }
 

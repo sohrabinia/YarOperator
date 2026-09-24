@@ -6,7 +6,12 @@ import {
 } from "../contracts/index.js";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { resolve, relative, isAbsolute } from "path";
+import { ResourceRegistry } from "../registry/resource.js";
+import {
+  ResourceResolver,
+  ResolvedResource,
+  isResolvedResource,
+} from "../registry/resolver.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -68,23 +73,73 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
   private sensitiveKeyPattern =
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
 
+  constructor(private resourceResolver?: ResourceResolver) {}
+
+  public setResourceResolver(resolver: ResourceResolver): void {
+    this.resourceResolver = resolver;
+  }
+
   async execute(
     params: GitOperationParams,
     context: ExecutionContext,
   ): Promise<ToolResult<GitOperationResult>> {
-    const defaultRoot = resolve(process.cwd());
-    const targetCwd = params.cwd ? resolve(params.cwd) : defaultRoot;
+    const resolver = this.resourceResolver;
 
-    // Enforce workspace path boundary: target cwd must be within authorized workspace root
-    const rel = relative(defaultRoot, targetCwd);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
+    if (!resolver) {
       return {
         success: false,
-        error: `Git operation rejected: Target path '${params.cwd}' escapes authorized workspace root '${defaultRoot}'.`,
+        error:
+          "RESOURCE RESOLUTION FAILURE: Authoritative ResourceResolver is required for GitTool execution.",
       };
     }
 
-    const cwd = targetCwd;
+    const wsId = context.workspaceId;
+    if (!wsId) {
+      return {
+        success: false,
+        error:
+          "RESOURCE RESOLUTION FAILURE: workspaceId is required in ExecutionContext for GitTool.",
+      };
+    }
+
+    let resolvedResource: ResolvedResource;
+
+    if (
+      context.metadata?.resolvedResource &&
+      isResolvedResource(context.metadata.resolvedResource)
+    ) {
+      const preResolved = context.metadata.resolvedResource as ResolvedResource;
+      if (preResolved.workspaceId !== wsId) {
+        return {
+          success: false,
+          error: `Git operation rejected: Pre-resolved resource workspace '${preResolved.workspaceId}' does not match context workspace '${wsId}'.`,
+        };
+      }
+      // Re-verify canonical path through authoritative resolver to ensure single-authority validation
+      const verification = resolver.resolveResource(
+        wsId,
+        preResolved.canonicalPath,
+      );
+      if (!verification.success) {
+        return {
+          success: false,
+          error: `Git operation rejected: Pre-resolved resource failed authoritative resolution: ${verification.error}`,
+        };
+      }
+      resolvedResource = verification.resource;
+    } else {
+      const targetPath = params.cwd || ".";
+      const res = resolver.resolveResource(wsId, targetPath);
+      if (!res.success) {
+        return {
+          success: false,
+          error: `Git operation rejected: ${res.error}`,
+        };
+      }
+      resolvedResource = res.resource;
+    }
+
+    const cwd = resolvedResource.canonicalPath;
     const timeout = params.timeoutMs || 15000;
 
     let gitArgs: string[] = [];
