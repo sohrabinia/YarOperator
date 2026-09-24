@@ -47,6 +47,7 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
   });
 
   it("should prove real application composition across full HTTP -> Auth -> Owner -> Receiver -> Assistant -> SQLite Audit", async () => {
+    process.env.OPERATOR_RESOURCES_PATH = "config/resources.example.json";
     const { server, port } = await createProductionServer({
       port: 0,
       host: "127.0.0.1",
