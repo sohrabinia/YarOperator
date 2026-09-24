@@ -257,11 +257,7 @@ export class DiagnosticWorker {
       "وضعیت یار تریدر",
     ];
 
-    if (exactRequiredIntents.some((kw) => norm === kw || norm.includes(kw))) {
-      return true;
-    }
-
-    return false;
+    return exactRequiredIntents.includes(norm);
   }
 
   public escapeHtml(str: string): string {
