@@ -16,6 +16,7 @@ export interface SystemHealthReport {
     subsystems: {
       commandReceiver: boolean;
       identityStore: boolean;
+      resourceRegistry?: boolean;
     };
     timestamp: string;
   };
@@ -27,7 +28,12 @@ export class SystemHealthProvider {
     private identityStoreSupplier?: () =>
       { checkIntegrity: () => boolean } | null | undefined,
     private healthEvaluator?: () => "HEALTHY" | "DEGRADED" | "UNHEALTHY",
+    private resourceRegistrySupplier?: () => boolean,
   ) {}
+
+  public setResourceRegistrySupplier(supplier: () => boolean): void {
+    this.resourceRegistrySupplier = supplier;
+  }
 
   public getReport(): SystemHealthReport {
     const nowIso = new Date().toISOString();
@@ -54,7 +60,17 @@ export class SystemHealthProvider {
       }
     }
 
-    const isReady = commandReceiverReady && identityStoreReady;
+    let resourceRegistryReady = true;
+    if (this.resourceRegistrySupplier) {
+      try {
+        resourceRegistryReady = this.resourceRegistrySupplier();
+      } catch {
+        resourceRegistryReady = false;
+      }
+    }
+
+    const isReady =
+      commandReceiverReady && identityStoreReady && resourceRegistryReady;
     const healthStatus = this.healthEvaluator
       ? this.healthEvaluator()
       : isReady
@@ -72,6 +88,7 @@ export class SystemHealthProvider {
         subsystems: {
           commandReceiver: commandReceiverReady,
           identityStore: identityStoreReady,
+          resourceRegistry: resourceRegistryReady,
         },
         timestamp: nowIso,
       },

@@ -30,6 +30,11 @@ import {
   WorkspacePolicyManager,
   WorkspacePolicy,
 } from "../workspace/policy.js";
+import {
+  ResourceRegistry,
+  ResourceRegistryConfig,
+} from "../registry/resource.js";
+import { ResourceResolver } from "../registry/resolver.js";
 
 export interface BootstrapOptions {
   ownerId?: string;
@@ -40,6 +45,8 @@ export interface BootstrapOptions {
   dbPath?: string;
   auditStore?: AuditStore;
   useInMemoryStores?: boolean;
+  resourceRegistryConfig?: ResourceRegistryConfig | string;
+  resourcesPath?: string;
 }
 
 export function bootstrapOperatorApplication(
@@ -150,17 +157,109 @@ export function bootstrapOperatorApplication(
     : new IdentityStore(dbPath);
 
   let receiver: OwnerCommandReceiver | undefined;
+  let registryReady = false;
+  let resourceRegistry: ResourceRegistry | undefined;
+  let resourceResolver: ResourceResolver | undefined;
+
+  try {
+    const registryInput =
+      options?.resourceRegistryConfig ||
+      options?.resourcesPath ||
+      process.env.OPERATOR_RESOURCES_PATH;
+
+    if (registryInput) {
+      resourceRegistry = new ResourceRegistry(registryInput, {
+        skipFsCheck: options?.useInMemoryStores ?? false,
+      });
+    } else {
+      // Default production configuration initialization
+      const appRoot = process.cwd();
+      resourceRegistry = new ResourceRegistry(
+        {
+          defaultWorkspaceId: activeWorkspaceId,
+          workspaces: [
+            {
+              workspaceId: "yartrader",
+              aliases: ["trader"],
+              allowedRoots: [appRoot],
+              repositories: [
+                {
+                  repositoryId: "sohrabinia/YarTrader",
+                  workspaceId: "yartrader",
+                  root: appRoot,
+                },
+              ],
+              environments: [
+                {
+                  environmentId: "env_yartrader",
+                  name: "YarTrader Primary Environment",
+                },
+              ],
+            },
+            {
+              workspaceId: "ws_default",
+              aliases: ["default"],
+              allowedRoots: [appRoot],
+              repositories: [
+                {
+                  repositoryId: "sohrabinia/YarOperator",
+                  workspaceId: "ws_default",
+                  root: appRoot,
+                },
+              ],
+              environments: [
+                {
+                  environmentId: "env_ws_default",
+                  name: "Default Operator Environment",
+                },
+              ],
+            },
+          ],
+        },
+        { skipFsCheck: options?.useInMemoryStores ?? false },
+      );
+    }
+
+    resourceRegistry.auditBootstrap(auditManager).catch(() => {});
+    resourceResolver = new ResourceResolver(resourceRegistry, auditManager);
+    registryReady = true;
+  } catch (err: any) {
+    registryReady = false;
+    auditManager
+      .recordEvent(
+        "REGISTRY_BOOTSTRAP_FAILURE",
+        {
+          error: err.message,
+          configPathIdentifier:
+            options?.resourcesPath ||
+            process.env.OPERATOR_RESOURCES_PATH ||
+            "in-memory",
+        },
+        { severity: "CRITICAL" },
+      )
+      .catch(() => {});
+  }
 
   const sharedHealthProvider = new SystemHealthProvider(
     () => Boolean(receiver),
     () => identityStoreForApi,
+    undefined,
+    () => registryReady,
   );
 
   const healthTool = new OperatorHealthTool(sharedHealthProvider);
 
+  const gitTool = new GitTool();
+  const terminalTool = new TerminalTool();
+  if (resourceResolver) {
+    gitTool.setResourceResolver(resourceResolver);
+    terminalTool.setResourceResolver(resourceResolver);
+    toolEcosystem.setResourceResolver(resourceResolver);
+  }
+
   const defaultTools = [
-    new TerminalTool(),
-    new GitTool(),
+    terminalTool,
+    gitTool,
     new GitHubTool(),
     new JulesWorkerAdapter(),
     new BrowserTool(),
