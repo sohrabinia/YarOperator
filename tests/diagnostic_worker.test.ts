@@ -622,6 +622,11 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
     it("26b. Fix 1 Proof — Huge streaming response body is read boundedly and reader cancel is invoked at maxResponseBytes", async () => {
       const http = await import("node:http");
 
+      const cancelSpy = vi.spyOn(
+        ReadableStreamDefaultReader.prototype,
+        "cancel",
+      );
+
       const server = http.createServer((_req, res) => {
         res.writeHead(200, { "Content-Type": "text/plain" });
         // Stream 100KB in 1KB chunks
@@ -645,7 +650,9 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
         expect(res.success).toBe(true);
         expect(res.body?.length).toBeLessThanOrEqual(500);
         expect(res.body?.length).toBeGreaterThan(0);
+        expect(cancelSpy).toHaveBeenCalled();
       } finally {
+        cancelSpy.mockRestore();
         server.close();
       }
     });
@@ -715,6 +722,53 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
 
         expect(res.success).toBe(false);
         expect(res.error).toMatch(/Maximum redirect depth \(5\) exceeded/i);
+      } finally {
+        serverA.close();
+        serverB.close();
+      }
+    });
+
+    it("26e. Multi-hop redirect stalled endpoint triggers global deadline timeout", async () => {
+      const http = await import("node:http");
+
+      let serverBPort = 0;
+
+      const serverA = http.createServer((_req, res) => {
+        res.writeHead(302, {
+          Location: `http://127.0.0.1:${serverBPort}/stalled`,
+        });
+        res.end();
+      });
+
+      const serverB = http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.write("Header OK\n");
+        // Intentionally stall
+      });
+
+      await new Promise<void>((resolve) =>
+        serverA.listen(0, "127.0.0.1", resolve),
+      );
+      await new Promise<void>((resolve) =>
+        serverB.listen(0, "127.0.0.1", resolve),
+      );
+
+      const serverAPort = (serverA.address() as any).port;
+      serverBPort = (serverB.address() as any).port;
+
+      const urlA = `http://127.0.0.1:${serverAPort}`;
+      const urlB = `http://127.0.0.1:${serverBPort}`;
+
+      try {
+        const probe = new BoundedHttpProbe([urlA, urlB], 300, 1000); // 300ms global timeout
+        const start = Date.now();
+        const res = await probe.get(`${urlA}/start`);
+        const elapsed = Date.now() - start;
+
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/HTTP PROBE TIMEOUT/i);
+        expect(elapsed).toBeGreaterThanOrEqual(250);
+        expect(elapsed).toBeLessThan(1500);
       } finally {
         serverA.close();
         serverB.close();
@@ -886,9 +940,10 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
 
   // --- Category 10: Audit & End-to-End Execution (Tests 40-42) ---
   describe("10. Audit & End-to-End Proof", () => {
-    it("42. Runtime HTTP API POST /api/v1/operator/chat dispatches diagnostic intent to DiagnosticWorker and returns report", async () => {
+    it("42. Real network HTTP server POST /api/v1/operator/chat dispatches diagnostic intent to DiagnosticWorker", async () => {
       const { bootstrapOperatorApplication } =
         await import("../src/core/bootstrap/index.js");
+      const { OperatorWebServer } = await import("../src/web/server.js");
 
       const validConfigPath = path.join(tempDir, "api_diag_resources.json");
       const validConfig = {
@@ -910,20 +965,124 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
         ownerId: "owner_sohrab",
       });
 
-      const reqRes = await apiHandler.handleChatRequest({
-        headers: { authorization: "Bearer api_diag_token_999" },
-        body: {
-          workspaceId: "yartrader",
-          rawCommandText: "check YarTrader status",
-        },
+      const server = new OperatorWebServer({
+        port: 0,
+        host: "127.0.0.1",
+        apiHandler,
       });
 
-      expect(reqRes.statusCode).toBe(200);
-      expect(reqRes.body.success).toBe(true);
-      expect(reqRes.body.result?.status).toBe("COMPLETED");
-      expect(reqRes.body.result?.resolvedCapability).toBe("diagnostic-worker");
-      expect(reqRes.body.result?.resolvedToolId).toBe("diagnostic_worker");
-      expect(reqRes.body.result?.details).toBeDefined();
+      const port = await server.start();
+
+      try {
+        const httpRes = await fetch(
+          `http://127.0.0.1:${port}/api/v1/operator/chat`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer api_diag_token_999",
+            },
+            body: JSON.stringify({
+              workspaceId: "yartrader",
+              rawCommandText: "check YarTrader status",
+            }),
+          },
+        );
+
+        expect(httpRes.status).toBe(200);
+        const data = (await httpRes.json()) as any;
+        expect(data.success).toBe(true);
+        expect(data.result?.status).toBe("COMPLETED");
+        expect(data.result?.resolvedCapability).toBe("diagnostic-worker");
+        expect(data.result?.resolvedToolId).toBe("diagnostic_worker");
+        expect(data.result?.details).toBeDefined();
+      } finally {
+        await server.stop();
+      }
+    });
+
+    it("43. Audit persistence failure handles denial error safely fail-closed", async () => {
+      const throwingAuditManager = {
+        recordEvent: () => {
+          throw new Error("Audit DB disk I/O error");
+        },
+        queryEvents: async () => [],
+      } as any;
+
+      const failingWorker = new DiagnosticWorker(
+        identityStore,
+        registry,
+        resolver,
+        policyEngine,
+        throwingAuditManager,
+      );
+
+      const res = await failingWorker.executeDiagnostics({
+        token: "invalid_token",
+        workspaceId,
+        rawCommandText: "check status",
+      });
+
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/audit persistence failed/i);
+      expect(res.toolExecutionCount).toBe(0);
+    });
+
+    it("44. Tool execution counter increments on failed HTTP probe execution", async () => {
+      const http = await import("node:http");
+
+      // Target server returning 500 error
+      const server = http.createServer((_req, res) => {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end("Internal Error");
+      });
+
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const port = (server.address() as any).port;
+      const failUrl = `http://127.0.0.1:${port}`;
+
+      try {
+        const customRegistry = new ResourceRegistry({
+          defaultWorkspaceId: "yartrader",
+          workspaces: [
+            {
+              workspaceId: "yartrader",
+              allowedRoots: [process.cwd()],
+              allowedHttpOrigins: [failUrl],
+            },
+          ],
+        });
+        const customResolver = new ResourceResolver(
+          customRegistry,
+          auditManager,
+        );
+
+        const customWorker = new DiagnosticWorker(
+          identityStore,
+          customRegistry,
+          customResolver,
+          policyEngine,
+          auditManager,
+        );
+
+        const res = await customWorker.executeDiagnostics({
+          token: validToken,
+          workspaceId: "yartrader",
+          rawCommandText: "check YarTrader status",
+          targetOrigin: failUrl,
+        });
+
+        expect(res.success).toBe(true); // Diagnostic worker report succeeds even if 1 probe item fails
+        expect(res.toolExecutionCount).toBeGreaterThanOrEqual(2); // GitTool + BoundedHttpProbe both executed
+        const probeItem = res.report?.items.find(
+          (i) => i.source === "BoundedHttpProbe",
+        );
+        expect(probeItem?.status).toBe("FAIL");
+      } finally {
+        server.close();
+      }
     });
     it("40. Successful diagnostic execution records DIAGNOSTIC_EXECUTION_COMPLETED audit event", async () => {
       const res = await worker.executeDiagnostics({

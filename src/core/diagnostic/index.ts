@@ -6,6 +6,7 @@ import { ResourceResolver } from "../registry/resolver.js";
 import { PolicyEngine } from "../policy/index.js";
 import { AuditManager } from "../audit/index.js";
 import { IdentityStore } from "../identity/index.js";
+import dns from "node:dns/promises";
 import { GitTool } from "../git/index.js";
 import { SystemHealthProvider, OperatorHealthTool } from "../tools/index.js";
 import { ExecutionContext } from "../contracts/index.js";
@@ -131,6 +132,21 @@ export class BoundedHttpProbe {
             error: `SSRF PROTECTION DENIED: Access to private/loopback/metadata host '${hostname}' is prohibited.`,
           };
         }
+      } else {
+        // Preflight DNS resolution to prevent domain-pointing SSRF
+        try {
+          const resolved = await dns.lookup(hostname);
+          if (
+            resolved.address &&
+            this.privateIpPattern.test(resolved.address) &&
+            !isAllowedOrigin
+          ) {
+            return {
+              success: false,
+              error: `SSRF PROTECTION DENIED: Host '${hostname}' resolves to private/loopback address '${resolved.address}'.`,
+            };
+          }
+        } catch {}
       }
 
       /**
@@ -616,9 +632,9 @@ export class DiagnosticWorker {
           1000,
         );
         const probeRes = await httpProbe.get(probeUrl);
+        toolExecutionCount++;
 
         if (probeRes.success) {
-          toolExecutionCount++;
           items.push({
             name: "HTTP Origin Probe",
             source: "BoundedHttpProbe",
