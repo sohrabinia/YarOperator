@@ -5,11 +5,26 @@ import {
   JulesWorkerAdapter,
   ExecutionContext,
 } from "../src/index.js";
+import { ResourceRegistry } from "../src/core/registry/resource.js";
+import { ResourceResolver } from "../src/core/registry/resolver.js";
 
 describe("Git, GitHub and Jules Worker Tools", () => {
+  const testRegistry = new ResourceRegistry({
+    workspaces: [
+      {
+        workspaceId: "ws_default",
+        aliases: ["yartrader"],
+        allowedRoots: [process.cwd()],
+      },
+    ],
+  });
+  const testResolver = new ResourceResolver(testRegistry);
+
   const mockContext: ExecutionContext = {
     executionId: "git_123",
     timestamp: new Date(),
+    workspaceId: "ws_default",
+    metadata: { resourceResolver: testResolver },
   };
 
   it("should perform real Git status and execute Git operations", async () => {

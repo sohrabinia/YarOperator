@@ -15,6 +15,8 @@ import {
   ToolResult,
 } from "../src/index.js";
 import { resolve, join } from "path";
+import { ResourceRegistry } from "../src/core/registry/resource.js";
+import { ResourceResolver } from "../src/core/registry/resolver.js";
 
 describe("WorkspaceManager and RuntimeContext Foundation", () => {
   let workspaceManager: WorkspaceManager;
@@ -69,7 +71,16 @@ describe("WorkspaceManager and RuntimeContext Foundation", () => {
 
   describe("WorkspacePolicy Enforcement Boundaries", () => {
     it("Positive: yartrader workspace can execute git status", async () => {
-      const gitTool = new GitTool();
+      const testRegistry = new ResourceRegistry({
+        workspaces: [
+          {
+            workspaceId: "yartrader",
+            allowedRoots: [process.cwd()],
+          },
+        ],
+      });
+      const testResolver = new ResourceResolver(testRegistry);
+      const gitTool = new GitTool(testResolver);
       const mockContext: ExecutionContext = {
         executionId: "exec_ws_pos_1",
         timestamp: new Date(),
@@ -87,7 +98,16 @@ describe("WorkspaceManager and RuntimeContext Foundation", () => {
     });
 
     it("Negative: git cwd outside workspace root is blocked", async () => {
-      const gitTool = new GitTool();
+      const testRegistry = new ResourceRegistry({
+        workspaces: [
+          {
+            workspaceId: "yartrader",
+            allowedRoots: [process.cwd()],
+          },
+        ],
+      });
+      const testResolver = new ResourceResolver(testRegistry);
+      const gitTool = new GitTool(testResolver);
       const mockContext: ExecutionContext = {
         executionId: "exec_ws_neg_1",
         timestamp: new Date(),
