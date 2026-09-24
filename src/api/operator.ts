@@ -5,6 +5,7 @@ import {
 } from "../core/owner/index.js";
 import { ExecutionContext } from "../core/contracts/index.js";
 import { IdentityStore } from "../core/identity/index.js";
+import { SystemHealthProvider } from "../core/tools/index.js";
 
 export interface OperatorApiRequest {
   headers: {
@@ -61,11 +62,13 @@ export interface OperatorApiResponse {
 
 export class OperatorApiHandler {
   private identityStore: IdentityStore;
+  private healthProvider: SystemHealthProvider;
 
   constructor(
     private commandReceiver: OwnerCommandReceiver,
     initialTokens?: Record<string, string>,
     identityStore?: IdentityStore,
+    healthProvider?: SystemHealthProvider,
   ) {
     if (!identityStore) {
       throw new Error(
@@ -73,6 +76,12 @@ export class OperatorApiHandler {
       );
     }
     this.identityStore = identityStore;
+    this.healthProvider =
+      healthProvider ||
+      new SystemHealthProvider(
+        () => Boolean(this.commandReceiver),
+        () => this.identityStore,
+      );
     if (initialTokens) {
       for (const [token, ownerId] of Object.entries(initialTokens)) {
         this.registerBearerToken(token, ownerId);
@@ -84,46 +93,30 @@ export class OperatorApiHandler {
     return this.identityStore;
   }
 
+  public getHealthProvider(): SystemHealthProvider {
+    return this.healthProvider;
+  }
+
   public getHealth(): OperatorApiResponse {
+    const report = this.healthProvider.getReport();
     return {
       statusCode: 200,
       body: {
         success: true,
-        health: {
-          status: "HEALTHY",
-          uptimeMs: Math.floor(process.uptime() * 1000),
-          timestamp: new Date().toISOString(),
-        },
+        health: report.health,
       },
     };
   }
 
   public getReadiness(): OperatorApiResponse {
-    const commandReceiverReady = Boolean(this.commandReceiver);
-    let identityStoreReady = true;
-
-    if (this.identityStore) {
-      try {
-        identityStoreReady = this.identityStore.checkIntegrity();
-      } catch (err) {
-        identityStoreReady = false;
-      }
-    }
-
-    const isReady = commandReceiverReady && identityStoreReady;
+    const report = this.healthProvider.getReport();
+    const isReady = report.readiness.status === "READY";
 
     return {
       statusCode: isReady ? 200 : 503,
       body: {
         success: isReady,
-        readiness: {
-          status: isReady ? "READY" : "NOT_READY",
-          subsystems: {
-            commandReceiver: commandReceiverReady,
-            identityStore: identityStoreReady,
-          },
-          timestamp: new Date().toISOString(),
-        },
+        readiness: report.readiness,
       },
     };
   }
@@ -475,10 +468,12 @@ export class OperatorApiHandler {
         }
       }
 
+      const isSuccessfulStatus = status === "COMPLETED" || status === "SAFE";
+
       return {
         statusCode: 200,
         body: {
-          success: true,
+          success: isSuccessfulStatus,
           result: {
             commandId: receiverResult.commandId,
             accepted: true,

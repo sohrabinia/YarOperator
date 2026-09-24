@@ -237,7 +237,7 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
     const res = await apiHandler.handleChatRequest(req, mockContext);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.success).toBe(true);
+    expect(res.body.success).toBe(false);
     expect(res.body.result?.status).toBe("APPROVAL_REQUIRED");
     expect(mockTool.invocations.length).toBe(0); // Tool NEVER invoked
 
@@ -262,7 +262,7 @@ describe("Operator API Boundary & Natural-Language Goal Resolution", () => {
     const res = await apiHandler.handleChatRequest(req, mockContext);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.success).toBe(true);
+    expect(res.body.success).toBe(false);
     expect(res.body.result?.status).toBe("BLOCKED");
     expect(mockTool.invocations.length).toBe(0); // Tool NEVER invoked
   });

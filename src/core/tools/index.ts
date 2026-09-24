@@ -1,6 +1,11 @@
 import { ExecutionScope } from "../orchestrator/index.js";
 import { Tool, ToolResult, ExecutionContext } from "../contracts/index.js";
 import { ToolRegistry } from "../registry/index.js";
+export {
+  OperatorHealthTool,
+  SystemHealthProvider,
+  type SystemHealthReport,
+} from "./health.js";
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
 import { EnvironmentManager } from "../environment/index.js";
 import { WorkspacePolicyManager } from "../workspace/policy.js";

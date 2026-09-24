@@ -45,7 +45,7 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
           Authorization: "Bearer test-runtime-token",
         },
         body: JSON.stringify({
-          rawCommandText: "check status",
+          rawCommandText: "check operator runtime health",
           workspaceId: "yartrader",
         }),
       },

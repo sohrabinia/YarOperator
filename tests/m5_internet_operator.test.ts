@@ -39,7 +39,7 @@ describe("M5 Internet Operator Core Verification Suite", () => {
       const res = await handler.handleChatRequest(req);
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(true);
+      expect(res.body.result?.accepted).toBe(true);
       expect(res.body.result?.resolvedCapability).toBe("web-browsing");
       expect(res.body.result?.resolvedToolId).toBe("browser_operate");
     });
@@ -308,7 +308,6 @@ describe("M5 Internet Operator Core Verification Suite", () => {
       const res = await handler.handleChatRequest(safeReq);
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(true);
       expect(res.body.result?.accepted).toBe(true);
       expect(res.body.result?.resolvedToolId).toBe("browser_operate");
       expect(res.body.result?.status).not.toBe("BLOCKED");
@@ -372,7 +371,7 @@ describe("M5 Internet Operator Core Verification Suite", () => {
       const res = await handler.handleChatRequest(req);
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(true);
+      expect(res.body.success).toBe(false);
       expect(res.body.result?.status).toBe("BLOCKED");
     });
 
@@ -398,7 +397,8 @@ describe("M5 Internet Operator Core Verification Suite", () => {
       const res = await handler.handleChatRequest(req);
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(true);
+      expect(res.body.success).toBe(false);
+      expect(res.body.result?.status).toBe("BLOCKED");
       expect(res.body.result?.resolvedToolId).toBeUndefined();
     });
 
@@ -426,7 +426,6 @@ describe("M5 Internet Operator Core Verification Suite", () => {
       const res = await handler.handleChatRequest(req);
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(true);
       expect(res.body.result?.accepted).toBe(true);
       expect(res.body.result?.resolvedCapability).toBe("web-research");
       expect(res.body.result?.resolvedToolId).toBe("web_research");

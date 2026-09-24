@@ -12,7 +12,11 @@ import {
 import { NotificationManager } from "../notification/index.js";
 import { ControlledAutonomyEngine } from "../autonomy/index.js";
 import { RealWorldAssistant } from "../assistant/index.js";
-import { SecureToolEcosystem } from "../tools/index.js";
+import {
+  SecureToolEcosystem,
+  OperatorHealthTool,
+  SystemHealthProvider,
+} from "../tools/index.js";
 import { TerminalTool } from "../terminal/index.js";
 import { GitTool, GitHubTool, JulesWorkerAdapter } from "../git/index.js";
 import { BrowserTool } from "../browser/index.js";
@@ -131,12 +135,28 @@ export function bootstrapOperatorApplication(
 
   policyEngine.setRule("github_operate:merge_pr", "BLOCKED");
 
+  policyEngine.setRule("operator_health:check", "SAFE");
+
   // Base tool fallback defaults for legacy toolId lookups
+  policyEngine.setRule("operator_health", "SAFE");
   policyEngine.setRule("browser_operate", "SAFE");
   policyEngine.setRule("web_research", "SAFE");
   policyEngine.setRule("git_operate", "APPROVAL_REQUIRED");
   policyEngine.setRule("github_operate", "APPROVAL_REQUIRED");
   policyEngine.setRule("terminal_execute", "APPROVAL_REQUIRED");
+
+  const identityStoreForApi = options?.useInMemoryStores
+    ? new IdentityStore(":memory:")
+    : new IdentityStore(dbPath);
+
+  let receiver: OwnerCommandReceiver | undefined;
+
+  const sharedHealthProvider = new SystemHealthProvider(
+    () => Boolean(receiver),
+    () => identityStoreForApi,
+  );
+
+  const healthTool = new OperatorHealthTool(sharedHealthProvider);
 
   const defaultTools = [
     new TerminalTool(),
@@ -145,6 +165,7 @@ export function bootstrapOperatorApplication(
     new JulesWorkerAdapter(),
     new BrowserTool(),
     new WebResearchTool(),
+    healthTool,
   ];
 
   const registeredToolIds: string[] = [];
@@ -188,6 +209,7 @@ export function bootstrapOperatorApplication(
       "web-research",
       "web-browsing",
       "terminal-execution",
+      "system-monitoring",
     ],
     workspaceScopes: ["yartrader", "ws_default"],
     toolScopes: [
@@ -195,6 +217,7 @@ export function bootstrapOperatorApplication(
       "git_operate",
       "browser_operate",
       "web_research",
+      "operator_health",
     ],
     provider: "DefaultProvider",
     model: "default-v1",
@@ -231,7 +254,7 @@ export function bootstrapOperatorApplication(
     defaultWorkspaceId: activeWorkspaceId,
   });
 
-  const receiver = new OwnerCommandReceiver(
+  receiver = new OwnerCommandReceiver(
     ownerManager,
     policyEngine,
     auditManager,
@@ -246,14 +269,11 @@ export function bootstrapOperatorApplication(
     tokenMap[token] = activeOwnerId;
   }
 
-  const identityStoreForApi = options?.useInMemoryStores
-    ? new IdentityStore(":memory:")
-    : new IdentityStore(dbPath);
-
   const apiHandler = new OperatorApiHandler(
     receiver,
     undefined,
     identityStoreForApi,
+    sharedHealthProvider,
   );
   for (const [t, oId] of Object.entries(tokenMap)) {
     apiHandler.registerBearerToken(t, oId);

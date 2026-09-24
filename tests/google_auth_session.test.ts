@@ -316,8 +316,9 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
       console.log("CHAT RES ERROR:", chatData);
     }
     expect(chatRes.status).toBe(200);
-    expect(chatData.success).toBe(true);
+    expect(chatData.success).toBe(false);
     expect(chatData.result.accepted).toBe(true);
+    expect(chatData.result.status).toBe("BLOCKED");
   });
 
   it("10. Owner anti-impersonation enforces isolation on session-authenticated requests", async () => {
@@ -367,7 +368,8 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
 
     expect(apiRes.status).toBe(200);
     const apiData = (await apiRes.json()) as any;
-    expect(apiData.success).toBe(true);
+    expect(apiData.success).toBe(false);
     expect(apiData.result.accepted).toBe(true);
+    expect(apiData.result.status).toBe("BLOCKED");
   });
 });
