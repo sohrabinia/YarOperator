@@ -54,12 +54,105 @@ export interface HttpProbeResult {
   error?: string;
 }
 
+export function parseCanonicalIpv4Number(hostOrIp: string): number | null {
+  if (!hostOrIp) return null;
+  const clean = hostOrIp.trim().replace(/^\[|\]$/g, "");
+
+  if (/^(::ffff:|:ffff:)/i.test(clean)) {
+    const v4Part = clean.replace(/^(::ffff:|:ffff:)/i, "");
+    return parseCanonicalIpv4Number(v4Part);
+  }
+
+  const parts = clean.split(".");
+  if (parts.length < 1 || parts.length > 4) return null;
+
+  const parsedParts: number[] = [];
+  for (const part of parts) {
+    if (!part) return null;
+    let val: number;
+    if (/^0x/i.test(part)) {
+      val = parseInt(part, 16);
+    } else if (/^0[0-7]+$/.test(part) && part.length > 1) {
+      val = parseInt(part, 8);
+    } else if (/^\d+$/.test(part)) {
+      val = parseInt(part, 10);
+    } else {
+      return null;
+    }
+    if (isNaN(val) || val < 0) return null;
+    parsedParts.push(val);
+  }
+
+  let num = 0;
+  if (parsedParts.length === 4) {
+    if (parsedParts.some((p) => p > 255)) return null;
+    num =
+      ((parsedParts[0] << 24) >>> 0) +
+      (parsedParts[1] << 16) +
+      (parsedParts[2] << 8) +
+      parsedParts[3];
+  } else if (parsedParts.length === 3) {
+    if (parsedParts[0] > 255 || parsedParts[1] > 255 || parsedParts[2] > 65535)
+      return null;
+    num =
+      ((parsedParts[0] << 24) >>> 0) + (parsedParts[1] << 16) + parsedParts[2];
+  } else if (parsedParts.length === 2) {
+    if (parsedParts[0] > 255 || parsedParts[1] > 16777215) return null;
+    num = ((parsedParts[0] << 24) >>> 0) + parsedParts[1];
+  } else if (parsedParts.length === 1) {
+    if (parsedParts[0] > 4294967295) return null;
+    num = parsedParts[0] >>> 0;
+  }
+
+  return num >>> 0;
+}
+
+export function isPrivateOrUnsafeIp(ipOrHost: string): boolean {
+  if (!ipOrHost) return true;
+  const clean = ipOrHost
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+
+  if (
+    clean === "localhost" ||
+    clean.endsWith(".local") ||
+    clean.endsWith(".internal")
+  ) {
+    return true;
+  }
+
+  if (clean.includes(":")) {
+    if (clean === "::1" || clean === "::" || clean === "0:0:0:0:0:0:0:1") {
+      return true;
+    }
+    if (/^fe[89ab]/i.test(clean)) return true;
+    if (/^f[cd]/i.test(clean)) return true;
+    if (/^(::ffff:|:ffff:)/i.test(clean)) {
+      const v4Part = clean.replace(/^(::ffff:|:ffff:)/i, "");
+      return isPrivateOrUnsafeIp(v4Part);
+    }
+  }
+
+  const ipv4Num = parseCanonicalIpv4Number(clean);
+  if (ipv4Num !== null) {
+    const o1 = (ipv4Num >>> 24) & 0xff;
+    const o2 = (ipv4Num >>> 16) & 0xff;
+
+    if (o1 === 127 || o1 === 0) return true;
+    if (o1 === 10) return true;
+    if (o1 === 172 && o2 >= 16 && o2 <= 31) return true;
+    if (o1 === 192 && o2 === 168) return true;
+    if (o1 === 169 && o2 === 254) return true;
+    if (o1 === 100 && o2 >= 64 && o2 <= 127) return true;
+  }
+
+  return false;
+}
+
 export class BoundedHttpProbe {
   private sensitiveKeyPattern =
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
-
-  private privateIpPattern =
-    /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|169\.254\.|localhost|::1|\[::1\]|fe80:|fd[0-9a-f]{2}:|0177\.|0x7f|\.local)/i;
 
   constructor(
     private allowedOrigins: (string | HttpOriginResourceConfig)[] = [],
@@ -111,7 +204,8 @@ export class BoundedHttpProbe {
             : (allowedEntry as any)?.origin || "";
         return (
           allowedStr.toLowerCase() === origin.toLowerCase() ||
-          allowedStr.toLowerCase() === parsedUrl.host.toLowerCase()
+          allowedStr.toLowerCase() === parsedUrl.host.toLowerCase() ||
+          allowedStr === "*"
         );
       });
 
@@ -122,31 +216,56 @@ export class BoundedHttpProbe {
         };
       }
 
-      // SSRF private/loopback/metadata IP protection check
       const hostname = parsedUrl.hostname;
-      if (this.privateIpPattern.test(hostname)) {
-        // Unless explicitly allowed in origin allowlist
-        if (!isAllowedOrigin) {
-          return {
-            success: false,
-            error: `SSRF PROTECTION DENIED: Access to private/loopback/metadata host '${hostname}' is prohibited.`,
-          };
-        }
-      } else {
-        // Preflight DNS resolution to prevent domain-pointing SSRF
-        try {
-          const resolved = await dns.lookup(hostname);
-          if (
-            resolved.address &&
-            this.privateIpPattern.test(resolved.address) &&
-            !isAllowedOrigin
-          ) {
-            return {
-              success: false,
-              error: `SSRF PROTECTION DENIED: Host '${hostname}' resolves to private/loopback address '${resolved.address}'.`,
-            };
-          }
-        } catch {}
+
+      // Check if hostname or IP is explicitly in allowedOrigins list
+      const isExplicitInternalAllowed = this.allowedOrigins.some(
+        (allowedEntry) => {
+          const allowedStr =
+            typeof allowedEntry === "string"
+              ? allowedEntry
+              : (allowedEntry as any)?.origin || "";
+          if (allowedStr === "*") return false;
+          const allowedHost = allowedStr
+            .replace(/^https?:\/\//i, "")
+            .toLowerCase();
+          return (
+            allowedHost === hostname.toLowerCase() ||
+            allowedHost === `${hostname.toLowerCase()}:${parsedUrl.port}`
+          );
+        },
+      );
+
+      // Fail-closed DNS preflight resolution
+      let resolvedIp: string | null = null;
+      try {
+        const resolved = await dns.lookup(hostname);
+        resolvedIp = resolved.address || null;
+      } catch (dnsErr: any) {
+        return {
+          success: false,
+          error: `DNS RESOLUTION FAILED: Host '${hostname}' could not be resolved: ${dnsErr.message}`,
+        };
+      }
+
+      if (!resolvedIp) {
+        return {
+          success: false,
+          error: `DNS RESOLUTION FAILED: Host '${hostname}' resolved to empty address.`,
+        };
+      }
+
+      const isHostnamePrivate = isPrivateOrUnsafeIp(hostname);
+      const isResolvedIpPrivate = isPrivateOrUnsafeIp(resolvedIp);
+
+      if (
+        (isHostnamePrivate || isResolvedIpPrivate) &&
+        !isExplicitInternalAllowed
+      ) {
+        return {
+          success: false,
+          error: `SSRF PROTECTION DENIED: Access to private/loopback/metadata destination '${hostname}' (${resolvedIp}) is prohibited.`,
+        };
       }
 
       /**

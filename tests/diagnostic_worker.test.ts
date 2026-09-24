@@ -5,7 +5,10 @@ import os from "node:os";
 import {
   DiagnosticWorker,
   BoundedHttpProbe,
+  parseCanonicalIpv4Number,
+  isPrivateOrUnsafeIp,
 } from "../src/core/diagnostic/index.js";
+import dns from "node:dns/promises";
 import { IdentityStore } from "../src/core/identity/index.js";
 import { ResourceRegistry } from "../src/core/registry/resource.js";
 import { ResourceResolver } from "../src/core/registry/resolver.js";
@@ -549,25 +552,77 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       );
     });
 
-    it("24b. SSRF hardened protection blocks IPv6 loopback, link-local, octal, hex, and .local hostnames", async () => {
-      const probe = new BoundedHttpProbe(["https://public-api.com"]);
+    it("24b. SSRF canonical IP boundary logic identifies and rejects dword, hex, octal, IPv6, and mapped IPv6", () => {
+      expect(isPrivateOrUnsafeIp("127.0.0.1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("0177.0.0.1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("0x7f000001")).toBe(true);
+      expect(isPrivateOrUnsafeIp("2130706433")).toBe(true); // 127.0.0.1 as dword
+      expect(isPrivateOrUnsafeIp("10.0.0.1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("172.16.0.1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("192.168.1.1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("169.254.169.254")).toBe(true);
+      expect(isPrivateOrUnsafeIp("::1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("fe80::1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("fd00::1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("::ffff:127.0.0.1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("::ffff:10.0.0.1")).toBe(true);
+      expect(isPrivateOrUnsafeIp("service.local")).toBe(true);
 
-      const resIpv6 = await probe.get("http://[::1]:8080");
-      expect(resIpv6.success).toBe(false);
+      // Public IPs
+      expect(isPrivateOrUnsafeIp("8.8.8.8")).toBe(false);
+      expect(isPrivateOrUnsafeIp("1.1.1.1")).toBe(false);
+      expect(isPrivateOrUnsafeIp("93.184.216.34")).toBe(false);
+    });
 
-      const resLinkLocal = await probe.get("http://[fe80::1]:8080");
-      expect(resLinkLocal.success).toBe(false);
+    it("24c. Fail-closed DNS resolution failure prevents fetch and denies request", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const dnsLookupSpy = vi
+        .spyOn(dns, "lookup")
+        .mockRejectedValue(
+          new Error("ENOTFOUND unresolvable-hostname.invalid"),
+        );
 
-      const resOctal = await probe.get("http://0177.0.0.1:8080");
-      expect(resOctal.success).toBe(false);
+      const probe = new BoundedHttpProbe(["*"]);
+      const res = await probe.get("http://unresolvable-hostname.invalid/test");
 
-      const resHex = await probe.get("http://0x7f000001:8080");
-      expect(resHex.success).toBe(false);
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/DNS RESOLUTION FAILED/i);
+      expect(fetchSpy).toHaveBeenCalledTimes(0);
 
-      const resLocalDomain = await probe.get(
-        "http://internal.service.local:8080",
+      dnsLookupSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
+    it("24d. Wildcard allowlist '*' rejects private/loopback/metadata destinations unless explicitly configured", async () => {
+      const probe = new BoundedHttpProbe(["*"]);
+
+      const resMeta = await probe.get(
+        "http://169.254.169.254/latest/meta-data",
       );
-      expect(resLocalDomain.success).toBe(false);
+      expect(resMeta.success).toBe(false);
+      expect(resMeta.error).toMatch(/SSRF PROTECTION DENIED/i);
+
+      const resLocal = await probe.get("http://127.0.0.1:8080/secret");
+      expect(resLocal.success).toBe(false);
+      expect(resLocal.error).toMatch(/SSRF PROTECTION DENIED/i);
+
+      // Explicit internal origin allowlist permits target
+      const explicitProbe = new BoundedHttpProbe(["http://127.0.0.1:8080"]);
+      const dnsLookupSpy = vi
+        .spyOn(dns, "lookup")
+        .mockResolvedValue({ address: "127.0.0.1", family: 4 } as any);
+
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(new Response("Internal OK", { status: 200 }));
+
+      const resExplicit = await explicitProbe.get(
+        "http://127.0.0.1:8080/status",
+      );
+      expect(resExplicit.success).toBe(true);
+
+      dnsLookupSpy.mockRestore();
+      fetchSpy.mockRestore();
     });
 
     it("25. SSRF redirect to non-allowlisted destination rejected with zero requests to forbidden destination", async () => {
