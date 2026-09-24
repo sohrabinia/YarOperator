@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { OperatorApiHandler, OperatorApiRequest } from "../src/api/operator.js";
 import { bootstrapOperatorApplication } from "../src/core/bootstrap/index.js";
 import {
@@ -10,12 +10,16 @@ import { AgentOrchestrator } from "../src/core/orchestrator/index.js";
 import {
   SecureToolEcosystem,
   OperatorHealthTool,
+  SystemHealthProvider,
   Tool,
   ToolResult,
 } from "../src/core/tools/index.js";
+import { TerminalTool } from "../src/core/terminal/index.js";
+import { GitTool } from "../src/core/git/index.js";
+import { BrowserTool } from "../src/core/browser/index.js";
+import { WebResearchTool } from "../src/core/research/index.js";
 import { PolicyEngine, ApprovalManager } from "../src/core/policy/index.js";
 import { AuditManager } from "../src/core/audit/index.js";
-import { ExecutionContext } from "../src/core/contracts/index.js";
 
 class SpyMockTool implements Tool {
   metadata = {
@@ -37,6 +41,7 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
   let apiHandler: OperatorApiHandler;
 
   beforeEach(() => {
+    vi.restoreAllMocks();
     apiHandler = bootstrapOperatorApplication({
       bearerToken,
       ownerId: "owner_sohrab",
@@ -46,9 +51,15 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
   });
 
   describe("1. Real Task Execution Path & Safe Health/Readiness Resolution", () => {
-    it("exact real YarTrader task prompt resolves to operator_health and executes via ToolEcosystem", async () => {
+    it("exact real YarTrader task prompt reaches POST /api/v1/operator/chat and ACTUALLY executes OperatorHealthTool.execute()", async () => {
       const realTaskPrompt =
         "Check operator runtime health and report current readiness status. Do not perform any trading or external side effects.";
+
+      const spyHealth = vi.spyOn(OperatorHealthTool.prototype, "execute");
+      const spyTerminal = vi.spyOn(TerminalTool.prototype, "execute");
+      const spyGit = vi.spyOn(GitTool.prototype, "execute");
+      const spyBrowser = vi.spyOn(BrowserTool.prototype, "execute");
+      const spyResearch = vi.spyOn(WebResearchTool.prototype, "execute");
 
       const req: OperatorApiRequest = {
         headers: { authorization: `Bearer ${bearerToken}` },
@@ -67,16 +78,23 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(res.body.result?.resolvedCapability).toBe("system-monitoring");
       expect(res.body.result?.resolvedToolId).toBe("operator_health");
 
+      // Prove OperatorHealthTool.execute() was ACTUALLY invoked
+      expect(spyHealth).toHaveBeenCalledTimes(1);
+
+      // Prove NO unrelated/mutating tools were executed
+      expect(spyTerminal).not.toHaveBeenCalled();
+      expect(spyGit).not.toHaveBeenCalled();
+      expect(spyBrowser).not.toHaveBeenCalled();
+      expect(spyResearch).not.toHaveBeenCalled();
+
       const details = res.body.result?.details as any;
       expect(details?.executedSteps?.[0]?.status).toBe("EXECUTED");
       expect(details?.executedSteps?.[0]?.toolId).toBe("operator_health");
-
-      const healthOutput =
-        details?.evidence?.toolResult?.output || details?.evidence;
-      expect(healthOutput).toBeDefined();
     });
 
-    it("readiness request resolves deterministically to operator_health tool", async () => {
+    it("readiness request resolves deterministically to operator_health tool and executes it", async () => {
+      const spyHealth = vi.spyOn(OperatorHealthTool.prototype, "execute");
+
       const req: OperatorApiRequest = {
         headers: { authorization: `Bearer ${bearerToken}` },
         body: {
@@ -93,22 +111,7 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(res.body.result?.status).toBe("COMPLETED");
       expect(res.body.result?.resolvedCapability).toBe("system-monitoring");
       expect(res.body.result?.resolvedToolId).toBe("operator_health");
-    });
-
-    it("health/readiness execution is strictly read-only and non-mutating", async () => {
-      const healthTool = new OperatorHealthTool();
-      const execResult = await healthTool.execute(
-        {},
-        {
-          executionId: "exec_test",
-          timestamp: new Date(),
-        },
-      );
-
-      expect(execResult.success).toBe(true);
-      expect(execResult.output?.health?.status).toBe("HEALTHY");
-      expect(execResult.output?.readiness?.status).toBe("READY");
-      expect(typeof execResult.output?.health?.uptimeMs).toBe("number");
+      expect(spyHealth).toHaveBeenCalledTimes(1);
     });
 
     it("no trading, terminal, browser, or git tools can be implicitly selected for health/readiness tasks", async () => {
@@ -133,7 +136,6 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       const orchestrator = new AgentOrchestrator(agentRegistry);
       const approvalManager = new ApprovalManager(":memory:");
       const policyEngine = new PolicyEngine(approvalManager);
-      const auditManager = new AuditManager();
 
       const spyTerminal = new SpyMockTool();
       spyTerminal.metadata.id = "terminal_execute";
@@ -175,21 +177,87 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
     });
   });
 
-  describe("2. Ambiguous Multi-Tool Safety Boundary (Fail-Closed)", () => {
+  describe("2. Single Authoritative Source of Truth for Health & Readiness", () => {
+    it("OperatorHealthTool and API endpoints (/health, /readiness) share 100% identical SystemHealthProvider report", async () => {
+      const provider = apiHandler.getHealthProvider();
+      expect(provider).toBeInstanceOf(SystemHealthProvider);
+
+      const apiHealth = apiHandler.getHealth();
+      const apiReadiness = apiHandler.getReadiness();
+
+      const healthTool = new OperatorHealthTool(provider);
+      const toolExec = await healthTool.execute(
+        {},
+        {
+          executionId: "exec_auth_test",
+          timestamp: new Date(),
+        },
+      );
+
+      expect(toolExec.success).toBe(true);
+      expect(toolExec.output?.health.status).toBe(
+        apiHealth.body.health?.status,
+      );
+      expect(toolExec.output?.readiness.status).toBe(
+        apiReadiness.body.readiness?.status,
+      );
+      expect(toolExec.output?.readiness.subsystems).toEqual(
+        apiReadiness.body.readiness?.subsystems,
+      );
+    });
+
+    it("if authoritative readiness becomes NOT_READY, both /readiness and OperatorHealthTool report NOT_READY/DEGRADED in sync", async () => {
+      const mockIdentityStore = {
+        checkIntegrity: () => false, // Unhealthy identity store
+      };
+
+      const failingProvider = new SystemHealthProvider(
+        () => true,
+        () => mockIdentityStore,
+      );
+
+      const failingApiHandler = new OperatorApiHandler(
+        { receiveCommand: async () => ({ accepted: true }) } as any,
+        undefined,
+        mockIdentityStore as any,
+        failingProvider,
+      );
+
+      const readinessRes = failingApiHandler.getReadiness();
+      expect(readinessRes.statusCode).toBe(503);
+      expect(readinessRes.body.readiness?.status).toBe("NOT_READY");
+      expect(readinessRes.body.readiness?.subsystems.identityStore).toBe(false);
+
+      const healthTool = new OperatorHealthTool(failingProvider);
+      const toolRes = await healthTool.execute(
+        {},
+        {
+          executionId: "exec_failing_test",
+          timestamp: new Date(),
+        },
+      );
+
+      expect(toolRes.success).toBe(true);
+      expect(toolRes.output?.readiness.status).toBe("NOT_READY");
+      expect(toolRes.output?.health.status).toBe("DEGRADED");
+    });
+  });
+
+  describe("3. Ambiguous Multi-Tool Safety Boundary (Fail-Closed)", () => {
     it("ambiguous multi-tool action without explicit requestedToolId remains BLOCKED with success=false", async () => {
       const req: OperatorApiRequest = {
         headers: { authorization: `Bearer ${bearerToken}` },
         body: {
           workspaceId: "yartrader",
           environmentId: "env_yartrader",
-          rawCommandText: "Check code changes in repository", // Ambiguous multi-tool action under software-development
+          rawCommandText: "Check code changes in repository", // Ambiguous multi-tool action
         },
       };
 
       const res = await apiHandler.handleChatRequest(req);
 
       expect(res.statusCode).toBe(200);
-      expect(res.body.success).toBe(false); // MUST BE false!
+      expect(res.body.success).toBe(false);
       expect(res.body.result?.status).toBe("BLOCKED");
       expect(res.body.result?.details).toBeDefined();
       const details = res.body.result?.details as any;
@@ -197,7 +265,7 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
     });
   });
 
-  describe("3. API Contract Status Semantics Verification", () => {
+  describe("4. API Contract Status Semantics Verification", () => {
     it("COMPLETED API response has success=true and status=COMPLETED", async () => {
       const req: OperatorApiRequest = {
         headers: { authorization: `Bearer ${bearerToken}` },
@@ -254,7 +322,7 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
         body: {
           workspaceId: "yartrader",
           environmentId: "invalid_env_99",
-          rawCommandText: "operator health",
+          rawCommandText: "check operator health",
         },
       };
 
@@ -269,14 +337,14 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
     });
   });
 
-  describe("4. Intent Classification Positive & Negative Cases", () => {
+  describe("5. Bounded Intent Classification Positive & Negative Cases", () => {
     it("positive health/readiness phrases match isHealthReadinessIntent", () => {
       expect(
         isHealthReadinessIntent(
           "Check operator runtime health and report current readiness status.",
         ),
       ).toBe(true);
-      expect(isHealthReadinessIntent("check operator runtime health")).toBe(
+      expect(isHealthReadinessIntent("Check operator runtime health")).toBe(
         true,
       );
       expect(isHealthReadinessIntent("check runtime readiness")).toBe(true);
@@ -289,13 +357,15 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(isHealthReadinessIntent("وضعیت آمادگی اپراتور")).toBe(true);
     });
 
-    it("negative non-health phrases do not match isHealthReadinessIntent", () => {
+    it("negative non-health phrases fail closed and do not match isHealthReadinessIntent", () => {
       expect(isHealthReadinessIntent("check git status")).toBe(false);
       expect(isHealthReadinessIntent("verify test results")).toBe(false);
       expect(isHealthReadinessIntent("run build")).toBe(false);
       expect(isHealthReadinessIntent("check logs for errors")).toBe(false);
       expect(isHealthReadinessIntent("check code in repo")).toBe(false);
       expect(isHealthReadinessIntent("check pr status")).toBe(false);
+      expect(isHealthReadinessIntent("health")).toBe(false);
+      expect(isHealthReadinessIntent("readiness")).toBe(false);
     });
   });
 });

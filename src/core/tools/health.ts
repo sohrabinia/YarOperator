@@ -5,7 +5,7 @@ import {
   ToolResult,
 } from "../contracts/index.js";
 
-export interface OperatorHealthOutput {
+export interface SystemHealthReport {
   health: {
     status: "HEALTHY" | "DEGRADED" | "UNHEALTHY";
     uptimeMs: number;
@@ -21,33 +21,28 @@ export interface OperatorHealthOutput {
   };
 }
 
-export class OperatorHealthTool implements Tool<
-  Record<string, unknown>,
-  OperatorHealthOutput
-> {
-  metadata: ToolMetadata = {
-    id: "operator_health",
-    name: "Operator Health & Readiness Inspection",
-    description:
-      "Inspects authoritative YarOperator runtime health and readiness status without side effects.",
-    safetyLevel: "SAFE",
-  };
-
+export class SystemHealthProvider {
   constructor(
+    private commandReceiverSupplier?: () => boolean,
     private identityStoreSupplier?: () =>
       { checkIntegrity: () => boolean } | null | undefined,
+    private healthEvaluator?: () => "HEALTHY" | "DEGRADED" | "UNHEALTHY",
   ) {}
 
-  resolveCanonicalAction(_params?: Record<string, unknown>): string {
-    return "operator_health:check";
-  }
+  public getReport(): SystemHealthReport {
+    const nowIso = new Date().toISOString();
+    const uptimeMs = Math.floor(process.uptime() * 1000);
 
-  async execute(
-    _params: Record<string, unknown> = {},
-    _context?: ExecutionContext,
-  ): Promise<ToolResult<OperatorHealthOutput>> {
+    let commandReceiverReady = true;
+    if (this.commandReceiverSupplier) {
+      try {
+        commandReceiverReady = this.commandReceiverSupplier();
+      } catch {
+        commandReceiverReady = false;
+      }
+    }
+
     let identityStoreReady = true;
-
     if (this.identityStoreSupplier) {
       try {
         const store = this.identityStoreSupplier();
@@ -59,26 +54,63 @@ export class OperatorHealthTool implements Tool<
       }
     }
 
-    const isReady = identityStoreReady;
-    const nowIso = new Date().toISOString();
+    const isReady = commandReceiverReady && identityStoreReady;
+    const healthStatus = this.healthEvaluator
+      ? this.healthEvaluator()
+      : isReady
+        ? "HEALTHY"
+        : "DEGRADED";
+
+    return {
+      health: {
+        status: healthStatus,
+        uptimeMs,
+        timestamp: nowIso,
+      },
+      readiness: {
+        status: isReady ? "READY" : "NOT_READY",
+        subsystems: {
+          commandReceiver: commandReceiverReady,
+          identityStore: identityStoreReady,
+        },
+        timestamp: nowIso,
+      },
+    };
+  }
+}
+
+export class OperatorHealthTool implements Tool<
+  Record<string, unknown>,
+  SystemHealthReport
+> {
+  metadata: ToolMetadata = {
+    id: "operator_health",
+    name: "Operator Health & Readiness Inspection",
+    description:
+      "Inspects authoritative YarOperator runtime health and readiness status without side effects.",
+    safetyLevel: "SAFE",
+  };
+
+  constructor(private healthProvider?: SystemHealthProvider) {}
+
+  public setHealthProvider(healthProvider: SystemHealthProvider): void {
+    this.healthProvider = healthProvider;
+  }
+
+  resolveCanonicalAction(_params?: Record<string, unknown>): string {
+    return "operator_health:check";
+  }
+
+  async execute(
+    _params: Record<string, unknown> = {},
+    _context?: ExecutionContext,
+  ): Promise<ToolResult<SystemHealthReport>> {
+    const provider = this.healthProvider || new SystemHealthProvider();
+    const report = provider.getReport();
 
     return {
       success: true,
-      output: {
-        health: {
-          status: "HEALTHY",
-          uptimeMs: Math.floor(process.uptime() * 1000),
-          timestamp: nowIso,
-        },
-        readiness: {
-          status: isReady ? "READY" : "NOT_READY",
-          subsystems: {
-            commandReceiver: true,
-            identityStore: identityStoreReady,
-          },
-          timestamp: nowIso,
-        },
-      },
+      output: report,
     };
   }
 }

@@ -12,7 +12,11 @@ import {
 import { NotificationManager } from "../notification/index.js";
 import { ControlledAutonomyEngine } from "../autonomy/index.js";
 import { RealWorldAssistant } from "../assistant/index.js";
-import { SecureToolEcosystem, OperatorHealthTool } from "../tools/index.js";
+import {
+  SecureToolEcosystem,
+  OperatorHealthTool,
+  SystemHealthProvider,
+} from "../tools/index.js";
 import { TerminalTool } from "../terminal/index.js";
 import { GitTool, GitHubTool, JulesWorkerAdapter } from "../git/index.js";
 import { BrowserTool } from "../browser/index.js";
@@ -145,6 +149,15 @@ export function bootstrapOperatorApplication(
     ? new IdentityStore(":memory:")
     : new IdentityStore(dbPath);
 
+  let receiver: OwnerCommandReceiver | undefined;
+
+  const sharedHealthProvider = new SystemHealthProvider(
+    () => Boolean(receiver),
+    () => identityStoreForApi,
+  );
+
+  const healthTool = new OperatorHealthTool(sharedHealthProvider);
+
   const defaultTools = [
     new TerminalTool(),
     new GitTool(),
@@ -152,7 +165,7 @@ export function bootstrapOperatorApplication(
     new JulesWorkerAdapter(),
     new BrowserTool(),
     new WebResearchTool(),
-    new OperatorHealthTool(() => identityStoreForApi),
+    healthTool,
   ];
 
   const registeredToolIds: string[] = [];
@@ -241,7 +254,7 @@ export function bootstrapOperatorApplication(
     defaultWorkspaceId: activeWorkspaceId,
   });
 
-  const receiver = new OwnerCommandReceiver(
+  receiver = new OwnerCommandReceiver(
     ownerManager,
     policyEngine,
     auditManager,
@@ -260,6 +273,7 @@ export function bootstrapOperatorApplication(
     receiver,
     undefined,
     identityStoreForApi,
+    sharedHealthProvider,
   );
   for (const [t, oId] of Object.entries(tokenMap)) {
     apiHandler.registerBearerToken(t, oId);

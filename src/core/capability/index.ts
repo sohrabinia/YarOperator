@@ -13,52 +13,68 @@ export function isHealthReadinessIntent(text?: string): boolean {
   if (!text) return false;
   const norm = text.toLowerCase().trim();
 
-  // Negative checks for non-health operational contexts
+  // Negative word boundary checks for non-health operational contexts
   if (
-    norm.includes("git") ||
-    norm.includes("branch") ||
-    norm.includes("commit") ||
-    norm.includes("pull request") ||
-    norm.includes("pr ") ||
-    norm.includes(" pr") ||
-    norm.includes("build") ||
-    norm.includes("test") ||
-    norm.includes("logs") ||
-    norm.includes("code")
+    /\b(git|branch|commit|pull request|pr|build|test|tests|logs|code|repo|repository)\b/i.test(
+      norm,
+    )
   ) {
     return false;
   }
 
-  // Positive English patterns
+  // Reject standalone "health" or "readiness" without operator/runtime/system/check/status/report context
+  if (norm === "health" || norm === "readiness") {
+    return false;
+  }
+
   const hasHealth = norm.includes("health");
   const hasReadiness = norm.includes("readiness");
   const hasOperator = norm.includes("operator");
   const hasRuntime = norm.includes("runtime");
+  const hasSystem = norm.includes("system");
 
+  // Rule 1: operator + (health | readiness)
   if (hasOperator && (hasHealth || hasReadiness)) return true;
+
+  // Rule 2: runtime + (health | readiness)
   if (hasRuntime && (hasHealth || hasReadiness)) return true;
+
+  // Rule 3: (system | operator | runtime) + health
   if (
     hasHealth &&
-    (norm.includes("system") ||
-      norm.includes("check") ||
-      norm.includes("report"))
-  )
-    return true;
+    (hasSystem || norm.includes("check") || norm.includes("report"))
+  ) {
+    if (
+      hasOperator ||
+      hasRuntime ||
+      hasSystem ||
+      norm.includes("runtime health") ||
+      norm.includes("operator health")
+    ) {
+      return true;
+    }
+  }
+
+  // Rule 4: (readiness status | current readiness | check readiness | report readiness)
   if (
     hasReadiness &&
-    (norm.includes("status") ||
-      norm.includes("report") ||
-      norm.includes("check"))
-  )
+    (hasOperator ||
+      hasRuntime ||
+      norm.includes("readiness status") ||
+      norm.includes("current readiness") ||
+      norm.includes("runtime readiness") ||
+      norm.includes("check readiness") ||
+      norm.includes("report readiness"))
+  ) {
     return true;
+  }
 
-  // Positive Persian patterns
+  // Positive Persian patterns requiring explicit operator/system health/readiness context
   if (
     norm.includes("سلامت") &&
     (norm.includes("اپراتور") ||
       norm.includes("اوپراتور") ||
-      norm.includes("سیستم") ||
-      norm.includes("بررسی"))
+      norm.includes("سیستم"))
   ) {
     return true;
   }
@@ -67,8 +83,7 @@ export function isHealthReadinessIntent(text?: string): boolean {
     norm.includes("آمادگی") &&
     (norm.includes("اپراتور") ||
       norm.includes("اوپراتور") ||
-      norm.includes("سیستم") ||
-      norm.includes("وضعیت"))
+      norm.includes("سیستم"))
   ) {
     return true;
   }
