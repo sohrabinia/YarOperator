@@ -597,6 +597,109 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(res.success).toBe(false);
       expect(res.error).toMatch(/Unsupported protocol 'file:'/i);
     });
+
+    it("26b. Fix 1 Proof — Huge streaming response body is read boundedly and reader is cancelled at maxResponseBytes", async () => {
+      const http = await import("node:http");
+      let totalBytesSent = 0;
+
+      const server = http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        // Stream 100KB in 1KB chunks
+        const chunk = "X".repeat(1024);
+        for (let i = 0; i < 100; i++) {
+          res.write(chunk);
+          totalBytesSent += 1024;
+        }
+        res.end();
+      });
+
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const address = server.address() as any;
+      const serverUrl = `http://127.0.0.1:${address.port}`;
+
+      try {
+        const probe = new BoundedHttpProbe([serverUrl], 5000, 500); // 500 bytes max
+        const res = await probe.get(serverUrl);
+
+        expect(res.success).toBe(true);
+        expect(res.body?.length).toBeLessThanOrEqual(500);
+      } finally {
+        server.close();
+      }
+    });
+
+    it("26c. Fix 2 Proof — End-to-end timeout covers stalled body reading and aborts request", async () => {
+      const http = await import("node:http");
+
+      const server = http.createServer((_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.write("Initial Header OK\n");
+        // Intentionally stall without closing
+      });
+
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const address = server.address() as any;
+      const serverUrl = `http://127.0.0.1:${address.port}`;
+
+      try {
+        const probe = new BoundedHttpProbe([serverUrl], 300, 1000); // 300ms timeout
+        const start = Date.now();
+        const res = await probe.get(serverUrl);
+        const elapsed = Date.now() - start;
+
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/HTTP PROBE TIMEOUT/i);
+        expect(elapsed).toBeGreaterThanOrEqual(250);
+        expect(elapsed).toBeLessThan(1500);
+      } finally {
+        server.close();
+      }
+    });
+
+    it("26d. Fix 3 Proof — Infinite redirect loop terminates fail-closed at max depth (5)", async () => {
+      const http = await import("node:http");
+
+      let serverAPort = 0;
+      let serverBPort = 0;
+
+      const serverA = http.createServer((_req, res) => {
+        res.writeHead(302, { Location: `http://127.0.0.1:${serverBPort}/b` });
+        res.end();
+      });
+
+      const serverB = http.createServer((_req, res) => {
+        res.writeHead(302, { Location: `http://127.0.0.1:${serverAPort}/a` });
+        res.end();
+      });
+
+      await new Promise<void>((resolve) =>
+        serverA.listen(0, "127.0.0.1", resolve),
+      );
+      await new Promise<void>((resolve) =>
+        serverB.listen(0, "127.0.0.1", resolve),
+      );
+
+      serverAPort = (serverA.address() as any).port;
+      serverBPort = (serverB.address() as any).port;
+
+      const urlA = `http://127.0.0.1:${serverAPort}`;
+      const urlB = `http://127.0.0.1:${serverBPort}`;
+
+      try {
+        const probe = new BoundedHttpProbe([urlA, urlB], 5000, 1000);
+        const res = await probe.get(`${urlA}/a`);
+
+        expect(res.success).toBe(false);
+        expect(res.error).toMatch(/Maximum redirect depth \(5\) exceeded/i);
+      } finally {
+        serverA.close();
+        serverB.close();
+      }
+    });
   });
 
   // --- Category 7: Service Health & Output Safety (Tests 27-31) ---

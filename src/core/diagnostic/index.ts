@@ -66,7 +66,20 @@ export class BoundedHttpProbe {
     private maxResponseBytes: number = 1000,
   ) {}
 
-  public async get(urlStr: string): Promise<HttpProbeResult> {
+  public async get(
+    urlStr: string,
+    redirectCount: number = 0,
+  ): Promise<HttpProbeResult> {
+    if (redirectCount >= 5) {
+      return {
+        success: false,
+        error: "HTTP PROBE DENIED: Maximum redirect depth (5) exceeded.",
+      };
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
     try {
       const parsedUrl = new URL(urlStr);
 
@@ -109,9 +122,6 @@ export class BoundedHttpProbe {
         }
       }
 
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-
       /**
        * RESIDUAL TOCTOU / DNS REBINDING RISK DOCUMENTATION:
        * While BoundedHttpProbe validates target URLs against origin allowlists and private IP regexes
@@ -128,8 +138,6 @@ export class BoundedHttpProbe {
         redirect: "manual", // Explicit manual redirect revalidation
         signal: controller.signal,
       });
-
-      clearTimeout(timer);
 
       // Handle redirects with explicit destination re-validation
       if (response.status >= 300 && response.status < 400) {
@@ -162,12 +170,35 @@ export class BoundedHttpProbe {
           };
         }
 
-        return this.get(resolvedRedirect.toString());
+        return this.get(resolvedRedirect.toString(), redirectCount + 1);
       }
 
-      const text = await response.text();
-      const truncated = text.substring(0, this.maxResponseBytes);
-      const redacted = this.redactSecrets(truncated);
+      // Bounded streaming response read up to maxResponseBytes
+      let bodyText = "";
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let totalBytesRead = 0;
+
+        while (totalBytesRead < this.maxResponseBytes) {
+          const { done, value } = await reader.read();
+          if (done || !value) break;
+
+          const remainingBytes = this.maxResponseBytes - totalBytesRead;
+          const chunkSlice = value.subarray(0, remainingBytes);
+          totalBytesRead += chunkSlice.length;
+          bodyText += decoder.decode(chunkSlice, { stream: true });
+
+          if (totalBytesRead >= this.maxResponseBytes) {
+            try {
+              await reader.cancel();
+            } catch {}
+            break;
+          }
+        }
+      }
+
+      const redacted = this.redactSecrets(bodyText);
 
       return {
         success: response.ok,
@@ -185,6 +216,8 @@ export class BoundedHttpProbe {
         success: false,
         error: `HTTP PROBE FAILED: ${err.message}`,
       };
+    } finally {
+      clearTimeout(timer);
     }
   }
 
