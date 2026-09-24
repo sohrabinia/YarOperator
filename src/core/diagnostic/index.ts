@@ -58,7 +58,7 @@ export class BoundedHttpProbe {
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
 
   private privateIpPattern =
-    /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|169\.254\.|localhost)/i;
+    /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|169\.254\.|localhost|::1|\[::1\]|fe80:|fd[0-9a-f]{2}:|0177\.|0x7f|\.local)/i;
 
   constructor(
     private allowedOrigins: (string | HttpOriginResourceConfig)[] = [],
@@ -69,6 +69,7 @@ export class BoundedHttpProbe {
   public async get(
     urlStr: string,
     redirectCount: number = 0,
+    globalDeadlineMs?: number,
   ): Promise<HttpProbeResult> {
     if (redirectCount >= 5) {
       return {
@@ -77,8 +78,18 @@ export class BoundedHttpProbe {
       };
     }
 
+    const deadline = globalDeadlineMs ?? Date.now() + this.timeoutMs;
+    const remainingMs = deadline - Date.now();
+
+    if (remainingMs <= 0) {
+      return {
+        success: false,
+        error: `HTTP PROBE TIMEOUT: Request exceeded global timeout deadline of ${this.timeoutMs}ms.`,
+      };
+    }
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), remainingMs);
 
     try {
       const parsedUrl = new URL(urlStr);
@@ -141,6 +152,11 @@ export class BoundedHttpProbe {
 
       // Handle redirects with explicit destination re-validation
       if (response.status >= 300 && response.status < 400) {
+        // Explicitly cancel/release the redirect response body before following next hop
+        try {
+          await response.body?.cancel();
+        } catch {}
+
         const redirectLocation = response.headers.get("location");
         if (!redirectLocation) {
           return {
@@ -170,7 +186,11 @@ export class BoundedHttpProbe {
           };
         }
 
-        return this.get(resolvedRedirect.toString(), redirectCount + 1);
+        return this.get(
+          resolvedRedirect.toString(),
+          redirectCount + 1,
+          deadline,
+        );
       }
 
       // Bounded streaming response read up to maxResponseBytes
@@ -326,14 +346,16 @@ export class DiagnosticWorker {
 
     // Stage 1: Authentication / Session
     if (!params.token || typeof params.token !== "string") {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_1_AUTH",
         params.workspaceId,
         "Missing token",
       );
       return {
         success: false,
-        error: "AUTHORIZATION FAILURE: Missing authentication Bearer token.",
+        error: auditOk
+          ? "AUTHORIZATION FAILURE: Missing authentication Bearer token."
+          : "AUTHORIZATION FAILURE: Missing token and audit persistence failed.",
         denialStage: "1. Authentication/Session",
         toolExecutionCount,
       };
@@ -341,15 +363,16 @@ export class DiagnosticWorker {
 
     const session = this.identityStore.getSession(params.token);
     if (!session) {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_1_AUTH",
         params.workspaceId,
         "Invalid token session",
       );
       return {
         success: false,
-        error:
-          "AUTHORIZATION FAILURE: Invalid or expired Bearer token session.",
+        error: auditOk
+          ? "AUTHORIZATION FAILURE: Invalid or expired Bearer token session."
+          : "AUTHORIZATION FAILURE: Invalid token and audit persistence failed.",
         denialStage: "1. Authentication/Session",
         toolExecutionCount,
       };
@@ -358,15 +381,16 @@ export class DiagnosticWorker {
     // Stage 2: IdentityStore Check
     const user = this.identityStore.getUserById(session.userId);
     if (!user) {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_2_IDENTITY",
         params.workspaceId,
         "User not found in IdentityStore",
       );
       return {
         success: false,
-        error:
-          "AUTHORIZATION FAILURE: User identity not found in IdentityStore.",
+        error: auditOk
+          ? "AUTHORIZATION FAILURE: User identity not found in IdentityStore."
+          : "AUTHORIZATION FAILURE: User not found and audit persistence failed.",
         denialStage: "2. IdentityStore",
         toolExecutionCount,
       };
@@ -374,14 +398,16 @@ export class DiagnosticWorker {
 
     // Stage 3: ACTIVE User Validation
     if (user.status !== "ACTIVE") {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_3_ACTIVE_USER",
         params.workspaceId,
         `User status is '${user.status}'`,
       );
       return {
         success: false,
-        error: `AUTHORIZATION FAILURE: User identity '${user.userId}' is not ACTIVE (status: '${user.status}').`,
+        error: auditOk
+          ? `AUTHORIZATION FAILURE: User identity '${user.userId}' is not ACTIVE (status: '${user.status}').`
+          : "AUTHORIZATION FAILURE: Inactive user and audit persistence failed.",
         denialStage: "3. ACTIVE User",
         toolExecutionCount,
       };
@@ -389,14 +415,16 @@ export class DiagnosticWorker {
 
     // Stage 4: Active Workspace Membership Validation
     if (!params.workspaceId) {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_4_MEMBERSHIP",
         "unknown",
         "Missing workspaceId",
       );
       return {
         success: false,
-        error: "AUTHORIZATION FAILURE: workspaceId is required.",
+        error: auditOk
+          ? "AUTHORIZATION FAILURE: workspaceId is required."
+          : "AUTHORIZATION FAILURE: Missing workspaceId and audit persistence failed.",
         denialStage: "4. Workspace Membership",
         toolExecutionCount,
       };
@@ -407,14 +435,16 @@ export class DiagnosticWorker {
       params.workspaceId,
     );
     if (!isMember) {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_4_MEMBERSHIP",
         params.workspaceId,
         `User is not member of '${params.workspaceId}'`,
       );
       return {
         success: false,
-        error: `AUTHORIZATION FAILURE: User '${user.userId}' is not an active member of workspace '${params.workspaceId}'.`,
+        error: auditOk
+          ? `AUTHORIZATION FAILURE: User '${user.userId}' is not an active member of workspace '${params.workspaceId}'.`
+          : "AUTHORIZATION FAILURE: Non-member user and audit persistence failed.",
         denialStage: "4. Workspace Membership",
         toolExecutionCount,
       };
@@ -423,14 +453,16 @@ export class DiagnosticWorker {
     // Stage 5: Requested Workspace Resolution
     const ws = this.registry.getWorkspace(params.workspaceId);
     if (!ws) {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_5_REQUESTED_WORKSPACE",
         params.workspaceId,
         "Workspace not registered in ResourceRegistry",
       );
       return {
         success: false,
-        error: `AUTHORIZATION FAILURE: Requested workspace '${params.workspaceId}' does not exist in ResourceRegistry.`,
+        error: auditOk
+          ? `AUTHORIZATION FAILURE: Requested workspace '${params.workspaceId}' does not exist in ResourceRegistry.`
+          : "AUTHORIZATION FAILURE: Unknown workspace and audit persistence failed.",
         denialStage: "5. Requested Workspace",
         toolExecutionCount,
       };
@@ -439,14 +471,16 @@ export class DiagnosticWorker {
     // Stage 6: Authoritative Resource Registry & Path Resolution
     const rootPath = ws.allowedRoots[0];
     if (!rootPath) {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_6_RESOURCE_REGISTRY",
         params.workspaceId,
         "Workspace has no allowedRoots",
       );
       return {
         success: false,
-        error: `AUTHORIZATION FAILURE: Workspace '${params.workspaceId}' has no allowed roots configured in ResourceRegistry.`,
+        error: auditOk
+          ? `AUTHORIZATION FAILURE: Workspace '${params.workspaceId}' has no allowed roots configured in ResourceRegistry.`
+          : "AUTHORIZATION FAILURE: Missing allowedRoots and audit persistence failed.",
         denialStage: "6. Resource Registry",
         toolExecutionCount,
       };
@@ -457,14 +491,16 @@ export class DiagnosticWorker {
       rootPath,
     );
     if (!resourceRes.success) {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_6_RESOURCE_REGISTRY",
         params.workspaceId,
         resourceRes.error,
       );
       return {
         success: false,
-        error: `AUTHORIZATION FAILURE: Resource resolution failed: ${resourceRes.error}`,
+        error: auditOk
+          ? `AUTHORIZATION FAILURE: Resource resolution failed: ${resourceRes.error}`
+          : "AUTHORIZATION FAILURE: Resource resolution failed and audit persistence failed.",
         denialStage: "6. Resource Registry",
         toolExecutionCount,
       };
@@ -473,15 +509,16 @@ export class DiagnosticWorker {
     // Stage 7: PolicyEngine Evaluation
     const gitRule = this.policyEngine.getRule("git_operate:status");
     if (gitRule === "BLOCKED") {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_7_POLICY",
         params.workspaceId,
         "git_operate:status is BLOCKED by PolicyEngine",
       );
       return {
         success: false,
-        error:
-          "AUTHORIZATION FAILURE: Diagnostic capability 'git_operate:status' is BLOCKED by PolicyEngine.",
+        error: auditOk
+          ? "AUTHORIZATION FAILURE: Diagnostic capability 'git_operate:status' is BLOCKED by PolicyEngine."
+          : "AUTHORIZATION FAILURE: Policy BLOCKED and audit persistence failed.",
         denialStage: "7. PolicyEngine",
         toolExecutionCount,
       };
@@ -490,15 +527,16 @@ export class DiagnosticWorker {
     // Stage 8: DiagnosticWorker Read-Only Capability Resolution
     // Verify intent is actually diagnostic
     if (!this.isDiagnosticIntent(params.rawCommandText)) {
-      await this.auditDenial(
+      const auditOk = await this.auditDenial(
         "STAGE_8_CAPABILITY",
         params.workspaceId,
         "Command text is not recognized as diagnostic intent",
       );
       return {
         success: false,
-        error:
-          "AUTHORIZATION FAILURE: Input text does not match recognized diagnostic intents.",
+        error: auditOk
+          ? "AUTHORIZATION FAILURE: Input text does not match recognized diagnostic intents."
+          : "AUTHORIZATION FAILURE: Unrecognized intent and audit persistence failed.",
         denialStage: "8. Capability Resolution",
         toolExecutionCount,
       };
@@ -513,7 +551,6 @@ export class DiagnosticWorker {
     // --- Subsystem 1: Git Read-Only Diagnostics ---
     try {
       spies?.gitSpy?.();
-      toolExecutionCount++;
 
       const gitTool = new GitTool(this.resolver);
       const gitContext: ExecutionContext = context || {
@@ -526,6 +563,8 @@ export class DiagnosticWorker {
         { action: "status", cwd: resourceRes.resource.canonicalPath },
         gitContext,
       );
+
+      toolExecutionCount++;
 
       if (gitStatusRes.success) {
         const rawOut = gitStatusRes.output?.output || "Git status clean";
@@ -570,7 +609,6 @@ export class DiagnosticWorker {
           : (firstOrigin as HttpOriginResourceConfig).origin);
       try {
         spies?.httpSpy?.();
-        toolExecutionCount++;
 
         const httpProbe = new BoundedHttpProbe(
           ws.allowedHttpOrigins || [],
@@ -580,6 +618,7 @@ export class DiagnosticWorker {
         const probeRes = await httpProbe.get(probeUrl);
 
         if (probeRes.success) {
+          toolExecutionCount++;
           items.push({
             name: "HTTP Origin Probe",
             source: "BoundedHttpProbe",
@@ -613,9 +652,9 @@ export class DiagnosticWorker {
     if (this.healthProvider) {
       try {
         spies?.healthSpy?.();
-        toolExecutionCount++;
 
         const report = this.healthProvider.getReport();
+        toolExecutionCount++;
         items.push({
           name: "Service Health Check",
           source: "SystemHealthProvider",
@@ -683,7 +722,7 @@ export class DiagnosticWorker {
     stage: string,
     workspaceId: string,
     reason: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await this.auditManager.recordEvent(
         "DIAGNOSTIC_AUTHORIZATION_DENIED",
@@ -694,8 +733,9 @@ export class DiagnosticWorker {
         },
         { workspaceId, severity: "HIGH" },
       );
+      return true;
     } catch {
-      // Audit recording fail-closed
+      return false;
     }
   }
 }

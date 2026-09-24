@@ -549,6 +549,27 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       );
     });
 
+    it("24b. SSRF hardened protection blocks IPv6 loopback, link-local, octal, hex, and .local hostnames", async () => {
+      const probe = new BoundedHttpProbe(["https://public-api.com"]);
+
+      const resIpv6 = await probe.get("http://[::1]:8080");
+      expect(resIpv6.success).toBe(false);
+
+      const resLinkLocal = await probe.get("http://[fe80::1]:8080");
+      expect(resLinkLocal.success).toBe(false);
+
+      const resOctal = await probe.get("http://0177.0.0.1:8080");
+      expect(resOctal.success).toBe(false);
+
+      const resHex = await probe.get("http://0x7f000001:8080");
+      expect(resHex.success).toBe(false);
+
+      const resLocalDomain = await probe.get(
+        "http://internal.service.local:8080",
+      );
+      expect(resLocalDomain.success).toBe(false);
+    });
+
     it("25. SSRF redirect to non-allowlisted destination rejected with zero requests to forbidden destination", async () => {
       const http = await import("node:http");
 
@@ -598,9 +619,8 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(res.error).toMatch(/Unsupported protocol 'file:'/i);
     });
 
-    it("26b. Fix 1 Proof — Huge streaming response body is read boundedly and reader is cancelled at maxResponseBytes", async () => {
+    it("26b. Fix 1 Proof — Huge streaming response body is read boundedly and reader cancel is invoked at maxResponseBytes", async () => {
       const http = await import("node:http");
-      let totalBytesSent = 0;
 
       const server = http.createServer((_req, res) => {
         res.writeHead(200, { "Content-Type": "text/plain" });
@@ -608,7 +628,6 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
         const chunk = "X".repeat(1024);
         for (let i = 0; i < 100; i++) {
           res.write(chunk);
-          totalBytesSent += 1024;
         }
         res.end();
       });
@@ -625,6 +644,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
 
         expect(res.success).toBe(true);
         expect(res.body?.length).toBeLessThanOrEqual(500);
+        expect(res.body?.length).toBeGreaterThan(0);
       } finally {
         server.close();
       }
@@ -864,8 +884,47 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
     });
   });
 
-  // --- Category 10: Audit & End-to-End Execution (Tests 40-41) ---
+  // --- Category 10: Audit & End-to-End Execution (Tests 40-42) ---
   describe("10. Audit & End-to-End Proof", () => {
+    it("42. Runtime HTTP API POST /api/v1/operator/chat dispatches diagnostic intent to DiagnosticWorker and returns report", async () => {
+      const { bootstrapOperatorApplication } =
+        await import("../src/core/bootstrap/index.js");
+
+      const validConfigPath = path.join(tempDir, "api_diag_resources.json");
+      const validConfig = {
+        defaultWorkspaceId: "yartrader",
+        workspaces: [
+          {
+            workspaceId: "yartrader",
+            allowedRoots: [process.cwd()],
+            allowedHttpOrigins: ["http://127.0.0.1:3000"],
+          },
+        ],
+      };
+      fs.writeFileSync(validConfigPath, JSON.stringify(validConfig), "utf-8");
+
+      const apiHandler = await bootstrapOperatorApplication({
+        useInMemoryStores: true,
+        resourcesPath: validConfigPath,
+        bearerToken: "api_diag_token_999",
+        ownerId: "owner_sohrab",
+      });
+
+      const reqRes = await apiHandler.handleChatRequest({
+        headers: { authorization: "Bearer api_diag_token_999" },
+        body: {
+          workspaceId: "yartrader",
+          rawCommandText: "check YarTrader status",
+        },
+      });
+
+      expect(reqRes.statusCode).toBe(200);
+      expect(reqRes.body.success).toBe(true);
+      expect(reqRes.body.result?.status).toBe("COMPLETED");
+      expect(reqRes.body.result?.resolvedCapability).toBe("diagnostic-worker");
+      expect(reqRes.body.result?.resolvedToolId).toBe("diagnostic_worker");
+      expect(reqRes.body.result?.details).toBeDefined();
+    });
     it("40. Successful diagnostic execution records DIAGNOSTIC_EXECUTION_COMPLETED audit event", async () => {
       const res = await worker.executeDiagnostics({
         token: validToken,
