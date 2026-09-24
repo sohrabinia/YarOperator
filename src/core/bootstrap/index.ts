@@ -178,15 +178,13 @@ export function bootstrapOperatorApplication(
     });
 
     resourceResolver = new ResourceResolver(resourceRegistry, auditManager);
+    registryReady = true;
 
     const auditRes = resourceRegistry.auditBootstrap(auditManager);
     if (auditRes && typeof (auditRes as any).then === "function") {
-      (auditRes as any)
-        .then(() => {
-          registryReady = true;
-        })
-        .catch((err: any) => {
-          registryReady = false;
+      (auditRes as any).catch((err: any) => {
+        registryReady = false;
+        try {
           auditManager
             .recordEvent(
               "REGISTRY_BOOTSTRAP_FAILURE",
@@ -200,9 +198,8 @@ export function bootstrapOperatorApplication(
               { severity: "CRITICAL" },
             )
             .catch(() => {});
-        });
-    } else {
-      registryReady = true;
+        } catch {}
+      });
     }
   } catch (err: any) {
     registryReady = false;
