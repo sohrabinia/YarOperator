@@ -246,4 +246,32 @@ describe("/Operator Web Interface & API Security Hardening Test Suite", () => {
     expect(data.success).toBe(false);
     expect(data.error).toContain("Forbidden");
   });
+
+  it("9. Serves static HTML with canonical YarTrader workspace label and no Dev indicator", async () => {
+    const res = await fetch(`${baseUrl}/Operator`);
+    expect(res.status).toBe(200);
+    const htmlText = await res.text();
+    expect(htmlText).toContain("YarTrader");
+    expect(htmlText).not.toContain("YarTrader / Dev");
+  });
+
+  it("10. Front-end app.js uses canonical production environment contract env_yartrader", async () => {
+    const res = await fetch(`${baseUrl}/app.js`);
+    expect(res.status).toBe(200);
+    const jsText = await res.text();
+    expect(jsText).toContain('workspaceId: "yartrader"');
+    expect(jsText).toContain('environmentId: "env_yartrader"');
+    expect(jsText).not.toContain('environmentId: "development"');
+  });
+
+  it("11. Validates real /health endpoint JSON contract structure for frontend consumption", async () => {
+    const res = await fetch(`${baseUrl}/health`);
+    expect(res.status).toBe(200);
+    const healthData = await res.json();
+    expect(healthData.success).toBe(true);
+    expect(healthData.health).toBeDefined();
+    expect(["HEALTHY", "DEGRADED", "UNHEALTHY"]).toContain(
+      healthData.health.status,
+    );
+  });
 });
