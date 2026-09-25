@@ -170,9 +170,29 @@ export class OperatorWebServer {
       if (this.server) {
         this.server.close(() => {
           this.server = null;
+          if (this.identityStore) {
+            try {
+              this.identityStore.close();
+            } catch {}
+          }
+          if (this.apiHandler) {
+            try {
+              this.apiHandler.close();
+            } catch {}
+          }
           resolve();
         });
       } else {
+        if (this.identityStore) {
+          try {
+            this.identityStore.close();
+          } catch {}
+        }
+        if (this.apiHandler) {
+          try {
+            this.apiHandler.close();
+          } catch {}
+        }
         resolve();
       }
     });

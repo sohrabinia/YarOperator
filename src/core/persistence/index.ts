@@ -117,6 +117,11 @@ export class OperationalStateStore {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+      this.db = null;
+    }
   }
 }

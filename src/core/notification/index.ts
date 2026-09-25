@@ -239,6 +239,7 @@ export class NotificationManager {
       try {
         this.db.close();
       } catch {}
+      this.db = null;
     }
   }
 }

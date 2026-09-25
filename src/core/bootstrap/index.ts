@@ -331,11 +331,28 @@ export async function bootstrapOperatorApplication(
     tokenMap[token] = activeOwnerId;
   }
 
+  const closeCallbacks: Array<() => void> = [
+    () => approvalManager.close(),
+    () => notificationManager.close(),
+    () => operationalMemory.close(),
+    () => autonomyEngine.runStore.close(),
+    () => {
+      if (
+        auditStore &&
+        "close" in auditStore &&
+        typeof (auditStore as any).close === "function"
+      ) {
+        (auditStore as any).close();
+      }
+    },
+  ];
+
   const apiHandler = new OperatorApiHandler(
     receiver,
     undefined,
     identityStoreForApi,
     sharedHealthProvider,
+    closeCallbacks,
   );
   for (const [t, oId] of Object.entries(tokenMap)) {
     apiHandler.registerBearerToken(t, oId);

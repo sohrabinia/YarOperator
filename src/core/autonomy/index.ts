@@ -583,7 +583,12 @@ export class DurableAutonomyRunStore {
   }
 
   public close(): void {
-    this.db.close();
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+      this.db = null;
+    }
   }
 }
 
