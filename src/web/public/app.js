@@ -55,7 +55,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function checkHealthStatus() {
     try {
-      const res = await fetch("/health", { method: "GET" });
+      const res = await fetch("/health", {
+        method: "GET",
+        credentials: "same-origin",
+      });
       if (res.ok) {
         const data = await res.json();
         const healthStatus = data.health ? data.health.status : null;
@@ -85,11 +88,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function checkAuthSession() {
     try {
-      const res = await fetch("/auth/me", { method: "GET" });
+      const res = await fetch("/auth/me", {
+        method: "GET",
+        credentials: "same-origin",
+      });
       const data = await res.json();
 
       if (data.authenticated && data.user) {
         currentUser = data.user;
+        if (currentUser.token) {
+          sessionStorage.setItem("yo_bearer_token", currentUser.token);
+        }
         if (loginBtn) loginBtn.classList.add("hidden");
         if (userBadge) userBadge.classList.remove("hidden");
         if (userEmail) userEmail.textContent = currentUser.email;
@@ -98,6 +107,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       } else {
         currentUser = null;
+        sessionStorage.removeItem("yo_bearer_token");
         if (loginBtn) loginBtn.classList.remove("hidden");
         if (userBadge) userBadge.classList.add("hidden");
       }
@@ -109,7 +119,11 @@ document.addEventListener("DOMContentLoaded", () => {
   if (logoutBtn) {
     logoutBtn.addEventListener("click", async () => {
       try {
-        await fetch("/auth/logout", { method: "POST" });
+        await fetch("/auth/logout", {
+          method: "POST",
+          credentials: "same-origin",
+        });
+        sessionStorage.removeItem("yo_bearer_token");
         window.location.reload();
       } catch (err) {
         alert("خطا در خروج از حساب کاربری.");
@@ -138,11 +152,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       // 2. Submit request to POST /api/v1/operator/chat
+      const token = sessionStorage.getItem("yo_bearer_token") || (currentUser && currentUser.token) || "";
+      const headers = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const response = await fetch("/api/v1/operator/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers,
+        credentials: "same-origin",
         body: JSON.stringify({
           workspaceId: "yartrader",
           environmentId: "env_yartrader",

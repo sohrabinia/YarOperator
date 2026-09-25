@@ -373,4 +373,115 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     expect(apiData.result.accepted).toBe(true);
     expect(apiData.result.status).toBe("BLOCKED");
   });
+
+  it("12. Missing Authorization header and missing session cookie is rejected with 401 Unauthorized", async () => {
+    const apiRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "development",
+          rawCommandText: "دستور بدون احراز هویّت",
+        }),
+      },
+    );
+
+    expect(apiRes.status).toBe(401);
+    const apiData = (await apiRes.json()) as any;
+    expect(apiData.success).toBe(false);
+    expect(apiData.error).toContain("Missing or invalid Bearer token format");
+  });
+
+  it("13. Malformed Bearer token is rejected with 401 Unauthorized", async () => {
+    const apiRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Basic invalid_format_token",
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "development",
+          rawCommandText: "دستور با توکن نادرست",
+        }),
+      },
+    );
+
+    expect(apiRes.status).toBe(401);
+    const apiData = (await apiRes.json()) as any;
+    expect(apiData.success).toBe(false);
+    expect(apiData.error).toContain("Missing or invalid Bearer token format");
+  });
+
+  it("14. Invalid/non-existent Bearer token is rejected with 401 Unauthorized", async () => {
+    const apiRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer non_existent_token_xyz_999",
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "development",
+          rawCommandText: "دستور با توکن نامعتبر",
+        }),
+      },
+    );
+
+    expect(apiRes.status).toBe(401);
+    const apiData = (await apiRes.json()) as any;
+    expect(apiData.success).toBe(false);
+    expect(apiData.error).toContain("Invalid or expired Bearer token");
+  });
+
+  it("15. Revoked session token is rejected with 401 Unauthorized", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+    server.revokeSession(session.sessionId);
+
+    const apiRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.sessionId}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "development",
+          rawCommandText: "دستور با نشست باطل‌شده",
+        }),
+      },
+    );
+
+    expect(apiRes.status).toBe(401);
+    const apiData = (await apiRes.json()) as any;
+    expect(apiData.success).toBe(false);
+    expect(apiData.error).toContain("Invalid or expired Bearer token");
+  });
+
+  it("16. Rehydration endpoint /auth/me returns session token for Bearer rehydration", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    const meRes = await fetch(`http://127.0.0.1:${serverPort}/auth/me`, {
+      headers: {
+        Cookie: `yo_session=${session.sessionId}`,
+      },
+    });
+
+    expect(meRes.status).toBe(200);
+    const meData = (await meRes.json()) as any;
+    expect(meData.authenticated).toBe(true);
+    expect(meData.user.email).toBe(AUTHORIZED_EMAIL);
+    expect(meData.user.ownerId).toBeDefined();
+    expect(meData.user.token).toBe(session.sessionId);
+  });
 });

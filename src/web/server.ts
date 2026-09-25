@@ -787,6 +787,7 @@ export class OperatorWebServer {
             email: session.email,
             ownerId: session.ownerId,
             expiresAt: new Date(session.expiresAt).toISOString(),
+            token: session.sessionId,
           },
         }),
       );
