@@ -28,7 +28,7 @@ export class CapabilityReporter {
   public static generateReport(
     registry: ToolRegistry,
     policyEngine?: PolicyEngine,
-    yarTraderAvailable: boolean = false,
+    overrideAvailability?: Record<string, boolean>,
   ): {
     tools: ToolCapabilityReportItem[];
     formattedReport: string;
@@ -42,25 +42,34 @@ export class CapabilityReporter {
 
     for (const tool of registeredTools) {
       const id = tool.metadata.id;
-      const rule: string =
-        policyEngine?.getRule(id) || tool.metadata.safetyLevel || "SAFE";
+      const toolRules = policyEngine
+        ? policyEngine.getRulesForTool(id)
+        : new Map<string, string>();
 
       let status: "AVAILABLE" | "UNAVAILABLE" = "AVAILABLE";
-      if (id === "yartrader_adapter" && !yarTraderAvailable) {
-        status = "UNAVAILABLE";
+
+      if (overrideAvailability && id in overrideAvailability) {
+        status = overrideAvailability[id] ? "AVAILABLE" : "UNAVAILABLE";
+      } else if (typeof (tool as any).isAvailable === "function") {
+        try {
+          status = (tool as any).isAvailable() ? "AVAILABLE" : "UNAVAILABLE";
+        } catch {
+          status = "UNAVAILABLE";
+        }
       }
 
-      let policyStr: string = rule;
-      if (id === "yartrader_adapter") {
-        policyStr =
-          "SAFE (پایش) / APPROVAL_REQUIRED (تغییرات) / BLOCKED (معاملات زنده)";
-      } else if (id === "github_operate") {
-        policyStr =
-          "SAFE (مشاهده) / APPROVAL_REQUIRED (ساخت PR) / BLOCKED (ادغام)";
-      } else if (id === "git_operate") {
-        policyStr = "SAFE (وضعیت) / APPROVAL_REQUIRED (کامیت/پوش)";
-      } else if (id === "browser_operate") {
-        policyStr = "SAFE (پیمایش) / APPROVAL_REQUIRED (فرم)";
+      let policyStr = "";
+      if (toolRules.size > 0) {
+        const parts: string[] = [];
+        for (const [actionKey, level] of toolRules.entries()) {
+          const subAction = actionKey.includes(":")
+            ? actionKey.split(":")[1]
+            : actionKey;
+          parts.push(`${subAction}: ${level}`);
+        }
+        policyStr = parts.join(", ");
+      } else {
+        policyStr = tool.metadata.safetyLevel || "SAFE";
       }
 
       toolReports.push({
@@ -72,7 +81,7 @@ export class CapabilityReporter {
       });
 
       lines.push(
-        `- ${id}: ثبت شده | وضعیت: ${status} | سطح دسترسی: ${policyStr}`,
+        `- ${id} (${tool.metadata.name}): ثبت شده | وضعیت: ${status} | قوانین دسترسی: ${policyStr}`,
       );
     }
 

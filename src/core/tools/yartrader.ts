@@ -50,16 +50,21 @@ export class YarTraderTool implements Tool<
 
   private resourceResolver?: ResourceResolver;
   private overrideBaseUrl?: string;
+  private overrideSecret?: string;
 
   constructor(options?: {
     resourceResolver?: ResourceResolver;
     baseUrl?: string;
+    secret?: string;
   }) {
     if (options?.resourceResolver) {
       this.resourceResolver = options.resourceResolver;
     }
     if (options?.baseUrl) {
       this.overrideBaseUrl = options.baseUrl;
+    }
+    if (options?.secret) {
+      this.overrideSecret = options.secret;
     }
   }
 
@@ -71,9 +76,32 @@ export class YarTraderTool implements Tool<
     this.overrideBaseUrl = url;
   }
 
+  public setSecret(secret: string): void {
+    this.overrideSecret = secret;
+  }
+
+  public isAvailable(): boolean {
+    const secret = this.resolveSecret();
+    const urlRes = this.resolveYarTraderBaseUrl();
+    return Boolean(secret && urlRes.baseUrl);
+  }
+
   resolveCanonicalAction(params?: YarTraderToolParams): string {
     const act = params?.action || "health";
     return `yartrader_adapter:${act}`;
+  }
+
+  private resolveSecret(): string | null {
+    if (this.overrideSecret) {
+      return this.overrideSecret;
+    }
+    if (process.env.OPERATOR_YARTRADER_SECRET) {
+      return process.env.OPERATOR_YARTRADER_SECRET;
+    }
+    if (process.env.OPERATOR_YARTRADER_TOKEN) {
+      return process.env.OPERATOR_YARTRADER_TOKEN;
+    }
+    return null;
   }
 
   private resolveAllowedOrigins(): string[] {
@@ -166,7 +194,24 @@ export class YarTraderTool implements Tool<
       };
     }
 
-    // 2. Resolve & Validate YarTrader Destination Base URL against Authoritative Allowlist
+    // 2. Server-Side Secret / Credential Verification
+    const secret = this.resolveSecret();
+    if (!secret) {
+      return {
+        success: false,
+        error:
+          "YarTrader connection UNAVAILABLE: Server-side authentication secret (OPERATOR_YARTRADER_SECRET) is not configured.",
+        output: {
+          status: "UNAVAILABLE",
+          capability: action,
+          timestamp,
+          message:
+            "YarTrader authenticated connection is not configured; capability remains UNAVAILABLE.",
+        },
+      };
+    }
+
+    // 3. Resolve & Validate YarTrader Destination Base URL against Authoritative Allowlist
     const urlResolution = this.resolveYarTraderBaseUrl(params);
     if (!urlResolution.baseUrl) {
       return {
@@ -190,7 +235,7 @@ export class YarTraderTool implements Tool<
       2000,
     );
 
-    // 3. Endpoint Route Resolution
+    // 4. Endpoint Route Resolution
     const isMutation = [
       "restart_service",
       "stop_service",
@@ -223,17 +268,40 @@ export class YarTraderTool implements Tool<
 
     const targetUrl = `${baseUrl.replace(/\/$/, "")}${endpointPath}`;
 
-    // 4. Issue Bounded Request (GET for reads, POST for mutations)
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${secret}`,
+      "X-YarTrader-Secret": secret,
+    };
+
+    // 5. Issue Bounded Authenticated Request (GET for reads, POST for mutations)
     const probeRes = isMutation
       ? await httpProbe.request(targetUrl, {
           method: "POST",
+          headers,
           body: JSON.stringify({
             action,
             serviceName: params.serviceName,
             configPatch: params.configPatch,
           }),
         })
-      : await httpProbe.get(targetUrl);
+      : await httpProbe.request(targetUrl, {
+          method: "GET",
+          headers,
+        });
+
+    if (probeRes.statusCode === 401 || probeRes.statusCode === 403) {
+      return {
+        success: false,
+        error: `YarTrader connection DENIED: Authentication failed against YarTrader endpoint (HTTP ${probeRes.statusCode}).`,
+        output: {
+          status: "UNAVAILABLE",
+          capability: action,
+          timestamp,
+          message:
+            "YarTrader credentials invalid or rejected by remote endpoint.",
+        },
+      };
+    }
 
     if (!probeRes.success || !probeRes.body) {
       return {
@@ -248,7 +316,7 @@ export class YarTraderTool implements Tool<
       };
     }
 
-    // 5. Parse and Return Real Unfabricated YarTrader Payload
+    // 6. Parse and Return Real Unfabricated YarTrader Payload
     let parsedDetails: Record<string, unknown> = {};
     try {
       parsedDetails = JSON.parse(probeRes.body);

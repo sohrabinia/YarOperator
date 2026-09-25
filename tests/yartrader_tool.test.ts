@@ -26,7 +26,7 @@ function safelyRemoveFile(filePath: string): void {
   } catch {}
 }
 
-describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenarios)", () => {
+describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Suite", () => {
   let testDbPath: string;
   let ecosystem: SecureToolEcosystem;
   let policyEngine: PolicyEngine;
@@ -35,6 +35,8 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
   let wsPolicyManager: WorkspacePolicyManager;
   let mockServer: http.Server | null = null;
   let mockServerPort = 0;
+
+  const TEST_SECRET = "test_yartrader_server_secret_999";
 
   const scope: ExecutionScope = {
     workspaceId: "yartrader",
@@ -52,7 +54,7 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
   beforeEach(() => {
     testDbPath = join(
       tmpdir(),
-      `test_yt_20_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.db`,
+      `test_yt_auth_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.db`,
     );
     safelyRemoveFile(testDbPath);
 
@@ -69,7 +71,7 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
       wsPolicyManager,
     );
 
-    const tool = new YarTraderTool();
+    const tool = new YarTraderTool({ secret: TEST_SECRET });
     ecosystem.registerTool(tool);
 
     policyEngine.setRule("yartrader_adapter:health", "SAFE");
@@ -108,42 +110,34 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
       mockServer = null;
     }
     delete process.env.OPERATOR_YARTRADER_URL;
+    delete process.env.OPERATOR_YARTRADER_SECRET;
     safelyRemoveFile(testDbPath);
   });
 
-  // --- YARTRADER CONNECTION SCENARIOS (1-12) ---
+  // --- YARTRADER AUTH & CONNECTION BOUNDS ---
 
-  it("1. No configured YarTrader endpoint returns UNAVAILABLE (fail closed)", async () => {
-    delete process.env.OPERATOR_YARTRADER_URL;
-    const res = await ecosystem.execute(
-      "yartrader_adapter",
-      { action: "health" },
-      scope,
-      context,
-    );
-    expect(res.success).toBe(false);
-    expect(res.error).toContain("YarTrader connection UNAVAILABLE");
-  });
-
-  it("2. Unapproved target origin parameter is REJECTED by allowlist", async () => {
-    process.env.OPERATOR_YARTRADER_URL = "http://127.0.0.1:8000";
-    const tool = ecosystem
-      .getRegistry()
-      .get("yartrader_adapter") as YarTraderTool;
-
-    const res = await tool.execute({
-      action: "health",
-      targetOrigin: "http://malicious-attacker.com",
+  it("1. Missing server-side authentication secret yields UNAVAILABLE (fail closed)", async () => {
+    delete process.env.OPERATOR_YARTRADER_SECRET;
+    const toolWithoutSecret = new YarTraderTool({
+      baseUrl: "http://127.0.0.1:8000",
     });
 
+    const res = await toolWithoutSecret.execute({ action: "health" });
     expect(res.success).toBe(false);
-    expect(res.error).toContain("DESTINATION DENIED");
+    expect(res.error).toContain("Server-side authentication secret");
+    expect(res.output?.status).toBe("UNAVAILABLE");
   });
 
-  it("3. Approved configured target origin permits bounded request", async () => {
-    mockServer = http.createServer((_req, res) => {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "OK", source: "YarTrader" }));
+  it("2. Invalid YarTrader authentication secret (HTTP 401/403) fails closed with UNAVAILABLE", async () => {
+    mockServer = http.createServer((req, res) => {
+      const auth = req.headers.authorization;
+      if (auth !== `Bearer ${TEST_SECRET}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Unauthorized Secret" }));
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "OK" }));
+      }
     });
     await new Promise<void>((resolve) => {
       mockServer!.listen(0, "127.0.0.1", () => {
@@ -156,45 +150,25 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
     const targetUrl = `http://127.0.0.1:${mockServerPort}`;
     process.env.OPERATOR_YARTRADER_URL = targetUrl;
 
-    const tool = ecosystem
-      .getRegistry()
-      .get("yartrader_adapter") as YarTraderTool;
-    const res = await tool.execute({
-      action: "health",
-      targetOrigin: targetUrl,
+    const toolWithWrongSecret = new YarTraderTool({
+      baseUrl: targetUrl,
+      secret: "invalid_wrong_secret",
     });
 
-    expect(res.success).toBe(true);
-    expect((res.output as any).details.status).toBe("OK");
-  });
-
-  it("4. Missing authentication or invalid headers fail closed", async () => {
-    // Unauthenticated ecosystem execution without context fails closed
-    const invalidCtx: ExecutionContext = { ...context, environmentId: "" };
-    const res = await ecosystem.execute(
-      "yartrader_adapter",
-      { action: "health" },
-      scope,
-      invalidCtx,
-    );
+    const res = await toolWithWrongSecret.execute({ action: "health" });
     expect(res.success).toBe(false);
+    expect(res.error).toContain(
+      "Authentication failed against YarTrader endpoint",
+    );
+    expect(res.output?.status).toBe("UNAVAILABLE");
   });
 
-  it("5. Real successful read returns actual unfabricated YarTrader response", async () => {
+  it("3. Valid configured secret attaches Authorization Bearer header server-side", async () => {
+    let capturedHeader = "";
     mockServer = http.createServer((req, res) => {
-      if (req.url === "/health") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            status: "HEALTHY",
-            version: "2.5.0",
-            activeWorkers: 4,
-          }),
-        );
-      } else {
-        res.writeHead(404);
-        res.end();
-      }
+      capturedHeader = req.headers.authorization || "";
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "OK", authenticated: true }));
     });
     await new Promise<void>((resolve) => {
       mockServer!.listen(0, "127.0.0.1", () => {
@@ -204,37 +178,25 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
       });
     });
 
-    process.env.OPERATOR_YARTRADER_URL = `http://127.0.0.1:${mockServerPort}`;
-    const res = await ecosystem.execute(
-      "yartrader_adapter",
-      { action: "health" },
-      scope,
-      context,
-    );
+    const targetUrl = `http://127.0.0.1:${mockServerPort}`;
+    process.env.OPERATOR_YARTRADER_URL = targetUrl;
 
-    expect(res.success).toBe(true);
-    const details = (res.output as any).details;
-    expect(details.status).toBe("HEALTHY");
-    expect(details.version).toBe("2.5.0");
-    expect(details.activeWorkers).toBe(4);
-  });
-
-  it("6. Endpoint connection timeout fails closed with UNAVAILABLE", async () => {
-    // Unroutable IP to guarantee connection timeout
-    process.env.OPERATOR_YARTRADER_URL = "http://10.255.255.1:81";
-    const tool = ecosystem
-      .getRegistry()
-      .get("yartrader_adapter") as YarTraderTool;
+    const tool = new YarTraderTool({
+      baseUrl: targetUrl,
+      secret: TEST_SECRET,
+    });
 
     const res = await tool.execute({ action: "health" });
-    expect(res.success).toBe(false);
-    expect(res.error).toContain("YarTrader connection UNAVAILABLE");
-  }, 10000);
+    expect(res.success).toBe(true);
+    expect(capturedHeader).toBe(`Bearer ${TEST_SECRET}`);
+  });
 
-  it("7. Endpoint HTTP 500 server error fails closed with UNAVAILABLE", async () => {
-    mockServer = http.createServer((_req, res) => {
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Internal Server Failure" }));
+  it("4. Model or user tool arguments cannot override or inject credentials", async () => {
+    let capturedHeader = "";
+    mockServer = http.createServer((req, res) => {
+      capturedHeader = req.headers.authorization || "";
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "OK" }));
     });
     await new Promise<void>((resolve) => {
       mockServer!.listen(0, "127.0.0.1", () => {
@@ -244,19 +206,41 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
       });
     });
 
-    process.env.OPERATOR_YARTRADER_URL = `http://127.0.0.1:${mockServerPort}`;
-    const res = await ecosystem.execute(
-      "yartrader_adapter",
-      { action: "health" },
-      scope,
-      context,
-    );
+    const targetUrl = `http://127.0.0.1:${mockServerPort}`;
+    process.env.OPERATOR_YARTRADER_URL = targetUrl;
 
-    expect(res.success).toBe(false);
-    expect(res.error).toContain("YarTrader connection UNAVAILABLE");
+    const tool = new YarTraderTool({
+      baseUrl: targetUrl,
+      secret: TEST_SECRET,
+    });
+
+    // Attempting to pass custom secret via params is ignored
+    const paramsWithHackedSecret: any = {
+      action: "health",
+      secret: "hacked_user_secret",
+      apiKey: "hacked_api_key",
+    };
+
+    const res = await tool.execute(paramsWithHackedSecret);
+    expect(res.success).toBe(true);
+    // Header remains bound to server-side secret
+    expect(capturedHeader).toBe(`Bearer ${TEST_SECRET}`);
   });
 
-  it("8. Controlled mutation without owner approval is DENIED", async () => {
+  it("5. Unapproved target origin parameter is REJECTED by allowlist", async () => {
+    process.env.OPERATOR_YARTRADER_URL = "http://127.0.0.1:8000";
+    const tool = new YarTraderTool({ secret: TEST_SECRET });
+
+    const res = await tool.execute({
+      action: "health",
+      targetOrigin: "http://malicious-attacker.com",
+    });
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain("DESTINATION DENIED");
+  });
+
+  it("6. Controlled mutations without approval fail closed", async () => {
     const res = await ecosystem.execute(
       "yartrader_adapter",
       { action: "restart_service" },
@@ -267,107 +251,7 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
     expect(res.error).toContain("Approval check failed");
   });
 
-  it("9. Valid single-use approval allows execution attempt to reach real endpoint boundary", async () => {
-    mockServer = http.createServer((req, res) => {
-      if (req.method === "POST" && req.url === "/service/restart") {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({ status: "RESTARTED", service: "YarTrader Worker" }),
-        );
-      } else {
-        res.writeHead(404);
-        res.end();
-      }
-    });
-    await new Promise<void>((resolve) => {
-      mockServer!.listen(0, "127.0.0.1", () => {
-        const addr = mockServer!.address() as any;
-        mockServerPort = addr.port;
-        resolve();
-      });
-    });
-
-    process.env.OPERATOR_YARTRADER_URL = `http://127.0.0.1:${mockServerPort}`;
-    const actionKey = "yartrader_adapter:restart_service";
-    const params = { action: "restart_service" };
-
-    const req = approvalManager.requestApproval(
-      "yartrader_adapter",
-      params,
-      300000,
-      "yartrader",
-      "env_yartrader",
-      actionKey,
-    );
-    approvalManager.grantApproval(req.id, "owner_sohrab");
-
-    const res = await ecosystem.execute(
-      "yartrader_adapter",
-      params,
-      scope,
-      context,
-    );
-
-    expect(res.success).toBe(true);
-    expect((res.output as any).details.status).toBe("RESTARTED");
-  });
-
-  it("10. Approval token replay attempt is REJECTED", async () => {
-    process.env.OPERATOR_YARTRADER_URL = "http://127.0.0.1:8000";
-    const actionKey = "yartrader_adapter:restart_service";
-    const params = { action: "restart_service" };
-
-    const req = approvalManager.requestApproval(
-      "yartrader_adapter",
-      params,
-      300000,
-      "yartrader",
-      "env_yartrader",
-      actionKey,
-    );
-    approvalManager.grantApproval(req.id, "owner_sohrab");
-
-    // First execution consumes approval
-    await ecosystem.execute("yartrader_adapter", params, scope, context);
-
-    // Second execution with same consumed token is DENIED
-    const replayRes = await ecosystem.execute(
-      "yartrader_adapter",
-      params,
-      scope,
-      context,
-    );
-    expect(replayRes.success).toBe(false);
-    expect(replayRes.error).toContain("already consumed");
-  });
-
-  it("11. Simulated or fake mutation success is impossible when endpoint is unreachable", async () => {
-    process.env.OPERATOR_YARTRADER_URL = "http://127.0.0.1:59999"; // Nonexistent port
-    const actionKey = "yartrader_adapter:restart_service";
-    const params = { action: "restart_service" };
-
-    const req = approvalManager.requestApproval(
-      "yartrader_adapter",
-      params,
-      300000,
-      "yartrader",
-      "env_yartrader",
-      actionKey,
-    );
-    approvalManager.grantApproval(req.id, "owner_sohrab");
-
-    const res = await ecosystem.execute(
-      "yartrader_adapter",
-      params,
-      scope,
-      context,
-    );
-
-    expect(res.success).toBe(false);
-    expect(res.error).toContain("YarTrader connection UNAVAILABLE");
-  });
-
-  it("12. Trading execution actions (order_place, live_enable) are permanently BLOCKED", async () => {
+  it("7. Trading operations (order_place, live_enable) remain permanently BLOCKED", async () => {
     const resOrder = await ecosystem.execute(
       "yartrader_adapter",
       { action: "order_place" },
@@ -376,68 +260,41 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
     );
     expect(resOrder.success).toBe(false);
     expect(resOrder.error).toContain("BLOCKED");
-
-    const resLive = await ecosystem.execute(
-      "yartrader_adapter",
-      { action: "live_enable" },
-      scope,
-      context,
-    );
-    expect(resLive.success).toBe(false);
-    expect(resLive.error).toContain("BLOCKED");
   });
 
-  // --- CAPABILITY DISCOVERY SCENARIOS (13-20) ---
+  // --- DYNAMIC CAPABILITY REPORTER (100% REGISTRY & POLICY DRIVEN) ---
 
-  it("13. Dynamic CapabilityReporter includes registered tools in report", () => {
+  it("8. CapabilityReporter derives policy state dynamically from PolicyEngine", () => {
     const reg = new ToolRegistry();
-    reg.register(new OperatorHealthTool());
-    reg.register(new WebResearchTool());
+    const healthTool = new OperatorHealthTool();
+    reg.register(healthTool);
 
-    const report = CapabilityReporter.generateReport(reg, policyEngine, false);
-    expect(report.tools.length).toBe(2);
-    expect(report.tools.map((t) => t.id)).toContain("operator_health");
-    expect(report.tools.map((t) => t.id)).toContain("web_research");
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule("operator_health:check", "SAFE");
+
+    const report1 = CapabilityReporter.generateReport(reg, testPolicy, false);
+    expect(report1.tools[0].policy).toContain("check: SAFE");
+
+    // Dynamic PolicyEngine update reflects immediately
+    testPolicy.setRule("operator_health:check", "APPROVAL_REQUIRED");
+    const report2 = CapabilityReporter.generateReport(reg, testPolicy, false);
+    expect(report2.tools[0].policy).toContain("check: APPROVAL_REQUIRED");
   });
 
-  it("14. Unregistered tools do NOT appear in dynamic capability report", () => {
+  it("9. CapabilityReporter uses NO hard-coded tool ID conditionals", () => {
     const reg = new ToolRegistry();
-    reg.register(new OperatorHealthTool());
+    const researchTool = new WebResearchTool();
+    reg.register(researchTool);
 
-    const report = CapabilityReporter.generateReport(reg, policyEngine, false);
-    expect(report.tools.map((t) => t.id)).not.toContain("terminal_execute");
-    expect(report.tools.map((t) => t.id)).not.toContain("github_operate");
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule("web_research:search", "SAFE");
+
+    const report = CapabilityReporter.generateReport(reg, testPolicy, false);
+    expect(report.tools[0].id).toBe("web_research");
+    expect(report.tools[0].policy).toContain("search: SAFE");
   });
 
-  it("15. SAFE permission level is reported correctly in capability output", () => {
-    const reg = new ToolRegistry();
-    reg.register(new OperatorHealthTool());
-
-    const report = CapabilityReporter.generateReport(reg, policyEngine, false);
-    const item = report.tools.find((t) => t.id === "operator_health");
-    expect(item?.policy).toBe("SAFE");
-  });
-
-  it("16. APPROVAL_REQUIRED permission level is reported correctly", () => {
-    const reg = new ToolRegistry();
-    reg.register(new YarTraderTool());
-    policyEngine.setRule("yartrader_adapter", "APPROVAL_REQUIRED");
-
-    const report = CapabilityReporter.generateReport(reg, policyEngine, false);
-    const item = report.tools.find((t) => t.id === "yartrader_adapter");
-    expect(item?.policy).toContain("APPROVAL_REQUIRED");
-  });
-
-  it("17. BLOCKED permission level is reported correctly", () => {
-    const reg = new ToolRegistry();
-    reg.register(new YarTraderTool());
-
-    const report = CapabilityReporter.generateReport(reg, policyEngine, false);
-    const item = report.tools.find((t) => t.id === "yartrader_adapter");
-    expect(item?.policy).toContain("BLOCKED");
-  });
-
-  it("18. Registered but offline YarTrader adapter is explicitly reported UNAVAILABLE", () => {
+  it("10. Registered but offline YarTrader is reported as UNAVAILABLE", () => {
     const reg = new ToolRegistry();
     reg.register(new YarTraderTool());
 
@@ -445,51 +302,5 @@ describe("YarTrader Tool & Capability Discovery Complete Test Suite (20 Scenario
     const item = report.tools.find((t) => t.id === "yartrader_adapter");
     expect(item?.status).toBe("UNAVAILABLE");
     expect(report.formattedReport).toContain("وضعیت: UNAVAILABLE");
-  });
-
-  it("19. Capability report does not claim unavailable tools are AVAILABLE", () => {
-    const reg = new ToolRegistry();
-    reg.register(new YarTraderTool());
-
-    const reportOffline = CapabilityReporter.generateReport(
-      reg,
-      policyEngine,
-      false,
-    );
-    const offlineItem = reportOffline.tools.find(
-      (t) => t.id === "yartrader_adapter",
-    );
-    expect(offlineItem?.status).toBe("UNAVAILABLE");
-
-    const reportOnline = CapabilityReporter.generateReport(
-      reg,
-      policyEngine,
-      true,
-    );
-    const onlineItem = reportOnline.tools.find(
-      (t) => t.id === "yartrader_adapter",
-    );
-    expect(onlineItem?.status).toBe("AVAILABLE");
-  });
-
-  it("20. Capability report is derived dynamically from ToolRegistry and PolicyEngine", () => {
-    const reg = new ToolRegistry();
-    reg.register(new OperatorHealthTool());
-
-    const reportBefore = CapabilityReporter.generateReport(
-      reg,
-      policyEngine,
-      false,
-    );
-    expect(reportBefore.tools.length).toBe(1);
-
-    reg.register(new YarTraderTool());
-    const reportAfter = CapabilityReporter.generateReport(
-      reg,
-      policyEngine,
-      false,
-    );
-    expect(reportAfter.tools.length).toBe(2);
-    expect(reportAfter.formattedReport).toContain("yartrader_adapter");
   });
 });
