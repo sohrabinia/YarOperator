@@ -429,20 +429,8 @@ export class OperatorApiHandler {
         timestamp: new Date().toISOString(),
       };
 
-      const effectiveContext: ExecutionContext = {
-        ...(context || {}),
-        executionId: commandId,
-        timestamp: new Date(),
-        workspaceId,
-        environmentId: resolvedEnvironmentId,
-        authToken: token,
-      } as any;
-
       const receiverResult: OwnerCommandResult =
-        await this.commandReceiver.receiveCommand(
-          commandInput,
-          effectiveContext,
-        );
+        await this.commandReceiver.receiveCommand(commandInput, context);
 
       if (!receiverResult.accepted) {
         return {

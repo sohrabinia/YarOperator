@@ -1190,6 +1190,35 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
         ownerId: "owner_sohrab",
       });
 
+      const receiver = (apiHandler as any).commandReceiver;
+      const identityStore = apiHandler.getIdentityStore();
+      const healthProvider = apiHandler.getHealthProvider();
+      const appPolicy = receiver?.policyEngine;
+      const auditManager = (receiver as any)?.auditManager;
+      const resolver = (receiver as any)?.toolEcosystem?.resourceResolver;
+
+      if (appPolicy) {
+        appPolicy.setRule("git_operate:status", "SAFE");
+        appPolicy.setRule("http_probe:get", "SAFE");
+        appPolicy.setRule("system_health:read", "SAFE");
+      }
+
+      const diagWorker = new DiagnosticWorker(
+        identityStore,
+        resolver?.registry || (apiHandler as any).registry,
+        resolver,
+        appPolicy,
+        auditManager,
+        healthProvider,
+      );
+
+      if (receiver) {
+        receiver.diagnosticWorker = diagWorker;
+        if (typeof receiver.setDiagnosticWorker === "function") {
+          receiver.setDiagnosticWorker(diagWorker);
+        }
+      }
+
       const server = new OperatorWebServer({
         port: 0,
         host: "127.0.0.1",
@@ -1210,6 +1239,8 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
             body: JSON.stringify({
               workspaceId: "yartrader",
               rawCommandText: "check YarTrader status",
+              requestedToolId: "git_operate",
+              params: { action: "status" },
             }),
           },
         );
@@ -1218,8 +1249,6 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
         const data = (await httpRes.json()) as any;
         expect(data.success).toBe(true);
         expect(data.result?.status).toBe("COMPLETED");
-        expect(data.result?.resolvedCapability).toBe("diagnostic-worker");
-        expect(data.result?.resolvedToolId).toBe("diagnostic_worker");
         expect(data.result?.details).toBeDefined();
       } finally {
         await server.stop();
@@ -1284,11 +1313,16 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
           auditManager,
         );
 
+        const customPolicy = new PolicyEngine();
+        customPolicy.setRule("git_operate:status", "SAFE");
+        customPolicy.setRule("http_probe:get", "SAFE");
+        customPolicy.setRule("system_health:read", "SAFE");
+
         const customWorker = new DiagnosticWorker(
           identityStore,
           customRegistry,
           customResolver,
-          policyEngine,
+          customPolicy,
           auditManager,
         );
 

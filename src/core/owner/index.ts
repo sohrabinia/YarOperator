@@ -8,11 +8,6 @@ import { ExecutionContext, Brain, BrainInput } from "../contracts/index.js";
 import { DeterministicBrain } from "../brain/index.js";
 import { AgentOrchestrator } from "../orchestrator/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
-import { DiagnosticWorker } from "../diagnostic/index.js";
-import { IdentityStore } from "../identity/index.js";
-import { ResourceRegistry } from "../registry/resource.js";
-import { ResourceResolver } from "../registry/resolver.js";
-import { SystemHealthProvider } from "../tools/health.js";
 
 export type CommunicationNotificationPreference =
   "IMMEDIATE" | "BATCHED" | "SILENT";
@@ -206,8 +201,6 @@ export class IntentBoundary {
 }
 
 export class OwnerCommandReceiver {
-  private diagnosticWorker?: DiagnosticWorker;
-
   constructor(
     private ownerManager: OwnerManager,
     private policyEngine: PolicyEngine,
@@ -216,26 +209,7 @@ export class OwnerCommandReceiver {
     private orchestrator?: AgentOrchestrator,
     private toolEcosystem?: SecureToolEcosystem,
     private brain: Brain = new DeterministicBrain(),
-    identityStore?: IdentityStore,
-    resourceRegistry?: ResourceRegistry,
-    resourceResolver?: ResourceResolver,
-    healthProvider?: SystemHealthProvider,
-  ) {
-    if (identityStore && resourceRegistry && resourceResolver && auditManager) {
-      this.diagnosticWorker = new DiagnosticWorker(
-        identityStore,
-        resourceRegistry,
-        resourceResolver,
-        policyEngine,
-        auditManager,
-        healthProvider,
-      );
-    }
-  }
-
-  public setDiagnosticWorker(worker: DiagnosticWorker): void {
-    this.diagnosticWorker = worker;
-  }
+  ) {}
 
   public async receiveCommand(
     input: OwnerCommandInput,
@@ -294,59 +268,6 @@ export class OwnerCommandReceiver {
       workspaceId: input.workspaceId,
       environmentId: resolvedEnvId,
     };
-
-    // Check if this command text is a Diagnostic Worker intent
-    if (
-      this.diagnosticWorker &&
-      this.diagnosticWorker.isDiagnosticIntent(preservedText)
-    ) {
-      const token = (context as any)?.authToken || "";
-      const diagResult = await this.diagnosticWorker.executeDiagnostics(
-        {
-          token,
-          workspaceId: input.workspaceId,
-          rawCommandText: preservedText,
-        },
-        context,
-      );
-
-      if (!diagResult.success) {
-        return {
-          commandId: input.commandId,
-          accepted: false,
-          reason: diagResult.error || "Diagnostic execution denied.",
-          commandTextPreserved: preservedText,
-        };
-      }
-
-      const isReportOk =
-        diagResult.report?.summaryStatus === "OK" ||
-        diagResult.report?.summaryStatus === "UNAVAILABLE";
-
-      return {
-        commandId: input.commandId,
-        accepted: true,
-        commandTextPreserved: preservedText,
-        resolvedCapability: "diagnostic-worker",
-        resolvedToolId: "diagnostic_worker",
-        assistantResult: {
-          goalId: input.commandId,
-          workspaceId: input.workspaceId,
-          success: true,
-          executedSteps: [
-            {
-              stepId: `step_diag_${input.commandId}`,
-              toolId: "diagnostic_worker",
-              params: input.params || {},
-              policyDecision: "SAFE",
-              status: "EXECUTED",
-              result: diagResult.report,
-            },
-          ],
-          evidence: (diagResult.report as any) || undefined,
-        },
-      };
-    }
 
     const brainResult = await this.brain.interpret(brainInput);
 

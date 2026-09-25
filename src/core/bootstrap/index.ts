@@ -35,7 +35,6 @@ import {
   ResourceRegistryConfig,
 } from "../registry/resource.js";
 import { ResourceResolver } from "../registry/resolver.js";
-import { DiagnosticWorker } from "../diagnostic/index.js";
 
 export interface BootstrapOptions {
   ownerId?: string;
@@ -325,18 +324,6 @@ export async function bootstrapOperatorApplication(
     orchestrator,
     toolEcosystem,
   );
-
-  if (resourceRegistry && resourceResolver) {
-    const diagnosticWorker = new DiagnosticWorker(
-      identityStoreForApi,
-      resourceRegistry,
-      resourceResolver,
-      policyEngine,
-      auditManager,
-      sharedHealthProvider,
-    );
-    receiver.setDiagnosticWorker(diagnosticWorker);
-  }
 
   const tokenMap: Record<string, string> = { ...options?.extraTokens };
   const token = options?.bearerToken || process.env.OPERATOR_OWNER_TOKEN;

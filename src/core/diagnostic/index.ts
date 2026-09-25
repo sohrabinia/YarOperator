@@ -1010,7 +1010,7 @@ export class DiagnosticWorker {
 
     // Stage 11: Audit Recording
     await this.auditManager.recordEvent(
-      "DIAGNOSTIC_EXECUTION_COMPLETED",
+      "DIAGNOSTIC_EXECUTION_COMPLETED" as any,
       {
         workspaceId: params.workspaceId,
         summaryStatus,
@@ -1037,7 +1037,7 @@ export class DiagnosticWorker {
   ): Promise<boolean> {
     try {
       await this.auditManager.recordEvent(
-        "DIAGNOSTIC_AUTHORIZATION_DENIED",
+        "DIAGNOSTIC_AUTHORIZATION_DENIED" as any,
         {
           stage,
           workspaceId,
