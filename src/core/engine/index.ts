@@ -1,112 +1,21 @@
 import {
   ExecutionContext,
   ExecutionState,
-  ToolRequest,
   ToolResult,
 } from "../contracts/index.js";
 import { ExecutionScope } from "../orchestrator/index.js";
 import { ToolRegistry } from "../registry/index.js";
 import { AuditLogger } from "../audit/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
-import { PolicyEngine } from "../policy/index.js";
-import { EnvironmentManager } from "../environment/index.js";
-import {
-  WorkspacePolicyManager,
-  WorkspacePolicy,
-} from "../workspace/policy.js";
-
-export interface PolicyEvaluator {
-  evaluate(
-    request: ToolRequest,
-    actionKey?: string,
-  ): Promise<{ allowed: boolean; reason?: string }>;
-}
 
 export class ExecutionEngine {
   private state: ExecutionState = "IDLE";
-  private ecosystem: SecureToolEcosystem;
 
   constructor(
     private registry: ToolRegistry,
     private auditLogger: AuditLogger,
-    policyEvaluatorOrEcosystem?: PolicyEvaluator | SecureToolEcosystem,
-    explicitEcosystem?: SecureToolEcosystem,
-  ) {
-    if (explicitEcosystem) {
-      this.ecosystem = explicitEcosystem;
-    } else if (policyEvaluatorOrEcosystem instanceof SecureToolEcosystem) {
-      this.ecosystem = policyEvaluatorOrEcosystem;
-    } else {
-      const policyEngine =
-        policyEvaluatorOrEcosystem instanceof PolicyEngine
-          ? policyEvaluatorOrEcosystem
-          : new PolicyEngine();
-
-      if (
-        policyEvaluatorOrEcosystem &&
-        !(policyEvaluatorOrEcosystem instanceof PolicyEngine)
-      ) {
-        policyEngine.evaluate = async (request, actionKey) => {
-          const evalRes = await policyEvaluatorOrEcosystem.evaluate(
-            request,
-            actionKey,
-          );
-          return {
-            allowed: evalRes.allowed,
-            safetyLevel: evalRes.allowed ? "SAFE" : "BLOCKED",
-            reason: evalRes.reason,
-          };
-        };
-      }
-
-      const envManager = new EnvironmentManager();
-      const wsPolicyManager = new WorkspacePolicyManager();
-
-      const registeredTools = registry.list().map((t) => t.metadata.id);
-
-      wsPolicyManager.registerPolicy(
-        new WorkspacePolicy({
-          workspaceId: "yartrader",
-          allowedTools: registeredTools,
-          allowedRoots: [process.cwd()],
-        }),
-      );
-      wsPolicyManager.registerPolicy(
-        new WorkspacePolicy({
-          workspaceId: "ws_default",
-          allowedTools: registeredTools,
-          allowedRoots: [process.cwd()],
-        }),
-      );
-
-      envManager.registerEnvironment({
-        id: "env_yartrader",
-        name: "Default Environment",
-        type: "PRODUCTION",
-        capabilities: registeredTools,
-        accessScope: "workspace",
-        riskLevel: "SAFE",
-        healthy: true,
-      });
-      envManager.registerEnvironment({
-        id: "env_ws_default",
-        name: "Default Environment",
-        type: "PRODUCTION",
-        capabilities: registeredTools,
-        accessScope: "workspace",
-        riskLevel: "SAFE",
-        healthy: true,
-      });
-
-      this.ecosystem = new SecureToolEcosystem(
-        registry,
-        policyEngine,
-        (policyEngine as any).approvalManager,
-        envManager,
-        wsPolicyManager,
-      );
-    }
-  }
+    private ecosystem?: SecureToolEcosystem,
+  ) {}
 
   getState(): ExecutionState {
     return this.state;
@@ -125,9 +34,9 @@ export class ExecutionEngine {
       details: { toolId, params },
     });
 
-    const tool = this.registry.get(toolId);
-    if (!tool) {
-      const errorMsg = `Tool '${toolId}' not found in ToolRegistry.`;
+    if (!this.ecosystem) {
+      const errorMsg =
+        "FAIL CLOSED: Authoritative SecureToolEcosystem is required for ExecutionEngine tool execution.";
       this.auditLogger.log({
         executionId: context.executionId,
         type: "ERROR",

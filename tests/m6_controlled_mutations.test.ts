@@ -542,12 +542,7 @@ describe("M6 Controlled Mutations Security Gate Suite", () => {
     it("enforces gate checks when executed via ExecutionEngine", async () => {
       const registry = ecosystem.getRegistry();
       const auditLogger = new AuditLogger();
-      const engine = new ExecutionEngine(
-        registry,
-        auditLogger,
-        policyEngine,
-        ecosystem,
-      );
+      const engine = new ExecutionEngine(registry, auditLogger, ecosystem);
 
       // Attempt to execute BLOCKED action via ExecutionEngine
       ecosystem.registerTool(new GitHubTool());
