@@ -104,7 +104,7 @@ export class ResourceResolver {
 
     const rawPath = requestedPath.trim();
 
-    // Prevent path traversal sequences (.. in path components)
+    // 1. Prevent path traversal sequences (.. in path components)
     if (rawPath.includes("..")) {
       const errReason = `RESOURCE DENIED: Path traversal sequence '..' detected in '${rawPath}' for workspace '${effectiveWorkspaceId}'.`;
       this.auditDenial(
@@ -120,9 +120,8 @@ export class ResourceResolver {
       };
     }
 
-    // Check for trailing dots/spaces in Windows path variants (e.g. C:\path. or C:\path )
+    // 2. Check for trailing dots/spaces in Windows path variants (e.g. C:\path. or C:\path )
     if (/[. ]+(\/|\\|$)/.test(rawPath) && rawPath !== "." && rawPath !== "..") {
-      // Check if it's trailing dot/space bypass attempt
       const cleanEnd = rawPath.replace(/[. ]+$/, "");
       if (cleanEnd !== rawPath) {
         const errReason = `RESOURCE DENIED: Path '${rawPath}' contains trailing dots/spaces bypass attempt for workspace '${effectiveWorkspaceId}'.`;
@@ -140,10 +139,9 @@ export class ResourceResolver {
       }
     }
 
-    // Resolve target path against workspace allowed roots
+    // 3. Normalize & resolve canonical real path
     let targetNormalized = this.pathAdapter.normalize(rawPath);
 
-    // If requested path is relative, resolve it relative to primary workspace allowed root
     if (!this.pathAdapter.isAbsolute(targetNormalized)) {
       const primaryRoot =
         ws.allowedRoots.find((r) => fs.existsSync(r)) || ws.allowedRoots[0];
@@ -154,26 +152,44 @@ export class ResourceResolver {
     const { canonical: canonicalPath } =
       this.resolveCanonicalPath(targetNormalized);
 
-    // Evaluate against each authorized root for this workspace
+    let realTargetPathNorm = canonicalPath;
+    if (fs.existsSync(targetNormalized)) {
+      try {
+        const realTargetPath = fs.realpathSync(targetNormalized);
+        realTargetPathNorm = this.pathAdapter.normalize(realTargetPath);
+      } catch {
+        // Fall back to canonicalPath
+      }
+    }
+
+    // 4. Evaluate workspace containment against authorized roots
     let matchedRoot: string | undefined;
     for (const allowedRoot of ws.allowedRoots) {
       const canonicalRoot = this.resolveCanonicalPath(allowedRoot).canonical;
+      const realAllowedRoot = fs.existsSync(allowedRoot)
+        ? this.pathAdapter.normalize(fs.realpathSync(allowedRoot))
+        : canonicalRoot;
+
       if (
         this.isPathContained(allowedRoot, targetNormalized) ||
         this.isPathContained(allowedRoot, canonicalPath) ||
+        this.isPathContained(allowedRoot, realTargetPathNorm) ||
         this.isPathContained(canonicalRoot, targetNormalized) ||
-        this.isPathContained(canonicalRoot, canonicalPath)
+        this.isPathContained(canonicalRoot, canonicalPath) ||
+        this.isPathContained(canonicalRoot, realTargetPathNorm) ||
+        this.isPathContained(realAllowedRoot, realTargetPathNorm)
       ) {
         matchedRoot = allowedRoot;
         break;
       }
     }
 
+    // 5. If not contained in authorized roots, determine escape classification
     if (!matchedRoot) {
-      // Check if this path belongs to another workspace (cross-workspace check)
       const otherWorkspace =
         this.findWorkspaceOwningPath(targetNormalized, effectiveWorkspaceId) ||
-        this.findWorkspaceOwningPath(canonicalPath, effectiveWorkspaceId);
+        this.findWorkspaceOwningPath(canonicalPath, effectiveWorkspaceId) ||
+        this.findWorkspaceOwningPath(realTargetPathNorm, effectiveWorkspaceId);
 
       if (otherWorkspace) {
         const errReason = `RESOURCE DENIED: Cross-workspace access attempt. Path '${rawPath}' belongs to workspace '${otherWorkspace}' and is denied for workspace '${effectiveWorkspaceId}'.`;
@@ -190,7 +206,6 @@ export class ResourceResolver {
         };
       }
 
-      // Check if it was a sibling prefix bypass attempt (e.g. C:\Projects\YarTrader2 vs C:\Projects\YarTrader)
       const siblingAttempt = ws.allowedRoots.some((allowedRoot) => {
         const canonicalRoot = this.resolveCanonicalPath(allowedRoot).canonical;
         return (
@@ -198,7 +213,10 @@ export class ResourceResolver {
             .toLowerCase()
             .startsWith(allowedRoot.toLowerCase()) ||
           canonicalPath.toLowerCase().startsWith(allowedRoot.toLowerCase()) ||
-          canonicalPath.toLowerCase().startsWith(canonicalRoot.toLowerCase())
+          canonicalPath.toLowerCase().startsWith(canonicalRoot.toLowerCase()) ||
+          realTargetPathNorm
+            .toLowerCase()
+            .startsWith(canonicalRoot.toLowerCase())
         );
       });
 
@@ -217,22 +235,7 @@ export class ResourceResolver {
         };
       }
 
-      if (has83Pattern) {
-        const errReason = `RESOURCE DENIED: Alternate 8.3 short-name representation detected in '${rawPath}' for workspace '${effectiveWorkspaceId}'.`;
-        this.auditDenial(
-          "EIGHT_DOT_THREE_BYPASS",
-          effectiveWorkspaceId,
-          rawPath,
-          errReason,
-        );
-        return {
-          success: false,
-          code: "EIGHT_DOT_THREE_BYPASS",
-          error: errReason,
-        };
-      }
-
-      const errReason = `RESOURCE DENIED: Target path '${rawPath}' (resolved: '${canonicalPath}') escapes authorized workspace roots [${ws.allowedRoots.join(", ")}] for workspace '${effectiveWorkspaceId}'.`;
+      const errReason = `RESOURCE DENIED: Target path '${rawPath}' (resolved: '${realTargetPathNorm}') escapes authorized workspace roots [${ws.allowedRoots.join(", ")}] for workspace '${effectiveWorkspaceId}'.`;
       this.auditDenial(
         "UNAUTHORIZED_ROOT",
         effectiveWorkspaceId,
@@ -246,43 +249,22 @@ export class ResourceResolver {
       };
     }
 
-    // Real filesystem symlink / junction resolution check (if path exists on current system)
+    // 6. Symlink / Junction Escape Check
     if (fs.existsSync(targetNormalized)) {
-      try {
-        const realTargetPath = fs.realpathSync(targetNormalized);
-        const realTargetPathNorm = this.pathAdapter.normalize(realTargetPath);
+      let realMatchFound = false;
+      for (const allowedRoot of ws.allowedRoots) {
+        const realAllowedRoot = fs.existsSync(allowedRoot)
+          ? this.pathAdapter.normalize(fs.realpathSync(allowedRoot))
+          : this.pathAdapter.normalize(allowedRoot);
 
-        let realMatchFound = false;
-        for (const allowedRoot of ws.allowedRoots) {
-          const realAllowedRoot = fs.existsSync(allowedRoot)
-            ? this.pathAdapter.normalize(fs.realpathSync(allowedRoot))
-            : this.pathAdapter.normalize(allowedRoot);
-
-          if (this.isPathContained(realAllowedRoot, realTargetPathNorm)) {
-            realMatchFound = true;
-            break;
-          }
+        if (this.isPathContained(realAllowedRoot, realTargetPathNorm)) {
+          realMatchFound = true;
+          break;
         }
+      }
 
-        if (!realMatchFound) {
-          const errReason = `RESOURCE DENIED: Symlink/Junction target '${realTargetPath}' escapes authorized roots for workspace '${effectiveWorkspaceId}'.`;
-          this.auditDenial(
-            "SYMLINK_ESCAPE",
-            effectiveWorkspaceId,
-            rawPath,
-            errReason,
-          );
-          return {
-            success: false,
-            code: "SYMLINK_ESCAPE",
-            error: errReason,
-          };
-        }
-
-        targetNormalized = realTargetPathNorm;
-      } catch (err: any) {
-        // Fail-closed if realpath fails
-        const errReason = `RESOURCE DENIED: Unable to resolve real path for '${rawPath}': ${err.message}`;
+      if (!realMatchFound) {
+        const errReason = `RESOURCE DENIED: Symlink/Junction target '${realTargetPathNorm}' escapes authorized roots for workspace '${effectiveWorkspaceId}'.`;
         this.auditDenial(
           "SYMLINK_ESCAPE",
           effectiveWorkspaceId,
@@ -295,11 +277,10 @@ export class ResourceResolver {
           error: errReason,
         };
       }
-    } else {
-      targetNormalized = canonicalPath;
     }
 
-    if (has83Pattern && /~[0-9]/.test(targetNormalized)) {
+    // 7. Alternate 8.3 short-name representation check
+    if (has83Pattern && /~[0-9]/.test(realTargetPathNorm)) {
       const errReason = `RESOURCE DENIED: Alternate 8.3 short-name representation detected in '${rawPath}' for workspace '${effectiveWorkspaceId}'.`;
       this.auditDenial(
         "EIGHT_DOT_THREE_BYPASS",
@@ -314,11 +295,14 @@ export class ResourceResolver {
       };
     }
 
-    // Match bound repository ID if available
+    // 8. Repository Binding
     let repositoryId: string | undefined;
     if (ws.repositories) {
       for (const repo of ws.repositories) {
-        if (this.isPathContained(repo.root, targetNormalized)) {
+        if (
+          this.isPathContained(repo.root, realTargetPathNorm) ||
+          this.isPathContained(repo.root, targetNormalized)
+        ) {
           repositoryId = repo.repositoryId;
           break;
         }
@@ -328,7 +312,7 @@ export class ResourceResolver {
     const resource: ResolvedResource = Object.freeze({
       [RESOLVED_RESOURCE_BRAND]: true as const,
       workspaceId: effectiveWorkspaceId,
-      canonicalPath: targetNormalized,
+      canonicalPath: realTargetPathNorm,
       allowedRoot: matchedRoot,
       repositoryId,
     });
