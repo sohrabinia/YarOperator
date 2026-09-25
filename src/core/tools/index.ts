@@ -108,14 +108,16 @@ export class CapabilityReporter {
           parts.push(`${subAction}: ${actionState}`);
         }
 
-        if (!isRuntimeAvailable) {
+        if (hasBlocked && !hasSafe && !hasApprovalRequired) {
+          overallState = "BLOCKED";
+        } else if (!isRuntimeAvailable) {
           overallState = "UNAVAILABLE";
         } else if (hasApprovalRequired && !hasSafe) {
           overallState = "APPROVAL_REQUIRED";
-        } else if (hasBlocked && !hasSafe && !hasApprovalRequired) {
-          overallState = "BLOCKED";
-        } else {
+        } else if (hasSafe) {
           overallState = "AVAILABLE";
+        } else {
+          overallState = "REGISTERED";
         }
 
         const policyStr = parts.join(", ");

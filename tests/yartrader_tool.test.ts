@@ -8,7 +8,6 @@ import {
   YarTraderTool,
   CapabilityReporter,
   OperatorHealthTool,
-  CapabilityState,
 } from "../src/core/tools/index.js";
 import { WebResearchTool } from "../src/core/research/index.js";
 import { PolicyEngine, ApprovalManager } from "../src/core/policy/index.js";
@@ -115,7 +114,7 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     safelyRemoveFile(testDbPath);
   });
 
-  // --- YARTRADER AUTHENTICATION & BOUNDED CONNECTION ---
+  // --- YARTRADER AUTHENTICATION & CONNECTION SCENARIOS ---
 
   it("1. Missing server-side authentication secret yields UNAVAILABLE (fail closed)", async () => {
     delete process.env.OPERATOR_YARTRADER_SECRET;
@@ -240,20 +239,9 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     expect(res.error).toContain("DESTINATION DENIED");
   });
 
-  it("6. Trading operations (order_place, live_enable) remain permanently BLOCKED", async () => {
-    const resOrder = await ecosystem.execute(
-      "yartrader_adapter",
-      { action: "order_place" },
-      scope,
-      context,
-    );
-    expect(resOrder.success).toBe(false);
-    expect(resOrder.error).toContain("BLOCKED");
-  });
+  // --- DYNAMIC 5-STATE CAPABILITY REPORTER TESTS (12 SCENARIOS) ---
 
-  // --- DYNAMIC 5-STATE CAPABILITY REPORTER TESTS ---
-
-  it("7. Registered tool + SAFE rule + available runtime → structured state AVAILABLE", () => {
+  it("6 (Req 1). SAFE + available = AVAILABLE", () => {
     const reg = new ToolRegistry();
     reg.register(new OperatorHealthTool());
 
@@ -265,7 +253,20 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     expect(report.tools[0].state).toBe("AVAILABLE");
   });
 
-  it("8. Registered tool + APPROVAL_REQUIRED rule + available runtime → structured state APPROVAL_REQUIRED", () => {
+  it("7 (Req 2). SAFE + unavailable = UNAVAILABLE", () => {
+    const reg = new ToolRegistry();
+    const toolOffline = new YarTraderTool(); // Missing secret -> isAvailable() = false
+    reg.register(toolOffline);
+
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule("yartrader_adapter:health", "SAFE");
+
+    const report = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report.tools[0].id).toBe("yartrader_adapter");
+    expect(report.tools[0].state).toBe("UNAVAILABLE");
+  });
+
+  it("8 (Req 3). APPROVAL_REQUIRED + available = APPROVAL_REQUIRED", () => {
     const reg = new ToolRegistry();
     reg.register(new YarTraderTool({ testSecret: "sec" }));
 
@@ -281,36 +282,47 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     expect(report.tools[0].state).toBe("APPROVAL_REQUIRED");
   });
 
-  it("9. Registered tool + BLOCKED rule → structured state BLOCKED", () => {
+  it("9 (Req 4). APPROVAL_REQUIRED + unavailable = UNAVAILABLE", () => {
+    const reg = new ToolRegistry();
+    reg.register(new YarTraderTool()); // Offline -> isAvailable() = false
+
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule(
+      "yartrader_adapter:restart_service",
+      "APPROVAL_REQUIRED",
+    );
+
+    const report = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report.tools[0].state).toBe("UNAVAILABLE");
+  });
+
+  it("10 (Req 5 & 6). BLOCKED + available/unavailable = BLOCKED (precedence over availability)", () => {
     const reg = new ToolRegistry();
     reg.register(new YarTraderTool({ testSecret: "sec" }));
 
     const testPolicy = new PolicyEngine();
     testPolicy.setRule("yartrader_adapter:order_place", "BLOCKED");
 
-    const report = CapabilityReporter.generateReport(reg, testPolicy, {
+    // Case 1: Runtime available -> BLOCKED
+    const reportOnline = CapabilityReporter.generateReport(reg, testPolicy, {
       yartrader_adapter: true,
     });
-    const actionItem = report.tools[0].actions?.find(
+    const onlineAction = reportOnline.tools[0].actions?.find(
       (a) => a.action === "order_place",
     );
-    expect(actionItem?.state).toBe("BLOCKED");
+    expect(onlineAction?.state).toBe("BLOCKED");
+
+    // Case 2: Runtime unavailable -> BLOCKED (Policy dominates)
+    const reportOffline = CapabilityReporter.generateReport(reg, testPolicy, {
+      yartrader_adapter: false,
+    });
+    const offlineAction = reportOffline.tools[0].actions?.find(
+      (a) => a.action === "order_place",
+    );
+    expect(offlineAction?.state).toBe("BLOCKED");
   });
 
-  it("10. Registered tool + SAFE rule + unavailable runtime → structured state UNAVAILABLE", () => {
-    const reg = new ToolRegistry();
-    const toolOffline = new YarTraderTool(); // Missing secret -> isAvailable() = false
-    reg.register(toolOffline);
-
-    const testPolicy = new PolicyEngine();
-    testPolicy.setRule("yartrader_adapter:health", "SAFE");
-
-    const report = CapabilityReporter.generateReport(reg, testPolicy);
-    expect(report.tools[0].id).toBe("yartrader_adapter");
-    expect(report.tools[0].state).toBe("UNAVAILABLE");
-  });
-
-  it("11. Registered tool without explicit PolicyEngine rule → structured state REGISTERED", () => {
+  it("11 (Req 7). No explicit PolicyEngine rule = REGISTERED", () => {
     const reg = new ToolRegistry();
     reg.register(new OperatorHealthTool());
 
@@ -322,7 +334,7 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     expect(report.tools[0].policy).toBe("NO_EXPLICIT_POLICY_RULE");
   });
 
-  it("12. Changing PolicyEngine rule dynamically updates structured state without reporter code changes", () => {
+  it("12 (Req 8). Dynamic PolicyEngine rule changes alter structured capability state", () => {
     const reg = new ToolRegistry();
     reg.register(new OperatorHealthTool());
 
@@ -332,18 +344,18 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     const report1 = CapabilityReporter.generateReport(reg, testPolicy);
     expect(report1.tools[0].state).toBe("AVAILABLE");
 
-    // Dynamic PolicyEngine update 1: APPROVAL_REQUIRED
+    // Update rule to APPROVAL_REQUIRED
     testPolicy.setRule("operator_health:check", "APPROVAL_REQUIRED");
     const report2 = CapabilityReporter.generateReport(reg, testPolicy);
     expect(report2.tools[0].state).toBe("APPROVAL_REQUIRED");
 
-    // Dynamic PolicyEngine update 2: BLOCKED
+    // Update rule to BLOCKED
     testPolicy.setRule("operator_health:check", "BLOCKED");
     const report3 = CapabilityReporter.generateReport(reg, testPolicy);
     expect(report3.tools[0].state).toBe("BLOCKED");
   });
 
-  it("13. Adding a new tool to ToolRegistry automatically appears in capability report without reporter code changes", () => {
+  it("13 (Req 9). Newly registered tools automatically appear without reporter code changes", () => {
     const reg = new ToolRegistry();
     reg.register(new OperatorHealthTool());
 
@@ -353,7 +365,7 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     const report1 = CapabilityReporter.generateReport(reg, testPolicy);
     expect(report1.tools.length).toBe(1);
 
-    // Registering new tool dynamically
+    // Dynamically register new tool
     reg.register(new WebResearchTool());
     testPolicy.setRule("web_research:search", "SAFE");
 
@@ -362,7 +374,7 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     expect(report2.tools.map((t) => t.id)).toContain("web_research");
   });
 
-  it("14. Metadata safety level cannot override an explicit PolicyEngine rule", () => {
+  it("14 (Req 10). Metadata safety level cannot override explicit PolicyEngine rule", () => {
     const reg = new ToolRegistry();
     const healthTool = new OperatorHealthTool(); // Metadata safetyLevel = SAFE
     reg.register(healthTool);
@@ -372,5 +384,21 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
 
     const report = CapabilityReporter.generateReport(reg, testPolicy);
     expect(report.tools[0].state).toBe("BLOCKED");
+  });
+
+  it("15 (Req 11 & 12). YarTrader missing secret = UNAVAILABLE, and trading actions = BLOCKED", async () => {
+    delete process.env.OPERATOR_YARTRADER_SECRET;
+    const toolOffline = new YarTraderTool();
+
+    expect(toolOffline.isAvailable()).toBe(false);
+
+    const resOrder = await ecosystem.execute(
+      "yartrader_adapter",
+      { action: "order_place" },
+      scope,
+      context,
+    );
+    expect(resOrder.success).toBe(false);
+    expect(resOrder.error).toContain("BLOCKED");
   });
 });
