@@ -393,9 +393,6 @@ export interface ResolvedDiagnosticCapability {
 
 export interface DiagnosticCapabilityResolution {
   intentsMatched: string[];
-  gitAction?: string;
-  requiresHttpProbe: boolean;
-  requiresHealthCheck: boolean;
   items: ResolvedDiagnosticCapability[];
 }
 
@@ -432,9 +429,6 @@ export class DiagnosticWorker {
     ) {
       return {
         intentsMatched: [norm],
-        gitAction: "status",
-        requiresHttpProbe: true,
-        requiresHealthCheck: true,
         items: [
           {
             capability: "software-development",
@@ -456,9 +450,6 @@ export class DiagnosticWorker {
     if (norm === "rev-parse head" || norm === "git rev-parse head") {
       return {
         intentsMatched: [norm],
-        gitAction: "rev-parse head",
-        requiresHttpProbe: false,
-        requiresHealthCheck: false,
         items: [
           {
             capability: "software-development",
@@ -475,9 +466,6 @@ export class DiagnosticWorker {
     ) {
       return {
         intentsMatched: [norm],
-        gitAction: "branch --show-current",
-        requiresHttpProbe: false,
-        requiresHealthCheck: false,
         items: [
           {
             capability: "software-development",
@@ -491,9 +479,6 @@ export class DiagnosticWorker {
     if (norm === "log -1" || norm === "git log -1") {
       return {
         intentsMatched: [norm],
-        gitAction: "log -1",
-        requiresHttpProbe: false,
-        requiresHealthCheck: false,
         items: [
           {
             capability: "software-development",
@@ -761,7 +746,7 @@ export class DiagnosticWorker {
 
     // Stage 7: DiagnosticWorker Read-Only Capability Resolution
     const resolution = this.resolveDiagnosticCapability(params.rawCommandText);
-    if (!resolution || !resolution.gitAction) {
+    if (!resolution || !resolution.items || resolution.items.length === 0) {
       const auditOk = await this.auditDenial(
         "STAGE_7_CAPABILITY",
         params.workspaceId,
@@ -777,222 +762,231 @@ export class DiagnosticWorker {
       };
     }
 
-    const targetGitAction = resolution.gitAction;
-
-    if (!this.validateGitAction(targetGitAction)) {
-      const auditOk = await this.auditDenial(
-        "STAGE_7_CAPABILITY",
-        params.workspaceId,
-        `Resolved Git action '${targetGitAction}' is not in allowed list`,
-      );
-      return {
-        success: false,
-        error: auditOk
-          ? `AUTHORIZATION FAILURE: Git action '${targetGitAction}' is not allowed.`
-          : "AUTHORIZATION FAILURE: Action not allowed and audit persistence failed.",
-        denialStage: "7. Capability Resolution",
-        toolExecutionCount,
-      };
+    // Validate Git actions for all git items in resolution.items
+    for (const item of resolution.items) {
+      if (item.gitAction && !this.validateGitAction(item.gitAction)) {
+        const auditOk = await this.auditDenial(
+          "STAGE_7_CAPABILITY",
+          params.workspaceId,
+          `Resolved Git action '${item.gitAction}' is not in allowed list`,
+        );
+        return {
+          success: false,
+          error: auditOk
+            ? `AUTHORIZATION FAILURE: Git action '${item.gitAction}' is not allowed.`
+            : "AUTHORIZATION FAILURE: Action not allowed and audit persistence failed.",
+          denialStage: "7. Capability Resolution",
+          toolExecutionCount,
+        };
+      }
     }
 
-    // Stage 8: PolicyEngine Evaluation for Primary Resolved Capability (MUST be explicitly SAFE)
-    const gitRule = this.policyEngine.getRule(`git_operate:${targetGitAction}`);
-    if (gitRule !== "SAFE") {
-      const auditOk = await this.auditDenial(
-        "STAGE_8_POLICY",
-        params.workspaceId,
-        `git_operate:${targetGitAction} rule is '${gitRule || "UNKNOWN"}' (requires SAFE)`,
-      );
-      return {
-        success: false,
-        error: auditOk
-          ? `AUTHORIZATION FAILURE: Diagnostic capability 'git_operate:${targetGitAction}' rule is '${gitRule || "UNKNOWN"}'. Strictly requires SAFE rule.`
-          : "AUTHORIZATION FAILURE: Policy not SAFE and audit persistence failed.",
-        denialStage: "8. PolicyEngine",
-        toolExecutionCount,
-      };
+    // Stage 8: PolicyEngine Evaluation for Primary Resolved Git Capability (MUST be explicitly SAFE)
+    const primaryGitItem = resolution.items.find((i) =>
+      i.toolId.startsWith("git_operate:"),
+    );
+    if (primaryGitItem) {
+      const gitRule = this.policyEngine.getRule(primaryGitItem.toolId);
+      if (gitRule !== "SAFE") {
+        const auditOk = await this.auditDenial(
+          "STAGE_8_POLICY",
+          params.workspaceId,
+          `Policy rule for '${primaryGitItem.toolId}' is '${gitRule || "UNKNOWN"}' (requires SAFE)`,
+        );
+        return {
+          success: false,
+          error: auditOk
+            ? `AUTHORIZATION FAILURE: Diagnostic capability '${primaryGitItem.toolId}' rule is '${gitRule || "UNKNOWN"}'. Strictly requires SAFE rule.`
+            : "AUTHORIZATION FAILURE: Policy not SAFE and audit persistence failed.",
+          denialStage: "8. PolicyEngine",
+          toolExecutionCount,
+        };
+      }
     }
 
     // Stage 9: Tool Authorization (Structurally exclude TerminalTool and write tools)
-    // Stage 10: Execution of Read-Only Tools
+    // Stage 10: Authoritative Execution of Resolved Capability Items
 
     const items: DiagnosticItemReport[] = [];
     const timestamp = new Date().toISOString();
 
-    // --- Subsystem 1: Git Read-Only Diagnostics ---
-    const gitPolicyRule = this.policyEngine.getRule(
-      `git_operate:${targetGitAction}`,
-    );
-    if (gitPolicyRule !== "SAFE") {
-      items.push({
-        name: "Git Status Check",
-        source: "GitTool",
-        timestamp,
-        status: "FAIL",
-        rawResult: `AUTHORIZATION FAILURE: Policy rule for 'git_operate:${targetGitAction}' is '${gitPolicyRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
-      });
-    } else {
-      try {
-        spies?.gitSpy?.();
+    for (const resolvedItem of resolution.items) {
+      const itemRule = this.policyEngine.getRule(resolvedItem.toolId);
 
-        const gitTool = new GitTool(this.resolver);
-        const gitContext: ExecutionContext = context || {
-          executionId: `diag_git_${Date.now()}`,
-          timestamp: new Date(),
-          workspaceId: params.workspaceId,
-        };
-
-        const gitStatusRes = await gitTool.execute(
-          {
-            action: targetGitAction as any,
-            cwd: resourceRes.resource.canonicalPath,
-          },
-          gitContext,
-        );
-
-        toolExecutionCount++;
-
-        if (gitStatusRes.success) {
-          const rawOut = gitStatusRes.output?.output || "Git status clean";
-          items.push({
-            name: "Git Status Check",
-            source: "GitTool",
-            timestamp,
-            status: "OK",
-            rawResult: this.escapeHtml(
-              this.redactSecrets(rawOut.substring(0, 1000)),
-            ),
-          });
-        } else {
+      if (resolvedItem.toolId.startsWith("git_operate:")) {
+        if (itemRule !== "SAFE") {
           items.push({
             name: "Git Status Check",
             source: "GitTool",
             timestamp,
             status: "FAIL",
-            rawResult: this.escapeHtml(
-              gitStatusRes.error || "Git status failed",
-            ),
+            rawResult: `AUTHORIZATION FAILURE: Policy rule for '${resolvedItem.toolId}' is '${itemRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
           });
+          continue;
         }
-      } catch (err: any) {
-        items.push({
-          name: "Git Status Check",
-          source: "GitTool",
-          timestamp,
-          status: "FAIL",
-          rawResult: this.escapeHtml(err.message),
-        });
-      }
-    }
 
-    // --- Subsystem 2: Bounded HTTP Probe Diagnostics ---
-    if (
-      resolution.requiresHttpProbe &&
-      (params.targetOrigin ||
-        (ws.allowedHttpOrigins && ws.allowedHttpOrigins.length > 0))
-    ) {
-      const httpPolicyRule = this.policyEngine.getRule("http_probe:get");
-      if (httpPolicyRule !== "SAFE") {
-        items.push({
-          name: "HTTP Origin Probe",
-          source: "BoundedHttpProbe",
-          timestamp,
-          status: "FAIL",
-          rawResult: `AUTHORIZATION FAILURE: Policy rule for 'http_probe:get' is '${httpPolicyRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
-        });
-      } else {
-        const firstOrigin = ws.allowedHttpOrigins![0];
-        const probeUrl =
-          params.targetOrigin ||
-          (typeof firstOrigin === "string"
-            ? firstOrigin
-            : (firstOrigin as HttpOriginResourceConfig).origin);
+        const gitAction = resolvedItem.gitAction!;
         try {
-          spies?.httpSpy?.();
+          spies?.gitSpy?.();
 
-          const httpProbe = new BoundedHttpProbe(
-            ws.allowedHttpOrigins || [],
-            5000,
-            1000,
+          const gitTool = new GitTool(this.resolver);
+          const gitContext: ExecutionContext = context || {
+            executionId: `diag_git_${Date.now()}`,
+            timestamp: new Date(),
+            workspaceId: params.workspaceId,
+          };
+
+          const gitStatusRes = await gitTool.execute(
+            {
+              action: gitAction as any,
+              cwd: resourceRes.resource.canonicalPath,
+            },
+            gitContext,
           );
-          const probeRes = await httpProbe.get(probeUrl);
+
           toolExecutionCount++;
 
-          if (probeRes.success) {
+          if (gitStatusRes.success) {
+            const rawOut = gitStatusRes.output?.output || "Git status clean";
             items.push({
-              name: "HTTP Origin Probe",
-              source: "BoundedHttpProbe",
+              name: "Git Status Check",
+              source: "GitTool",
               timestamp,
               status: "OK",
               rawResult: this.escapeHtml(
-                `HTTP ${probeRes.statusCode}: ${probeRes.body || "OK"}`,
+                this.redactSecrets(rawOut.substring(0, 1000)),
               ),
             });
           } else {
             items.push({
-              name: "HTTP Origin Probe",
-              source: "BoundedHttpProbe",
+              name: "Git Status Check",
+              source: "GitTool",
               timestamp,
               status: "FAIL",
-              rawResult: this.escapeHtml(probeRes.error || "HTTP probe failed"),
+              rawResult: this.escapeHtml(
+                gitStatusRes.error || "Git status failed",
+              ),
             });
           }
         } catch (err: any) {
+          items.push({
+            name: "Git Status Check",
+            source: "GitTool",
+            timestamp,
+            status: "FAIL",
+            rawResult: this.escapeHtml(err.message),
+          });
+        }
+      } else if (resolvedItem.toolId === "http_probe:get") {
+        if (itemRule !== "SAFE") {
           items.push({
             name: "HTTP Origin Probe",
             source: "BoundedHttpProbe",
             timestamp,
             status: "FAIL",
-            rawResult: this.escapeHtml(err.message),
+            rawResult: `AUTHORIZATION FAILURE: Policy rule for 'http_probe:get' is '${itemRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
           });
+          continue;
         }
-      }
-    }
 
-    // --- Subsystem 3: Service Health Diagnostics ---
-    if (resolution.requiresHealthCheck && this.healthProvider) {
-      const healthPolicyRule = this.policyEngine.getRule("system_health:read");
-      if (healthPolicyRule !== "SAFE") {
-        items.push({
-          name: "Service Health Check",
-          source: "SystemHealthProvider",
-          timestamp,
-          status: "FAIL",
-          rawResult: `AUTHORIZATION FAILURE: Policy rule for 'system_health:read' is '${healthPolicyRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
-        });
-      } else {
-        try {
-          spies?.healthSpy?.();
+        if (
+          params.targetOrigin ||
+          (ws.allowedHttpOrigins && ws.allowedHttpOrigins.length > 0)
+        ) {
+          const firstOrigin = ws.allowedHttpOrigins![0];
+          const probeUrl =
+            params.targetOrigin ||
+            (typeof firstOrigin === "string"
+              ? firstOrigin
+              : (firstOrigin as HttpOriginResourceConfig).origin);
+          try {
+            spies?.httpSpy?.();
 
-          const report = this.healthProvider.getReport();
-          toolExecutionCount++;
-          items.push({
-            name: "Service Health Check",
-            source: "SystemHealthProvider",
-            timestamp,
-            status: report.health.status === "HEALTHY" ? "OK" : "FAIL",
-            rawResult: this.escapeHtml(
-              `Status: ${report.health.status}, Uptime: ${report.health.uptimeMs}ms`,
-            ),
-          });
-        } catch (err: any) {
+            const httpProbe = new BoundedHttpProbe(
+              ws.allowedHttpOrigins || [],
+              5000,
+              1000,
+            );
+            const probeRes = await httpProbe.get(probeUrl);
+            toolExecutionCount++;
+
+            if (probeRes.success) {
+              items.push({
+                name: "HTTP Origin Probe",
+                source: "BoundedHttpProbe",
+                timestamp,
+                status: "OK",
+                rawResult: this.escapeHtml(
+                  `HTTP ${probeRes.statusCode}: ${probeRes.body || "OK"}`,
+                ),
+              });
+            } else {
+              items.push({
+                name: "HTTP Origin Probe",
+                source: "BoundedHttpProbe",
+                timestamp,
+                status: "FAIL",
+                rawResult: this.escapeHtml(
+                  probeRes.error || "HTTP probe failed",
+                ),
+              });
+            }
+          } catch (err: any) {
+            items.push({
+              name: "HTTP Origin Probe",
+              source: "BoundedHttpProbe",
+              timestamp,
+              status: "FAIL",
+              rawResult: this.escapeHtml(err.message),
+            });
+          }
+        }
+      } else if (resolvedItem.toolId === "system_health:read") {
+        if (itemRule !== "SAFE") {
           items.push({
             name: "Service Health Check",
             source: "SystemHealthProvider",
             timestamp,
             status: "FAIL",
-            rawResult: this.escapeHtml(err.message),
+            rawResult: `AUTHORIZATION FAILURE: Policy rule for 'system_health:read' is '${itemRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
+          });
+          continue;
+        }
+
+        if (this.healthProvider) {
+          try {
+            spies?.healthSpy?.();
+
+            const report = this.healthProvider.getReport();
+            toolExecutionCount++;
+            items.push({
+              name: "Service Health Check",
+              source: "SystemHealthProvider",
+              timestamp,
+              status: report.health.status === "HEALTHY" ? "OK" : "FAIL",
+              rawResult: this.escapeHtml(
+                `Status: ${report.health.status}, Uptime: ${report.health.uptimeMs}ms`,
+              ),
+            });
+          } catch (err: any) {
+            items.push({
+              name: "Service Health Check",
+              source: "SystemHealthProvider",
+              timestamp,
+              status: "FAIL",
+              rawResult: this.escapeHtml(err.message),
+            });
+          }
+        } else {
+          items.push({
+            name: "Service Health Check",
+            source: "SystemHealthProvider",
+            timestamp,
+            status: "UNAVAILABLE",
+            rawResult: "Service health capability is UNAVAILABLE.",
           });
         }
       }
-    } else if (resolution.requiresHealthCheck) {
-      items.push({
-        name: "Service Health Check",
-        source: "SystemHealthProvider",
-        timestamp,
-        status: "UNAVAILABLE",
-        rawResult: "Service health capability is UNAVAILABLE.",
-      });
     }
 
     const summaryStatus = items.some((i) => i.status === "FAIL")
