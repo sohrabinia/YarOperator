@@ -130,7 +130,23 @@ export class CapabilityReporter {
         lines.push(
           `- ${id} (${tool.metadata.name}): وضعیت اصلی: ${overallState} | قوانین اکشن‌ها: ${policyStr}`,
         );
+      } else if (policyEngine) {
+        // Explicit PolicyEngine supplied but no action rules registered for this tool -> REGISTERED
+        overallState = "REGISTERED";
+        const policyStr = "NO_EXPLICIT_POLICY_RULE";
+
+        toolReports.push({
+          id,
+          name: tool.metadata.name,
+          state: overallState,
+          policy: policyStr,
+        });
+
+        lines.push(
+          `- ${id} (${tool.metadata.name}): وضعیت: REGISTERED | سطح دسترسی: بدون قانون صریح PolicyEngine`,
+        );
       } else {
+        // Backward compatibility fallback when NO PolicyEngine instance is supplied
         const fallbackLevel = tool.metadata.safetyLevel || "SAFE";
         if (fallbackLevel === "BLOCKED") {
           overallState = "BLOCKED";
@@ -150,7 +166,7 @@ export class CapabilityReporter {
         });
 
         lines.push(
-          `- ${id} (${tool.metadata.name}): وضعیت: ${overallState} | سطح دسترسی: ${fallbackLevel}`,
+          `- ${id} (${tool.metadata.name}): وضعیت: ${overallState} | سطح دسترسی (توصیفی): ${fallbackLevel}`,
         );
       }
     }

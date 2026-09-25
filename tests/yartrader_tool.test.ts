@@ -253,7 +253,7 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
 
   // --- DYNAMIC 5-STATE CAPABILITY REPORTER TESTS ---
 
-  it("7. Registered tool with SAFE rule + available runtime reports state AVAILABLE", () => {
+  it("7. Registered tool + SAFE rule + available runtime → structured state AVAILABLE", () => {
     const reg = new ToolRegistry();
     reg.register(new OperatorHealthTool());
 
@@ -265,28 +265,39 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     expect(report.tools[0].state).toBe("AVAILABLE");
   });
 
-  it("8. Changing PolicyEngine rule dynamically updates structured state to APPROVAL_REQUIRED and BLOCKED", () => {
+  it("8. Registered tool + APPROVAL_REQUIRED rule + available runtime → structured state APPROVAL_REQUIRED", () => {
     const reg = new ToolRegistry();
-    reg.register(new OperatorHealthTool());
+    reg.register(new YarTraderTool({ testSecret: "sec" }));
 
     const testPolicy = new PolicyEngine();
-    testPolicy.setRule("operator_health:check", "SAFE");
+    testPolicy.setRule(
+      "yartrader_adapter:restart_service",
+      "APPROVAL_REQUIRED",
+    );
 
-    const report1 = CapabilityReporter.generateReport(reg, testPolicy);
-    expect(report1.tools[0].state).toBe("AVAILABLE");
-
-    // Dynamic PolicyEngine rule update 1: APPROVAL_REQUIRED
-    testPolicy.setRule("operator_health:check", "APPROVAL_REQUIRED");
-    const report2 = CapabilityReporter.generateReport(reg, testPolicy);
-    expect(report2.tools[0].state).toBe("APPROVAL_REQUIRED");
-
-    // Dynamic PolicyEngine rule update 2: BLOCKED
-    testPolicy.setRule("operator_health:check", "BLOCKED");
-    const report3 = CapabilityReporter.generateReport(reg, testPolicy);
-    expect(report3.tools[0].state).toBe("BLOCKED");
+    const report = CapabilityReporter.generateReport(reg, testPolicy, {
+      yartrader_adapter: true,
+    });
+    expect(report.tools[0].state).toBe("APPROVAL_REQUIRED");
   });
 
-  it("9. Registered tool with SAFE rule but unavailable runtime reports state UNAVAILABLE", () => {
+  it("9. Registered tool + BLOCKED rule → structured state BLOCKED", () => {
+    const reg = new ToolRegistry();
+    reg.register(new YarTraderTool({ testSecret: "sec" }));
+
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule("yartrader_adapter:order_place", "BLOCKED");
+
+    const report = CapabilityReporter.generateReport(reg, testPolicy, {
+      yartrader_adapter: true,
+    });
+    const actionItem = report.tools[0].actions?.find(
+      (a) => a.action === "order_place",
+    );
+    expect(actionItem?.state).toBe("BLOCKED");
+  });
+
+  it("10. Registered tool + SAFE rule + unavailable runtime → structured state UNAVAILABLE", () => {
     const reg = new ToolRegistry();
     const toolOffline = new YarTraderTool(); // Missing secret -> isAvailable() = false
     reg.register(toolOffline);
@@ -299,7 +310,40 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     expect(report.tools[0].state).toBe("UNAVAILABLE");
   });
 
-  it("10. Adding a new tool to ToolRegistry dynamically adds it to report without reporter code changes", () => {
+  it("11. Registered tool without explicit PolicyEngine rule → structured state REGISTERED", () => {
+    const reg = new ToolRegistry();
+    reg.register(new OperatorHealthTool());
+
+    const testPolicy = new PolicyEngine(); // No rules set
+
+    const report = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report.tools[0].id).toBe("operator_health");
+    expect(report.tools[0].state).toBe("REGISTERED");
+    expect(report.tools[0].policy).toBe("NO_EXPLICIT_POLICY_RULE");
+  });
+
+  it("12. Changing PolicyEngine rule dynamically updates structured state without reporter code changes", () => {
+    const reg = new ToolRegistry();
+    reg.register(new OperatorHealthTool());
+
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule("operator_health:check", "SAFE");
+
+    const report1 = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report1.tools[0].state).toBe("AVAILABLE");
+
+    // Dynamic PolicyEngine update 1: APPROVAL_REQUIRED
+    testPolicy.setRule("operator_health:check", "APPROVAL_REQUIRED");
+    const report2 = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report2.tools[0].state).toBe("APPROVAL_REQUIRED");
+
+    // Dynamic PolicyEngine update 2: BLOCKED
+    testPolicy.setRule("operator_health:check", "BLOCKED");
+    const report3 = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report3.tools[0].state).toBe("BLOCKED");
+  });
+
+  it("13. Adding a new tool to ToolRegistry automatically appears in capability report without reporter code changes", () => {
     const reg = new ToolRegistry();
     reg.register(new OperatorHealthTool());
 
@@ -316,5 +360,17 @@ describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery 
     const report2 = CapabilityReporter.generateReport(reg, testPolicy);
     expect(report2.tools.length).toBe(2);
     expect(report2.tools.map((t) => t.id)).toContain("web_research");
+  });
+
+  it("14. Metadata safety level cannot override an explicit PolicyEngine rule", () => {
+    const reg = new ToolRegistry();
+    const healthTool = new OperatorHealthTool(); // Metadata safetyLevel = SAFE
+    reg.register(healthTool);
+
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule("operator_health:check", "BLOCKED"); // Explicit PolicyEngine rule
+
+    const report = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report.tools[0].state).toBe("BLOCKED");
   });
 });
