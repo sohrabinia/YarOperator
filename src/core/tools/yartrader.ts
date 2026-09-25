@@ -76,31 +76,65 @@ export class YarTraderTool implements Tool<
     return `yartrader_adapter:${act}`;
   }
 
-  private resolveYarTraderBaseUrl(params?: YarTraderToolParams): string | null {
-    if (params?.targetOrigin) {
-      return params.targetOrigin;
+  private resolveAllowedOrigins(): string[] {
+    const origins: string[] = [];
+    if (process.env.OPERATOR_YARTRADER_URL) {
+      origins.push(process.env.OPERATOR_YARTRADER_URL);
     }
     if (this.overrideBaseUrl) {
-      return this.overrideBaseUrl;
-    }
-    if (process.env.OPERATOR_YARTRADER_URL) {
-      return process.env.OPERATOR_YARTRADER_URL;
+      origins.push(this.overrideBaseUrl);
     }
     if (this.resourceResolver) {
       try {
         const registry = this.resourceResolver.getRegistry();
         const ws = registry.getWorkspace("yartrader");
-        if (ws && ws.allowedHttpOrigins && ws.allowedHttpOrigins.length > 0) {
-          const firstOrigin = ws.allowedHttpOrigins[0];
-          return typeof firstOrigin === "string"
-            ? firstOrigin
-            : firstOrigin.origin;
+        if (ws && ws.allowedHttpOrigins) {
+          for (const o of ws.allowedHttpOrigins) {
+            const origStr = typeof o === "string" ? o : o.origin;
+            if (origStr && !origins.includes(origStr)) {
+              origins.push(origStr);
+            }
+          }
         }
-      } catch {
-        // Fall-through if workspace or registry not configured
-      }
+      } catch {}
     }
-    return null;
+    return origins;
+  }
+
+  private resolveYarTraderBaseUrl(params?: YarTraderToolParams): {
+    baseUrl: string | null;
+    error?: string;
+  } {
+    const allowedOrigins = this.resolveAllowedOrigins();
+
+    if (params?.targetOrigin) {
+      const targetNorm = params.targetOrigin.replace(/\/$/, "").toLowerCase();
+      const isAllowed = allowedOrigins.some((a) => {
+        const allowedNorm = a.replace(/\/$/, "").toLowerCase();
+        return (
+          allowedNorm === targetNorm ||
+          allowedNorm === "*" ||
+          new URL(allowedNorm).host === new URL(targetNorm).host
+        );
+      });
+
+      if (!isAllowed) {
+        return {
+          baseUrl: null,
+          error: `DESTINATION DENIED: Target origin '${params.targetOrigin}' is not in the workspace allowedHttpOrigins allowlist.`,
+        };
+      }
+      return { baseUrl: params.targetOrigin };
+    }
+
+    if (allowedOrigins.length > 0) {
+      return { baseUrl: allowedOrigins[0] };
+    }
+
+    return {
+      baseUrl: null,
+      error: `YarTrader connection UNAVAILABLE: No endpoint URL configured via OPERATOR_YARTRADER_URL or ResourceRegistry allowlist.`,
+    };
   }
 
   async execute(
@@ -132,12 +166,12 @@ export class YarTraderTool implements Tool<
       };
     }
 
-    // 2. Resolve YarTrader Base URL
-    const baseUrl = this.resolveYarTraderBaseUrl(params);
-    if (!baseUrl) {
+    // 2. Resolve & Validate YarTrader Destination Base URL against Authoritative Allowlist
+    const urlResolution = this.resolveYarTraderBaseUrl(params);
+    if (!urlResolution.baseUrl) {
       return {
         success: false,
-        error: `YarTrader connection UNAVAILABLE: No endpoint URL configured via OPERATOR_YARTRADER_URL or ResourceRegistry.`,
+        error: urlResolution.error || "YarTrader connection UNAVAILABLE.",
         output: {
           status: "UNAVAILABLE",
           capability: action,
@@ -148,22 +182,22 @@ export class YarTraderTool implements Tool<
       };
     }
 
-    // 3. Perform Bounded Request to Actual YarTrader Endpoint
-    let allowedOrigins: string[] = [baseUrl];
-    if (this.resourceResolver) {
-      try {
-        const ws = this.resourceResolver
-          .getRegistry()
-          .getWorkspace("yartrader");
-        if (ws && ws.allowedHttpOrigins) {
-          allowedOrigins = ws.allowedHttpOrigins.map((o) =>
-            typeof o === "string" ? o : o.origin,
-          );
-        }
-      } catch {}
-    }
+    const baseUrl = urlResolution.baseUrl;
+    const allowedOrigins = this.resolveAllowedOrigins();
+    const httpProbe = new BoundedHttpProbe(
+      allowedOrigins.length > 0 ? allowedOrigins : [baseUrl],
+      5000,
+      2000,
+    );
 
-    const httpProbe = new BoundedHttpProbe(allowedOrigins, 5000, 2000);
+    // 3. Endpoint Route Resolution
+    const isMutation = [
+      "restart_service",
+      "stop_service",
+      "start_service",
+      "config_write",
+    ].includes(action);
+
     const endpointPath =
       action === "health"
         ? "/health"
@@ -173,14 +207,33 @@ export class YarTraderTool implements Tool<
             ? "/logs"
             : action === "diagnostics"
               ? "/diagnostics"
-              : action === "config_read" || action === "config_write"
+              : action === "config_read"
                 ? "/config"
                 : action === "trading_state"
                   ? "/trading/state"
-                  : `/${action}`;
+                  : action === "restart_service"
+                    ? "/service/restart"
+                    : action === "stop_service"
+                      ? "/service/stop"
+                      : action === "start_service"
+                        ? "/service/start"
+                        : action === "config_write"
+                          ? "/config"
+                          : `/${action}`;
 
     const targetUrl = `${baseUrl.replace(/\/$/, "")}${endpointPath}`;
-    const probeRes = await httpProbe.get(targetUrl);
+
+    // 4. Issue Bounded Request (GET for reads, POST for mutations)
+    const probeRes = isMutation
+      ? await httpProbe.request(targetUrl, {
+          method: "POST",
+          body: JSON.stringify({
+            action,
+            serviceName: params.serviceName,
+            configPatch: params.configPatch,
+          }),
+        })
+      : await httpProbe.get(targetUrl);
 
     if (!probeRes.success || !probeRes.body) {
       return {
@@ -195,7 +248,7 @@ export class YarTraderTool implements Tool<
       };
     }
 
-    // 4. Return Real Unfabricated YarTrader Payload
+    // 5. Parse and Return Real Unfabricated YarTrader Payload
     let parsedDetails: Record<string, unknown> = {};
     try {
       parsedDetails = JSON.parse(probeRes.body);

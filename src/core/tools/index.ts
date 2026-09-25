@@ -16,6 +16,73 @@ import { EnvironmentManager } from "../environment/index.js";
 import { WorkspacePolicyManager } from "../workspace/policy.js";
 import { ResourceResolver } from "../registry/resolver.js";
 
+export interface ToolCapabilityReportItem {
+  id: string;
+  name: string;
+  registered: boolean;
+  status: "AVAILABLE" | "UNAVAILABLE";
+  policy: string;
+}
+
+export class CapabilityReporter {
+  public static generateReport(
+    registry: ToolRegistry,
+    policyEngine?: PolicyEngine,
+    yarTraderAvailable: boolean = false,
+  ): {
+    tools: ToolCapabilityReportItem[];
+    formattedReport: string;
+  } {
+    const registeredTools = registry.list();
+    const toolReports: ToolCapabilityReportItem[] = [];
+
+    const lines: string[] = [
+      "من YarOperator هستم. گزارش پویای ابزارها و قابلیت‌های سیستم:",
+    ];
+
+    for (const tool of registeredTools) {
+      const id = tool.metadata.id;
+      const rule: string =
+        policyEngine?.getRule(id) || tool.metadata.safetyLevel || "SAFE";
+
+      let status: "AVAILABLE" | "UNAVAILABLE" = "AVAILABLE";
+      if (id === "yartrader_adapter" && !yarTraderAvailable) {
+        status = "UNAVAILABLE";
+      }
+
+      let policyStr: string = rule;
+      if (id === "yartrader_adapter") {
+        policyStr =
+          "SAFE (پایش) / APPROVAL_REQUIRED (تغییرات) / BLOCKED (معاملات زنده)";
+      } else if (id === "github_operate") {
+        policyStr =
+          "SAFE (مشاهده) / APPROVAL_REQUIRED (ساخت PR) / BLOCKED (ادغام)";
+      } else if (id === "git_operate") {
+        policyStr = "SAFE (وضعیت) / APPROVAL_REQUIRED (کامیت/پوش)";
+      } else if (id === "browser_operate") {
+        policyStr = "SAFE (پیمایش) / APPROVAL_REQUIRED (فرم)";
+      }
+
+      toolReports.push({
+        id,
+        name: tool.metadata.name,
+        registered: true,
+        status,
+        policy: policyStr,
+      });
+
+      lines.push(
+        `- ${id}: ثبت شده | وضعیت: ${status} | سطح دسترسی: ${policyStr}`,
+      );
+    }
+
+    return {
+      tools: toolReports,
+      formattedReport: lines.join("\n"),
+    };
+  }
+}
+
 export class SecureToolEcosystem {
   constructor(
     private registry: ToolRegistry = new ToolRegistry(),
