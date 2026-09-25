@@ -385,6 +385,20 @@ export class BoundedHttpProbe {
   }
 }
 
+export interface ResolvedDiagnosticCapability {
+  capability: string;
+  gitAction?: string;
+  toolId: string;
+}
+
+export interface DiagnosticCapabilityResolution {
+  intentsMatched: string[];
+  gitAction?: string;
+  requiresHttpProbe: boolean;
+  requiresHealthCheck: boolean;
+  items: ResolvedDiagnosticCapability[];
+}
+
 export class DiagnosticWorker {
   private sensitiveKeyPattern =
     /(API_KEY|TOKEN|SECRET|PASSWORD|PASS|AUTH|BEARER)[=:\s]+["']?([^\s"']+)["']?/gi;
@@ -407,43 +421,86 @@ export class DiagnosticWorker {
 
   public resolveDiagnosticCapability(
     rawText: string,
-  ): { capability: string; gitAction?: string; toolId: string } | null {
+  ): DiagnosticCapabilityResolution | null {
     if (!rawText) return null;
     const norm = DiagnosticWorker.normalizeIntentText(rawText).toLowerCase();
 
     if (
+      this.isDiagnosticIntent(norm) ||
       norm === "status" ||
-      norm === "git status" ||
-      this.isDiagnosticIntent(norm)
+      norm === "git status"
     ) {
       return {
-        capability: "software-development",
+        intentsMatched: [norm],
         gitAction: "status",
-        toolId: "git_operate:status",
+        requiresHttpProbe: true,
+        requiresHealthCheck: true,
+        items: [
+          {
+            capability: "software-development",
+            gitAction: "status",
+            toolId: "git_operate:status",
+          },
+          {
+            capability: "internet-operator",
+            toolId: "http_probe:get",
+          },
+          {
+            capability: "system-health",
+            toolId: "system_health:read",
+          },
+        ],
       };
     }
+
     if (norm === "rev-parse head" || norm === "git rev-parse head") {
       return {
-        capability: "software-development",
+        intentsMatched: [norm],
         gitAction: "rev-parse head",
-        toolId: "git_operate:rev-parse head",
+        requiresHttpProbe: false,
+        requiresHealthCheck: false,
+        items: [
+          {
+            capability: "software-development",
+            gitAction: "rev-parse head",
+            toolId: "git_operate:rev-parse head",
+          },
+        ],
       };
     }
+
     if (
       norm === "branch --show-current" ||
       norm === "git branch --show-current"
     ) {
       return {
-        capability: "software-development",
+        intentsMatched: [norm],
         gitAction: "branch --show-current",
-        toolId: "git_operate:branch --show-current",
+        requiresHttpProbe: false,
+        requiresHealthCheck: false,
+        items: [
+          {
+            capability: "software-development",
+            gitAction: "branch --show-current",
+            toolId: "git_operate:branch --show-current",
+          },
+        ],
       };
     }
+
     if (norm === "log -1" || norm === "git log -1") {
       return {
-        capability: "software-development",
+        intentsMatched: [norm],
         gitAction: "log -1",
-        toolId: "git_operate:log -1",
+        requiresHttpProbe: false,
+        requiresHealthCheck: false,
+        items: [
+          {
+            capability: "software-development",
+            gitAction: "log -1",
+            toolId: "git_operate:log -1",
+          },
+        ],
       };
     }
 
@@ -703,10 +760,8 @@ export class DiagnosticWorker {
     }
 
     // Stage 7: DiagnosticWorker Read-Only Capability Resolution
-    const resolvedCapability = this.resolveDiagnosticCapability(
-      params.rawCommandText,
-    );
-    if (!resolvedCapability || !resolvedCapability.gitAction) {
+    const resolution = this.resolveDiagnosticCapability(params.rawCommandText);
+    if (!resolution || !resolution.gitAction) {
       const auditOk = await this.auditDenial(
         "STAGE_7_CAPABILITY",
         params.workspaceId,
@@ -722,7 +777,7 @@ export class DiagnosticWorker {
       };
     }
 
-    const targetGitAction = resolvedCapability.gitAction;
+    const targetGitAction = resolution.gitAction;
 
     if (!this.validateGitAction(targetGitAction)) {
       const auditOk = await this.auditDenial(
@@ -740,7 +795,7 @@ export class DiagnosticWorker {
       };
     }
 
-    // Stage 8: PolicyEngine Evaluation for Exact Resolved Capability (MUST be explicitly SAFE)
+    // Stage 8: PolicyEngine Evaluation for Primary Resolved Capability (MUST be explicitly SAFE)
     const gitRule = this.policyEngine.getRule(`git_operate:${targetGitAction}`);
     if (gitRule !== "SAFE") {
       const auditOk = await this.auditDenial(
@@ -832,8 +887,9 @@ export class DiagnosticWorker {
 
     // --- Subsystem 2: Bounded HTTP Probe Diagnostics ---
     if (
-      params.targetOrigin ||
-      (ws.allowedHttpOrigins && ws.allowedHttpOrigins.length > 0)
+      resolution.requiresHttpProbe &&
+      (params.targetOrigin ||
+        (ws.allowedHttpOrigins && ws.allowedHttpOrigins.length > 0))
     ) {
       const httpPolicyRule = this.policyEngine.getRule("http_probe:get");
       if (httpPolicyRule !== "SAFE") {
@@ -894,7 +950,7 @@ export class DiagnosticWorker {
     }
 
     // --- Subsystem 3: Service Health Diagnostics ---
-    if (this.healthProvider) {
+    if (resolution.requiresHealthCheck && this.healthProvider) {
       const healthPolicyRule = this.policyEngine.getRule("system_health:read");
       if (healthPolicyRule !== "SAFE") {
         items.push({
@@ -929,7 +985,7 @@ export class DiagnosticWorker {
           });
         }
       }
-    } else {
+    } else if (resolution.requiresHealthCheck) {
       items.push({
         name: "Service Health Check",
         source: "SystemHealthProvider",

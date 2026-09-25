@@ -15,6 +15,7 @@ import { ResourceResolver } from "../src/core/registry/resolver.js";
 import { PolicyEngine } from "../src/core/policy/index.js";
 import { AuditManager, InMemoryAuditStore } from "../src/core/audit/index.js";
 import { SystemHealthProvider } from "../src/core/tools/index.js";
+import { GitTool } from "../src/core/git/index.js";
 
 describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
   let tempDir: string;
@@ -166,6 +167,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
     });
 
     it("14d. HTTP capability requires its own SAFE policy (non-SAFE or missing prevents HTTP probe execution)", async () => {
+      const httpGetSpy = vi.spyOn(BoundedHttpProbe.prototype, "get");
       const freshPolicy = new PolicyEngine();
       freshPolicy.setRule("git_operate:status", "SAFE");
       freshPolicy.setRule("system_health:read", "SAFE");
@@ -192,14 +194,22 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
 
       expect(res.success).toBe(true);
       expect(httpCalls).toBe(0);
+      expect(httpGetSpy).toHaveBeenCalledTimes(0);
+
       const httpItem = res.report?.items.find(
         (i) => i.source === "BoundedHttpProbe",
       );
       expect(httpItem?.status).toBe("FAIL");
       expect(httpItem?.rawResult).toMatch(/AUTHORIZATION FAILURE/i);
+
+      httpGetSpy.mockRestore();
     });
 
     it("14e. Service Health capability requires its own SAFE policy (non-SAFE or missing prevents Health execution)", async () => {
+      const healthGetReportSpy = vi.spyOn(
+        SystemHealthProvider.prototype,
+        "getReport",
+      );
       const freshPolicy = new PolicyEngine();
       freshPolicy.setRule("git_operate:status", "SAFE");
       freshPolicy.setRule("http_probe:get", "SAFE");
@@ -226,11 +236,15 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
 
       expect(res.success).toBe(true);
       expect(healthCalls).toBe(0);
+      expect(healthGetReportSpy).toHaveBeenCalledTimes(0);
+
       const healthItem = res.report?.items.find(
         (i) => i.source === "SystemHealthProvider",
       );
       expect(healthItem?.status).toBe("FAIL");
       expect(healthItem?.rawResult).toMatch(/AUTHORIZATION FAILURE/i);
+
+      healthGetReportSpy.mockRestore();
     });
 
     it("14f. Git capability missing policy rule causes fail-closed zero tool execution", async () => {
@@ -533,17 +547,25 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
 
   // --- Category 4: Policy & Capability Controls (Tests 13-16) ---
   describe("4. Policy & Capability Controls", () => {
-    it("13. SAFE policy rule permits diagnostic execution", async () => {
+    it("13. SAFE policy rule permits diagnostic execution and invokes actual tool method", async () => {
+      const gitExecuteSpy = vi.spyOn(GitTool.prototype, "execute");
       policyEngine.setRule("git_operate:status", "SAFE");
+
       const res = await worker.executeDiagnostics({
         token: validToken,
         workspaceId,
         rawCommandText: "check YarTrader status",
       });
+
       expect(res.success).toBe(true);
+      expect(gitExecuteSpy).toHaveBeenCalledTimes(1);
+      expect(gitExecuteSpy.mock.calls[0][0].action).toBe("status");
+
+      gitExecuteSpy.mockRestore();
     });
 
-    it("14. Policy Engine BLOCKED rule causes fail-closed zero tool execution", async () => {
+    it("14. Policy Engine BLOCKED rule causes fail-closed zero tool execution on prototype method", async () => {
+      const gitExecuteSpy = vi.spyOn(GitTool.prototype, "execute");
       policyEngine.setRule("git_operate:status", "BLOCKED");
 
       let gitCalls = 0;
@@ -561,6 +583,9 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(res.denialStage).toBe("8. PolicyEngine");
       expect(res.toolExecutionCount).toBe(0);
       expect(gitCalls).toBe(0);
+      expect(gitExecuteSpy).toHaveBeenCalledTimes(0);
+
+      gitExecuteSpy.mockRestore();
     });
 
     it("15. TerminalTool is structurally unavailable to DiagnosticWorker", async () => {
