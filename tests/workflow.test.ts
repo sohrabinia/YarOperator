@@ -8,6 +8,11 @@ import {
   AuditLogger,
   Tool,
   ExecutionContext,
+  SecureToolEcosystem,
+  PolicyEngine,
+  EnvironmentManager,
+  WorkspacePolicyManager,
+  WorkspacePolicy,
 } from "../src/index.js";
 
 describe("WorkflowEngine Operator", () => {
@@ -19,12 +24,48 @@ describe("WorkflowEngine Operator", () => {
   const mockContext: ExecutionContext = {
     executionId: "wf_123",
     timestamp: new Date(),
+    workspaceId: "yartrader",
+    environmentId: "env_yartrader",
   };
 
   beforeEach(() => {
     registry = new ToolRegistry();
     auditLogger = new AuditLogger();
-    executionEngine = new ExecutionEngine(registry, auditLogger);
+
+    const policyEngine = new PolicyEngine();
+    policyEngine.setRule("step1_tool", "SAFE");
+    policyEngine.setRule("step2_tool", "SAFE");
+
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "Default Environment",
+      type: "PRODUCTION",
+      capabilities: ["step1_tool", "step2_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
+    const workspacePolicyManager = new WorkspacePolicyManager();
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["step1_tool", "step2_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
+    const ecosystem = new SecureToolEcosystem(
+      registry,
+      policyEngine,
+      undefined,
+      environmentManager,
+      workspacePolicyManager,
+    );
+
+    executionEngine = new ExecutionEngine(registry, auditLogger, ecosystem);
     workflowEngine = new WorkflowEngine(executionEngine, auditLogger);
 
     const step1Tool: Tool = {

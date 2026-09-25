@@ -430,17 +430,21 @@ export class PolicyEngine {
   resolveSafetyLevel(
     toolId: string,
     actionKey?: string,
+    declaredToolSafetyLevel?: ActionSafetyLevel,
   ): ActionSafetyLevel | undefined {
     if (actionKey && this.explicitRules.has(actionKey)) {
       return this.explicitRules.get(actionKey);
     }
     // If actionKey is specific (<toolId>:<subAction>) and not explicitly defined,
-    // do NOT fall back to broad toolId rule for unknown subActions!
+    // do NOT fall back to broad toolId rule or declared tool level for unknown subActions!
     if (actionKey && actionKey.includes(":") && actionKey !== toolId) {
       return undefined;
     }
     if (this.explicitRules.has(toolId)) {
       return this.explicitRules.get(toolId);
+    }
+    if (declaredToolSafetyLevel) {
+      return declaredToolSafetyLevel;
     }
     return undefined;
   }
@@ -448,13 +452,18 @@ export class PolicyEngine {
   async evaluate(
     request: ToolRequest,
     actionKey?: string,
+    declaredToolSafetyLevel?: ActionSafetyLevel,
   ): Promise<{
     allowed: boolean;
     safetyLevel?: ActionSafetyLevel;
     reason?: string;
   }> {
     const targetKey = actionKey || request.toolId;
-    const ruleLevel = this.resolveSafetyLevel(request.toolId, actionKey);
+    const ruleLevel = this.resolveSafetyLevel(
+      request.toolId,
+      actionKey,
+      declaredToolSafetyLevel,
+    );
 
     if (ruleLevel === "BLOCKED") {
       return {

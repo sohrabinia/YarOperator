@@ -1,18 +1,12 @@
 import {
   ExecutionContext,
   ExecutionState,
-  ToolRequest,
   ToolResult,
 } from "../contracts/index.js";
+import { ExecutionScope } from "../orchestrator/index.js";
 import { ToolRegistry } from "../registry/index.js";
 import { AuditLogger } from "../audit/index.js";
-
-export interface PolicyEvaluator {
-  evaluate(
-    request: ToolRequest,
-    actionKey?: string,
-  ): Promise<{ allowed: boolean; reason?: string }>;
-}
+import { SecureToolEcosystem } from "../tools/index.js";
 
 export class ExecutionEngine {
   private state: ExecutionState = "IDLE";
@@ -20,7 +14,7 @@ export class ExecutionEngine {
   constructor(
     private registry: ToolRegistry,
     private auditLogger: AuditLogger,
-    private policyEvaluator?: PolicyEvaluator,
+    private ecosystem?: SecureToolEcosystem,
   ) {}
 
   getState(): ExecutionState {
@@ -40,9 +34,9 @@ export class ExecutionEngine {
       details: { toolId, params },
     });
 
-    const tool = this.registry.get(toolId);
-    if (!tool) {
-      const errorMsg = `Tool '${toolId}' not found in ToolRegistry.`;
+    if (!this.ecosystem) {
+      const errorMsg =
+        "FAIL CLOSED: Authoritative SecureToolEcosystem is required for ExecutionEngine tool execution.";
       this.auditLogger.log({
         executionId: context.executionId,
         type: "ERROR",
@@ -52,65 +46,44 @@ export class ExecutionEngine {
       return { success: false, error: errorMsg };
     }
 
-    if (this.policyEvaluator) {
-      let canonicalAction = (params as any)?.action
-        ? `${toolId}:${(params as any).action}`
-        : toolId;
-      if (typeof tool.resolveCanonicalAction === "function") {
-        canonicalAction = tool.resolveCanonicalAction(params);
-      }
+    const wsId = context.workspaceId || "yartrader";
+    const envId = context.environmentId || `env_${wsId}`;
 
-      const evaluation = await this.policyEvaluator.evaluate(
-        {
-          toolId,
-          params,
-          context,
-        },
-        canonicalAction,
-      );
-      this.auditLogger.log({
-        executionId: context.executionId,
-        type: "POLICY_EVALUATION",
-        details: { toolId, evaluation },
-      });
+    const enrichedContext: ExecutionContext = {
+      ...context,
+      workspaceId: wsId,
+      environmentId: envId,
+    };
 
-      if (!evaluation.allowed) {
-        const errorMsg =
-          evaluation.reason || "Execution blocked by policy engine.";
-        this.transitionState("FAILED", context.executionId);
-        return { success: false, error: errorMsg };
-      }
-    }
+    const scope: ExecutionScope = {
+      id: `scope_${context.executionId}`,
+      workspaceId: wsId,
+      agentId: "agent_execution_engine",
+      allowedCapabilities: [toolId],
+      allowedTools: [toolId],
+      maxRetries: 1,
+    };
 
-    try {
-      const result = (await tool.execute(
-        params,
-        context,
-      )) as ToolResult<TOutput>;
+    const result = await this.ecosystem.execute<TParams, TOutput>(
+      toolId,
+      params,
+      scope,
+      enrichedContext,
+    );
 
-      this.auditLogger.log({
-        executionId: context.executionId,
-        type: "STEP_END",
-        details: { toolId, success: result.success, result },
-      });
+    this.auditLogger.log({
+      executionId: context.executionId,
+      type: "STEP_END",
+      details: { toolId, success: result.success, result },
+    });
 
-      if (result.success) {
-        this.transitionState("COMPLETED", context.executionId);
-      } else {
-        this.transitionState("FAILED", context.executionId);
-      }
-
-      return result;
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      this.auditLogger.log({
-        executionId: context.executionId,
-        type: "ERROR",
-        details: { toolId, error: errorMessage },
-      });
+    if (result.success) {
+      this.transitionState("COMPLETED", context.executionId);
+    } else {
       this.transitionState("FAILED", context.executionId);
-      return { success: false, error: errorMessage };
     }
+
+    return result;
   }
 
   private transitionState(

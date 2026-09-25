@@ -8,6 +8,11 @@ import {
   ScheduleDefinition,
   Clock,
   Tool,
+  SecureToolEcosystem,
+  PolicyEngine,
+  EnvironmentManager,
+  WorkspacePolicyManager,
+  WorkspacePolicy,
 } from "../src/index.js";
 import { unlinkSync, existsSync } from "fs";
 import { join } from "path";
@@ -38,7 +43,40 @@ describe("DurableScheduler Remediated Capabilities", () => {
 
     registry = new ToolRegistry();
     auditLogger = new AuditLogger();
-    executionEngine = new ExecutionEngine(registry, auditLogger);
+
+    const policyEngine = new PolicyEngine();
+    policyEngine.setRule("sched_tool", "SAFE");
+
+    const environmentManager = new EnvironmentManager();
+    environmentManager.registerEnvironment({
+      id: "env_yartrader",
+      name: "Default Environment",
+      type: "PRODUCTION",
+      capabilities: ["sched_tool"],
+      accessScope: "workspace",
+      riskLevel: "SAFE",
+      healthy: true,
+      metadata: { workspaceId: "yartrader" },
+    });
+
+    const workspacePolicyManager = new WorkspacePolicyManager();
+    workspacePolicyManager.registerPolicy(
+      new WorkspacePolicy({
+        workspaceId: "yartrader",
+        allowedTools: ["sched_tool"],
+        allowedRoots: [process.cwd()],
+      }),
+    );
+
+    const ecosystem = new SecureToolEcosystem(
+      registry,
+      policyEngine,
+      undefined,
+      environmentManager,
+      workspacePolicyManager,
+    );
+
+    executionEngine = new ExecutionEngine(registry, auditLogger, ecosystem);
     workflowEngine = new WorkflowEngine(executionEngine, auditLogger);
     clock = new TestClock(new Date("2026-01-01T00:00:00.000Z"));
 
