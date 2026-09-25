@@ -23,6 +23,7 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
       host: "127.0.0.1",
       bearerToken: "test-runtime-token",
       ownerId: "owner_sohrab",
+      useInMemoryStores: true,
     });
 
     server = res.server;
@@ -75,6 +76,7 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
     const res = await createProductionServer({
       port: 0,
       host: "127.0.0.1",
+      useInMemoryStores: true,
     });
 
     server = res.server;
@@ -113,6 +115,7 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
       const res = await createProductionServer({
         port: 0,
         host: "127.0.0.1",
+        dbPath: path.join(tempDir, "test_a.db"),
       });
       server = res.server;
       const port = res.port;
@@ -141,6 +144,7 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
       const res = await createProductionServer({
         port: 0,
         host: "127.0.0.1",
+        dbPath: path.join(tempDir, "test_b.db"),
       });
       server = res.server;
       const port = res.port;
@@ -162,6 +166,7 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
       const res = await createProductionServer({
         port: 0,
         host: "127.0.0.1",
+        dbPath: path.join(tempDir, "test_c.db"),
       });
       server = res.server;
       const port = res.port;
@@ -181,6 +186,7 @@ describe("YarOperator Web Runtime Entrypoint Test Suite", () => {
       const res = await createProductionServer({
         port: 0,
         host: "127.0.0.1",
+        dbPath: path.join(tempDir, "test_d.db"),
       });
       server = res.server;
       const port = res.port;

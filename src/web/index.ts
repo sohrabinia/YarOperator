@@ -12,11 +12,15 @@ export async function createProductionServer(options?: {
   googleRedirectUri?: string;
   authorizedOwnerEmail?: string;
   mockJwksPublicKeyPem?: string;
+  dbPath?: string;
+  useInMemoryStores?: boolean;
 }): Promise<{ server: OperatorWebServer; port: number }> {
   const apiHandler = await bootstrapOperatorApplication({
     bearerToken: options?.bearerToken,
     ownerId: options?.ownerId,
     resourcesPath: process.env.OPERATOR_RESOURCES_PATH,
+    dbPath: options?.dbPath,
+    useInMemoryStores: options?.useInMemoryStores,
   });
 
   const targetPort =
