@@ -54,6 +54,7 @@ describe("YarOperator Production Remediation E2E Proof Suite", () => {
       bearerToken: "valid_owner_bearer_token_123",
       ownerId: "owner_sohrab",
       authorizedOwnerEmail: "m.a.sohrabinia@gmail.com",
+      dbPath: testDbPath,
     });
 
     serverInstance = server;
