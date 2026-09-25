@@ -403,13 +403,51 @@ export class DiagnosticWorker {
     private policyEngine: PolicyEngine,
     private auditManager: AuditManager,
     private healthProvider?: SystemHealthProvider,
-  ) {
-    if (this.policyEngine.getRule("http_probe:get") === undefined) {
-      this.policyEngine.setRule("http_probe:get", "SAFE");
+  ) {}
+
+  public resolveDiagnosticCapability(
+    rawText: string,
+  ): { capability: string; gitAction?: string; toolId: string } | null {
+    if (!rawText) return null;
+    const norm = DiagnosticWorker.normalizeIntentText(rawText).toLowerCase();
+
+    if (
+      norm === "status" ||
+      norm === "git status" ||
+      this.isDiagnosticIntent(norm)
+    ) {
+      return {
+        capability: "software-development",
+        gitAction: "status",
+        toolId: "git_operate:status",
+      };
     }
-    if (this.policyEngine.getRule("system_health:read") === undefined) {
-      this.policyEngine.setRule("system_health:read", "SAFE");
+    if (norm === "rev-parse head" || norm === "git rev-parse head") {
+      return {
+        capability: "software-development",
+        gitAction: "rev-parse head",
+        toolId: "git_operate:rev-parse head",
+      };
     }
+    if (
+      norm === "branch --show-current" ||
+      norm === "git branch --show-current"
+    ) {
+      return {
+        capability: "software-development",
+        gitAction: "branch --show-current",
+        toolId: "git_operate:branch --show-current",
+      };
+    }
+    if (norm === "log -1" || norm === "git log -1") {
+      return {
+        capability: "software-development",
+        gitAction: "log -1",
+        toolId: "git_operate:log -1",
+      };
+    }
+
+    return null;
   }
 
   public static normalizeIntentText(text: string): string {
@@ -664,38 +702,58 @@ export class DiagnosticWorker {
       };
     }
 
-    // Stage 7: PolicyEngine Evaluation (MUST be explicitly SAFE)
-    const gitRule = this.policyEngine.getRule("git_operate:status");
-    if (gitRule !== "SAFE") {
+    // Stage 7: DiagnosticWorker Read-Only Capability Resolution
+    const resolvedCapability = this.resolveDiagnosticCapability(
+      params.rawCommandText,
+    );
+    if (!resolvedCapability || !resolvedCapability.gitAction) {
       const auditOk = await this.auditDenial(
-        "STAGE_7_POLICY",
+        "STAGE_7_CAPABILITY",
         params.workspaceId,
-        `git_operate:status rule is '${gitRule || "UNKNOWN"}' (requires SAFE)`,
+        "Command text does not resolve to a supported diagnostic capability",
       );
       return {
         success: false,
         error: auditOk
-          ? `AUTHORIZATION FAILURE: Diagnostic capability 'git_operate:status' rule is '${gitRule || "UNKNOWN"}'. Strictly requires SAFE rule.`
-          : "AUTHORIZATION FAILURE: Policy not SAFE and audit persistence failed.",
-        denialStage: "7. PolicyEngine",
+          ? "AUTHORIZATION FAILURE: Input text does not match recognized diagnostic capabilities."
+          : "AUTHORIZATION FAILURE: Unrecognized capability and audit persistence failed.",
+        denialStage: "7. Capability Resolution",
         toolExecutionCount,
       };
     }
 
-    // Stage 8: DiagnosticWorker Read-Only Capability Resolution
-    // Verify intent is actually diagnostic
-    if (!this.isDiagnosticIntent(params.rawCommandText)) {
+    const targetGitAction = resolvedCapability.gitAction;
+
+    if (!this.validateGitAction(targetGitAction)) {
       const auditOk = await this.auditDenial(
-        "STAGE_8_CAPABILITY",
+        "STAGE_7_CAPABILITY",
         params.workspaceId,
-        "Command text is not recognized as diagnostic intent",
+        `Resolved Git action '${targetGitAction}' is not in allowed list`,
       );
       return {
         success: false,
         error: auditOk
-          ? "AUTHORIZATION FAILURE: Input text does not match recognized diagnostic intents."
-          : "AUTHORIZATION FAILURE: Unrecognized intent and audit persistence failed.",
-        denialStage: "8. Capability Resolution",
+          ? `AUTHORIZATION FAILURE: Git action '${targetGitAction}' is not allowed.`
+          : "AUTHORIZATION FAILURE: Action not allowed and audit persistence failed.",
+        denialStage: "7. Capability Resolution",
+        toolExecutionCount,
+      };
+    }
+
+    // Stage 8: PolicyEngine Evaluation for Exact Resolved Capability (MUST be explicitly SAFE)
+    const gitRule = this.policyEngine.getRule(`git_operate:${targetGitAction}`);
+    if (gitRule !== "SAFE") {
+      const auditOk = await this.auditDenial(
+        "STAGE_8_POLICY",
+        params.workspaceId,
+        `git_operate:${targetGitAction} rule is '${gitRule || "UNKNOWN"}' (requires SAFE)`,
+      );
+      return {
+        success: false,
+        error: auditOk
+          ? `AUTHORIZATION FAILURE: Diagnostic capability 'git_operate:${targetGitAction}' rule is '${gitRule || "UNKNOWN"}'. Strictly requires SAFE rule.`
+          : "AUTHORIZATION FAILURE: Policy not SAFE and audit persistence failed.",
+        denialStage: "8. PolicyEngine",
         toolExecutionCount,
       };
     }
@@ -707,80 +765,68 @@ export class DiagnosticWorker {
     const timestamp = new Date().toISOString();
 
     // --- Subsystem 1: Git Read-Only Diagnostics ---
-    const targetGitAction = "status";
-
-    if (!this.validateGitAction(targetGitAction)) {
+    const gitPolicyRule = this.policyEngine.getRule(
+      `git_operate:${targetGitAction}`,
+    );
+    if (gitPolicyRule !== "SAFE") {
       items.push({
         name: "Git Status Check",
         source: "GitTool",
         timestamp,
         status: "FAIL",
-        rawResult: `AUTHORIZATION FAILURE: Git action '${targetGitAction}' is not in allowedGitActions list.`,
+        rawResult: `AUTHORIZATION FAILURE: Policy rule for 'git_operate:${targetGitAction}' is '${gitPolicyRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
       });
     } else {
-      const gitPolicyRule = this.policyEngine.getRule(
-        `git_operate:${targetGitAction}`,
-      );
-      if (gitPolicyRule !== "SAFE") {
-        items.push({
-          name: "Git Status Check",
-          source: "GitTool",
-          timestamp,
-          status: "FAIL",
-          rawResult: `AUTHORIZATION FAILURE: Policy rule for 'git_operate:${targetGitAction}' is '${gitPolicyRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
-        });
-      } else {
-        try {
-          spies?.gitSpy?.();
+      try {
+        spies?.gitSpy?.();
 
-          const gitTool = new GitTool(this.resolver);
-          const gitContext: ExecutionContext = context || {
-            executionId: `diag_git_${Date.now()}`,
-            timestamp: new Date(),
-            workspaceId: params.workspaceId,
-          };
+        const gitTool = new GitTool(this.resolver);
+        const gitContext: ExecutionContext = context || {
+          executionId: `diag_git_${Date.now()}`,
+          timestamp: new Date(),
+          workspaceId: params.workspaceId,
+        };
 
-          const gitStatusRes = await gitTool.execute(
-            {
-              action: targetGitAction as any,
-              cwd: resourceRes.resource.canonicalPath,
-            },
-            gitContext,
-          );
+        const gitStatusRes = await gitTool.execute(
+          {
+            action: targetGitAction as any,
+            cwd: resourceRes.resource.canonicalPath,
+          },
+          gitContext,
+        );
 
-          toolExecutionCount++;
+        toolExecutionCount++;
 
-          if (gitStatusRes.success) {
-            const rawOut = gitStatusRes.output?.output || "Git status clean";
-            items.push({
-              name: "Git Status Check",
-              source: "GitTool",
-              timestamp,
-              status: "OK",
-              rawResult: this.escapeHtml(
-                this.redactSecrets(rawOut.substring(0, 1000)),
-              ),
-            });
-          } else {
-            items.push({
-              name: "Git Status Check",
-              source: "GitTool",
-              timestamp,
-              status: "FAIL",
-              rawResult: this.escapeHtml(
-                gitStatusRes.error || "Git status failed",
-              ),
-            });
-          }
-        } catch (err: any) {
+        if (gitStatusRes.success) {
+          const rawOut = gitStatusRes.output?.output || "Git status clean";
+          items.push({
+            name: "Git Status Check",
+            source: "GitTool",
+            timestamp,
+            status: "OK",
+            rawResult: this.escapeHtml(
+              this.redactSecrets(rawOut.substring(0, 1000)),
+            ),
+          });
+        } else {
           items.push({
             name: "Git Status Check",
             source: "GitTool",
             timestamp,
             status: "FAIL",
-            rawResult: this.escapeHtml(err.message),
+            rawResult: this.escapeHtml(
+              gitStatusRes.error || "Git status failed",
+            ),
           });
         }
+      } catch (err: any) {
+        items.push({
+          name: "Git Status Check",
+          source: "GitTool",
+          timestamp,
+          status: "FAIL",
+          rawResult: this.escapeHtml(err.message),
+        });
       }
     }
 

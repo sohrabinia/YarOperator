@@ -57,6 +57,8 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
     resolver = new ResourceResolver(registry, auditManager);
     policyEngine = new PolicyEngine();
     policyEngine.setRule("git_operate:status", "SAFE");
+    policyEngine.setRule("http_probe:get", "SAFE");
+    policyEngine.setRule("system_health:read", "SAFE");
 
     // Setup active owner user and workspace membership in IdentityStore
     activeUserId = "owner_sohrab";
@@ -163,12 +165,22 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(gitCalls).toBe(0);
     });
 
-    it("14d. HTTP capability requires its own SAFE policy (non-SAFE prevents HTTP probe execution)", async () => {
-      policyEngine.setRule("git_operate:status", "SAFE");
-      policyEngine.setRule("http_probe:get", "BLOCKED");
+    it("14d. HTTP capability requires its own SAFE policy (non-SAFE or missing prevents HTTP probe execution)", async () => {
+      const freshPolicy = new PolicyEngine();
+      freshPolicy.setRule("git_operate:status", "SAFE");
+      freshPolicy.setRule("system_health:read", "SAFE");
+
+      const freshWorker = new DiagnosticWorker(
+        identityStore,
+        registry,
+        resolver,
+        freshPolicy,
+        auditManager,
+        healthProvider,
+      );
 
       let httpCalls = 0;
-      const res = await worker.executeDiagnostics(
+      const res = await freshWorker.executeDiagnostics(
         {
           token: validToken,
           workspaceId,
@@ -187,12 +199,22 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(httpItem?.rawResult).toMatch(/AUTHORIZATION FAILURE/i);
     });
 
-    it("14e. Service Health capability requires its own SAFE policy (non-SAFE prevents Health execution)", async () => {
-      policyEngine.setRule("git_operate:status", "SAFE");
-      policyEngine.setRule("system_health:read", "APPROVAL_REQUIRED");
+    it("14e. Service Health capability requires its own SAFE policy (non-SAFE or missing prevents Health execution)", async () => {
+      const freshPolicy = new PolicyEngine();
+      freshPolicy.setRule("git_operate:status", "SAFE");
+      freshPolicy.setRule("http_probe:get", "SAFE");
+
+      const freshWorker = new DiagnosticWorker(
+        identityStore,
+        registry,
+        resolver,
+        freshPolicy,
+        auditManager,
+        healthProvider,
+      );
 
       let healthCalls = 0;
-      const res = await worker.executeDiagnostics(
+      const res = await freshWorker.executeDiagnostics(
         {
           token: validToken,
           workspaceId,
@@ -211,6 +233,34 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(healthItem?.rawResult).toMatch(/AUTHORIZATION FAILURE/i);
     });
 
+    it("14f. Git capability missing policy rule causes fail-closed zero tool execution", async () => {
+      const emptyPolicy = new PolicyEngine(); // No rules defined
+      const emptyWorker = new DiagnosticWorker(
+        identityStore,
+        registry,
+        resolver,
+        emptyPolicy,
+        auditManager,
+      );
+
+      let gitCalls = 0;
+      const res = await emptyWorker.executeDiagnostics(
+        {
+          token: validToken,
+          workspaceId,
+          rawCommandText: "check YarTrader status",
+        },
+        undefined,
+        { gitSpy: () => gitCalls++ },
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.denialStage).toBe("8. PolicyEngine");
+      expect(res.error).toMatch(/Strictly requires SAFE rule/i);
+      expect(res.toolExecutionCount).toBe(0);
+      expect(gitCalls).toBe(0);
+    });
+
     it("14b. Policy Engine APPROVAL_REQUIRED rule causes fail-closed zero tool execution", async () => {
       policyEngine.setRule("git_operate:status", "APPROVAL_REQUIRED");
 
@@ -226,7 +276,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       );
 
       expect(res.success).toBe(false);
-      expect(res.denialStage).toBe("7. PolicyEngine");
+      expect(res.denialStage).toBe("8. PolicyEngine");
       expect(res.error).toMatch(/Strictly requires SAFE rule/i);
       expect(res.toolExecutionCount).toBe(0);
       expect(gitCalls).toBe(0);
@@ -271,7 +321,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       );
 
       expect(res.success).toBe(false);
-      expect(res.denialStage).toBe("8. Capability Resolution");
+      expect(res.denialStage).toBe("7. Capability Resolution");
       expect(res.toolExecutionCount).toBe(0);
       expect(gitCalls).toBe(0);
     });
@@ -508,7 +558,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       );
 
       expect(res.success).toBe(false);
-      expect(res.denialStage).toBe("7. PolicyEngine");
+      expect(res.denialStage).toBe("8. PolicyEngine");
       expect(res.toolExecutionCount).toBe(0);
       expect(gitCalls).toBe(0);
     });
@@ -528,7 +578,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       );
 
       expect(res.success).toBe(false);
-      expect(res.denialStage).toBe("8. Capability Resolution");
+      expect(res.denialStage).toBe("7. Capability Resolution");
       expect(res.toolExecutionCount).toBe(0);
     });
 
@@ -545,7 +595,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       );
 
       expect(res.success).toBe(false);
-      expect(res.denialStage).toBe("8. Capability Resolution");
+      expect(res.denialStage).toBe("7. Capability Resolution");
       expect(res.toolExecutionCount).toBe(0);
       expect(gitCalls).toBe(0);
     });
@@ -1021,7 +1071,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       );
 
       expect(res.success).toBe(false);
-      expect(res.denialStage).toBe("8. Capability Resolution");
+      expect(res.denialStage).toBe("7. Capability Resolution");
       expect(res.toolExecutionCount).toBe(0);
       expect(gitCalls).toBe(0);
     });
@@ -1044,7 +1094,7 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
 
       // Injection with extra text is rejected as invalid intent, executing zero tools
       expect(res.success).toBe(false);
-      expect(res.denialStage).toBe("8. Capability Resolution");
+      expect(res.denialStage).toBe("7. Capability Resolution");
       expect(res.toolExecutionCount).toBe(0);
       expect(gitCalls).toBe(0);
     });
