@@ -783,6 +783,7 @@ export class OperatorWebServer {
       res.end(
         JSON.stringify({
           authenticated: true,
+          token: session.sessionId,
           user: {
             email: session.email,
             ownerId: session.ownerId,

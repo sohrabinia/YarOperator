@@ -167,7 +167,7 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     expect(session.email).toBe(AUTHORIZED_EMAIL);
     expect(session.ownerId).toBeDefined();
 
-    // Verify /auth/me with session
+    // Verify /auth/me with session returns authenticated status and session token
     const meRes = await fetch(`http://127.0.0.1:${serverPort}/auth/me`, {
       headers: {
         Cookie: `yo_session=${session.sessionId}`,
@@ -177,8 +177,185 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     expect(meRes.status).toBe(200);
     const meData = (await meRes.json()) as any;
     expect(meData.authenticated).toBe(true);
+    expect(meData.token).toBe(session.sessionId);
     expect(meData.user.email).toBe(AUTHORIZED_EMAIL);
     expect(meData.user.ownerId).toBeDefined();
+  });
+
+  it("12. Negative Auth Gate 1: POST /api/v1/operator/chat without Authorization header or cookie is REJECTED (401)", async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(res.status).toBe(401);
+    const data = (await res.json()) as any;
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("Missing or invalid Bearer token format");
+  });
+
+  it("13. Negative Auth Gate 2: Authorization header with empty Bearer token is REJECTED (401)", async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer ",
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(res.status).toBe(401);
+    const data = (await res.json()) as any;
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("Bearer token");
+  });
+
+  it("14. Negative Auth Gate 3: Authorization header with malformed scheme is REJECTED (401)", async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Basic dXNlcjpwYXNz",
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(res.status).toBe(401);
+    const data = (await res.json()) as any;
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("Missing or invalid Bearer token format");
+  });
+
+  it("15. Negative Auth Gate 4: Nonexistent/invalid Bearer token is REJECTED (401)", async () => {
+    const res = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer invalid_nonexistent_token_999",
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(res.status).toBe(401);
+    const data = (await res.json()) as any;
+    expect(data.success).toBe(false);
+    expect(data.error).toContain("Invalid or expired Bearer token");
+  });
+
+  it("16. Complete Auth Lifecycle: Session token from /auth/me authenticates chat, and revocation rejects token", async () => {
+    // Step A: Create session
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    // Step B: Query /auth/me with session cookie to simulate frontend session hydration
+    const meRes = await fetch(`http://127.0.0.1:${serverPort}/auth/me`, {
+      headers: { Cookie: `yo_session=${session.sessionId}` },
+    });
+    expect(meRes.status).toBe(200);
+    const meData = (await meRes.json()) as any;
+    expect(meData.authenticated).toBe(true);
+    const hydratedToken = meData.token;
+    expect(hydratedToken).toBe(session.sessionId);
+
+    // Step C: Execute Operator Chat using Bearer <hydratedToken>
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${hydratedToken}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(200);
+    const chatData = (await chatRes.json()) as any;
+    expect(chatData.result.accepted).toBe(true);
+
+    // Step D: Revoke session (simulate logout / server revocation)
+    server.revokeSession(hydratedToken);
+
+    // Step E: Subsequent request with revoked Bearer token is REJECTED (401)
+    const revokedRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${hydratedToken}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(revokedRes.status).toBe(401);
+    const revokedData = (await revokedRes.json()) as any;
+    expect(revokedData.success).toBe(false);
+    expect(revokedData.error).toContain("Invalid or expired Bearer token");
+  });
+
+  it("17. Valid authentication does NOT bypass M12 Policy Engine or execution boundaries", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.sessionId}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "وضعیت سیستم را بررسی کن",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(200);
+    const chatData = (await chatRes.json()) as any;
+    // Authenticated command reaches Policy Engine intake boundary, which rejects or blocks unauthorized actions
+    expect(chatData.result.accepted).toBe(true);
+    expect(chatData.result.status).toBe("BLOCKED");
   });
 
   it("5. Real Google JWKS RS256 signature verification succeeds with valid key and fails on tampered signature", async () => {

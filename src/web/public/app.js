@@ -90,6 +90,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (data.authenticated && data.user) {
         currentUser = data.user;
+        if (data.token) {
+          sessionStorage.setItem("yo_bearer_token", data.token);
+        }
         if (loginBtn) loginBtn.classList.add("hidden");
         if (userBadge) userBadge.classList.remove("hidden");
         if (userEmail) userEmail.textContent = currentUser.email;
@@ -98,6 +101,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       } else {
         currentUser = null;
+        sessionStorage.removeItem("yo_bearer_token");
         if (loginBtn) loginBtn.classList.remove("hidden");
         if (userBadge) userBadge.classList.add("hidden");
       }
@@ -110,6 +114,7 @@ document.addEventListener("DOMContentLoaded", () => {
     logoutBtn.addEventListener("click", async () => {
       try {
         await fetch("/auth/logout", { method: "POST" });
+        sessionStorage.removeItem("yo_bearer_token");
         window.location.reload();
       } catch (err) {
         alert("خطا در خروج از حساب کاربری.");
@@ -137,12 +142,20 @@ document.addEventListener("DOMContentLoaded", () => {
     setSubmittingState(true);
 
     try {
+      const headers = {
+        "Content-Type": "application/json"
+      };
+
+      const bearerToken = sessionStorage.getItem("yo_bearer_token");
+      if (bearerToken) {
+        headers["Authorization"] = `Bearer ${bearerToken}`;
+      }
+
       // 2. Submit request to POST /api/v1/operator/chat
       const response = await fetch("/api/v1/operator/chat", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        credentials: "same-origin",
+        headers,
         body: JSON.stringify({
           workspaceId: "yartrader",
           environmentId: "env_yartrader",
