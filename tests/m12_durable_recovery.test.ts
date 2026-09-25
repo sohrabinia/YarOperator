@@ -65,17 +65,20 @@ class DummyTool implements Tool {
 }
 
 describe("M12 — Durable Operational State & Crash Recovery Test Suite", () => {
-  const dbPath = join(
-    tmpdir(),
-    `test_m12_durable_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.db`,
-  );
+  let dbPath: string;
 
   beforeEach(() => {
+    dbPath = join(
+      tmpdir(),
+      `test_m12_durable_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${Math.random().toString(36).substring(2, 6)}.db`,
+    );
     safelyRemoveDbFile(dbPath);
   });
 
   afterEach(() => {
-    safelyRemoveDbFile(dbPath);
+    if (dbPath) {
+      safelyRemoveDbFile(dbPath);
+    }
   });
 
   function setupEnvironment(customDbPath: string = dbPath) {
