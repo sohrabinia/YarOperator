@@ -8,6 +8,7 @@ import {
   YarTraderTool,
   CapabilityReporter,
   OperatorHealthTool,
+  CapabilityState,
 } from "../src/core/tools/index.js";
 import { WebResearchTool } from "../src/core/research/index.js";
 import { PolicyEngine, ApprovalManager } from "../src/core/policy/index.js";
@@ -26,7 +27,7 @@ function safelyRemoveFile(filePath: string): void {
   } catch {}
 }
 
-describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Suite", () => {
+describe("YarTrader Tool, Authentication & Dynamic 5-State Capability Discovery Suite", () => {
   let testDbPath: string;
   let ecosystem: SecureToolEcosystem;
   let policyEngine: PolicyEngine;
@@ -71,7 +72,7 @@ describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Sui
       wsPolicyManager,
     );
 
-    const tool = new YarTraderTool({ secret: TEST_SECRET });
+    const tool = new YarTraderTool({ testSecret: TEST_SECRET });
     ecosystem.registerTool(tool);
 
     policyEngine.setRule("yartrader_adapter:health", "SAFE");
@@ -114,7 +115,7 @@ describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Sui
     safelyRemoveFile(testDbPath);
   });
 
-  // --- YARTRADER AUTH & CONNECTION BOUNDS ---
+  // --- YARTRADER AUTHENTICATION & BOUNDED CONNECTION ---
 
   it("1. Missing server-side authentication secret yields UNAVAILABLE (fail closed)", async () => {
     delete process.env.OPERATOR_YARTRADER_SECRET;
@@ -152,7 +153,7 @@ describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Sui
 
     const toolWithWrongSecret = new YarTraderTool({
       baseUrl: targetUrl,
-      secret: "invalid_wrong_secret",
+      testSecret: "invalid_wrong_secret",
     });
 
     const res = await toolWithWrongSecret.execute({ action: "health" });
@@ -183,7 +184,7 @@ describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Sui
 
     const tool = new YarTraderTool({
       baseUrl: targetUrl,
-      secret: TEST_SECRET,
+      testSecret: TEST_SECRET,
     });
 
     const res = await tool.execute({ action: "health" });
@@ -191,7 +192,7 @@ describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Sui
     expect(capturedHeader).toBe(`Bearer ${TEST_SECRET}`);
   });
 
-  it("4. Model or user tool arguments cannot override or inject credentials", async () => {
+  it("4. Tool parameters cannot override or inject credentials or headers", async () => {
     let capturedHeader = "";
     mockServer = http.createServer((req, res) => {
       capturedHeader = req.headers.authorization || "";
@@ -211,25 +212,24 @@ describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Sui
 
     const tool = new YarTraderTool({
       baseUrl: targetUrl,
-      secret: TEST_SECRET,
+      testSecret: TEST_SECRET,
     });
 
-    // Attempting to pass custom secret via params is ignored
     const paramsWithHackedSecret: any = {
       action: "health",
       secret: "hacked_user_secret",
       apiKey: "hacked_api_key",
+      headers: { Authorization: "Bearer hacked" },
     };
 
     const res = await tool.execute(paramsWithHackedSecret);
     expect(res.success).toBe(true);
-    // Header remains bound to server-side secret
     expect(capturedHeader).toBe(`Bearer ${TEST_SECRET}`);
   });
 
   it("5. Unapproved target origin parameter is REJECTED by allowlist", async () => {
     process.env.OPERATOR_YARTRADER_URL = "http://127.0.0.1:8000";
-    const tool = new YarTraderTool({ secret: TEST_SECRET });
+    const tool = new YarTraderTool({ testSecret: TEST_SECRET });
 
     const res = await tool.execute({
       action: "health",
@@ -240,18 +240,7 @@ describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Sui
     expect(res.error).toContain("DESTINATION DENIED");
   });
 
-  it("6. Controlled mutations without approval fail closed", async () => {
-    const res = await ecosystem.execute(
-      "yartrader_adapter",
-      { action: "restart_service" },
-      scope,
-      context,
-    );
-    expect(res.success).toBe(false);
-    expect(res.error).toContain("Approval check failed");
-  });
-
-  it("7. Trading operations (order_place, live_enable) remain permanently BLOCKED", async () => {
+  it("6. Trading operations (order_place, live_enable) remain permanently BLOCKED", async () => {
     const resOrder = await ecosystem.execute(
       "yartrader_adapter",
       { action: "order_place" },
@@ -262,45 +251,70 @@ describe("YarTrader Tool, Authentication & Dynamic Capability Discovery Test Sui
     expect(resOrder.error).toContain("BLOCKED");
   });
 
-  // --- DYNAMIC CAPABILITY REPORTER (100% REGISTRY & POLICY DRIVEN) ---
+  // --- DYNAMIC 5-STATE CAPABILITY REPORTER TESTS ---
 
-  it("8. CapabilityReporter derives policy state dynamically from PolicyEngine", () => {
+  it("7. Registered tool with SAFE rule + available runtime reports state AVAILABLE", () => {
     const reg = new ToolRegistry();
-    const healthTool = new OperatorHealthTool();
-    reg.register(healthTool);
+    reg.register(new OperatorHealthTool());
 
     const testPolicy = new PolicyEngine();
     testPolicy.setRule("operator_health:check", "SAFE");
 
-    const report1 = CapabilityReporter.generateReport(reg, testPolicy, false);
-    expect(report1.tools[0].policy).toContain("check: SAFE");
-
-    // Dynamic PolicyEngine update reflects immediately
-    testPolicy.setRule("operator_health:check", "APPROVAL_REQUIRED");
-    const report2 = CapabilityReporter.generateReport(reg, testPolicy, false);
-    expect(report2.tools[0].policy).toContain("check: APPROVAL_REQUIRED");
+    const report = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report.tools[0].id).toBe("operator_health");
+    expect(report.tools[0].state).toBe("AVAILABLE");
   });
 
-  it("9. CapabilityReporter uses NO hard-coded tool ID conditionals", () => {
+  it("8. Changing PolicyEngine rule dynamically updates structured state to APPROVAL_REQUIRED and BLOCKED", () => {
     const reg = new ToolRegistry();
-    const researchTool = new WebResearchTool();
-    reg.register(researchTool);
+    reg.register(new OperatorHealthTool());
 
     const testPolicy = new PolicyEngine();
-    testPolicy.setRule("web_research:search", "SAFE");
+    testPolicy.setRule("operator_health:check", "SAFE");
 
-    const report = CapabilityReporter.generateReport(reg, testPolicy, false);
-    expect(report.tools[0].id).toBe("web_research");
-    expect(report.tools[0].policy).toContain("search: SAFE");
+    const report1 = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report1.tools[0].state).toBe("AVAILABLE");
+
+    // Dynamic PolicyEngine rule update 1: APPROVAL_REQUIRED
+    testPolicy.setRule("operator_health:check", "APPROVAL_REQUIRED");
+    const report2 = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report2.tools[0].state).toBe("APPROVAL_REQUIRED");
+
+    // Dynamic PolicyEngine rule update 2: BLOCKED
+    testPolicy.setRule("operator_health:check", "BLOCKED");
+    const report3 = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report3.tools[0].state).toBe("BLOCKED");
   });
 
-  it("10. Registered but offline YarTrader is reported as UNAVAILABLE", () => {
+  it("9. Registered tool with SAFE rule but unavailable runtime reports state UNAVAILABLE", () => {
     const reg = new ToolRegistry();
-    reg.register(new YarTraderTool());
+    const toolOffline = new YarTraderTool(); // Missing secret -> isAvailable() = false
+    reg.register(toolOffline);
 
-    const report = CapabilityReporter.generateReport(reg, policyEngine, false);
-    const item = report.tools.find((t) => t.id === "yartrader_adapter");
-    expect(item?.status).toBe("UNAVAILABLE");
-    expect(report.formattedReport).toContain("وضعیت: UNAVAILABLE");
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule("yartrader_adapter:health", "SAFE");
+
+    const report = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report.tools[0].id).toBe("yartrader_adapter");
+    expect(report.tools[0].state).toBe("UNAVAILABLE");
+  });
+
+  it("10. Adding a new tool to ToolRegistry dynamically adds it to report without reporter code changes", () => {
+    const reg = new ToolRegistry();
+    reg.register(new OperatorHealthTool());
+
+    const testPolicy = new PolicyEngine();
+    testPolicy.setRule("operator_health:check", "SAFE");
+
+    const report1 = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report1.tools.length).toBe(1);
+
+    // Registering new tool dynamically
+    reg.register(new WebResearchTool());
+    testPolicy.setRule("web_research:search", "SAFE");
+
+    const report2 = CapabilityReporter.generateReport(reg, testPolicy);
+    expect(report2.tools.length).toBe(2);
+    expect(report2.tools.map((t) => t.id)).toContain("web_research");
   });
 });

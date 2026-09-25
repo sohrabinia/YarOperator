@@ -16,12 +16,19 @@ import { EnvironmentManager } from "../environment/index.js";
 import { WorkspacePolicyManager } from "../workspace/policy.js";
 import { ResourceResolver } from "../registry/resolver.js";
 
+export type CapabilityState =
+  "REGISTERED" | "AVAILABLE" | "APPROVAL_REQUIRED" | "BLOCKED" | "UNAVAILABLE";
+
 export interface ToolCapabilityReportItem {
   id: string;
   name: string;
-  registered: boolean;
-  status: "AVAILABLE" | "UNAVAILABLE";
+  state: CapabilityState;
   policy: string;
+  actions?: Array<{
+    action: string;
+    state: CapabilityState;
+    rule?: string;
+  }>;
 }
 
 export class CapabilityReporter {
@@ -46,43 +53,106 @@ export class CapabilityReporter {
         ? policyEngine.getRulesForTool(id)
         : new Map<string, string>();
 
-      let status: "AVAILABLE" | "UNAVAILABLE" = "AVAILABLE";
-
+      let isRuntimeAvailable = true;
       if (overrideAvailability && id in overrideAvailability) {
-        status = overrideAvailability[id] ? "AVAILABLE" : "UNAVAILABLE";
+        isRuntimeAvailable = Boolean(overrideAvailability[id]);
       } else if (typeof (tool as any).isAvailable === "function") {
         try {
-          status = (tool as any).isAvailable() ? "AVAILABLE" : "UNAVAILABLE";
+          isRuntimeAvailable = Boolean((tool as any).isAvailable());
         } catch {
-          status = "UNAVAILABLE";
+          isRuntimeAvailable = false;
         }
       }
 
-      let policyStr = "";
+      const actionItems: Array<{
+        action: string;
+        state: CapabilityState;
+        rule?: string;
+      }> = [];
+
+      let overallState: CapabilityState = isRuntimeAvailable
+        ? "AVAILABLE"
+        : "UNAVAILABLE";
+
       if (toolRules.size > 0) {
         const parts: string[] = [];
+        let hasApprovalRequired = false;
+        let hasBlocked = false;
+        let hasSafe = false;
+
         for (const [actionKey, level] of toolRules.entries()) {
           const subAction = actionKey.includes(":")
             ? actionKey.split(":")[1]
             : actionKey;
-          parts.push(`${subAction}: ${level}`);
+
+          let actionState: CapabilityState = "REGISTERED";
+          if (level === "BLOCKED") {
+            actionState = "BLOCKED";
+            hasBlocked = true;
+          } else if (!isRuntimeAvailable) {
+            actionState = "UNAVAILABLE";
+          } else if (level === "APPROVAL_REQUIRED") {
+            actionState = "APPROVAL_REQUIRED";
+            hasApprovalRequired = true;
+          } else if (level === "SAFE") {
+            actionState = "AVAILABLE";
+            hasSafe = true;
+          }
+
+          actionItems.push({
+            action: subAction,
+            state: actionState,
+            rule: level,
+          });
+
+          parts.push(`${subAction}: ${actionState}`);
         }
-        policyStr = parts.join(", ");
+
+        if (!isRuntimeAvailable) {
+          overallState = "UNAVAILABLE";
+        } else if (hasApprovalRequired && !hasSafe) {
+          overallState = "APPROVAL_REQUIRED";
+        } else if (hasBlocked && !hasSafe && !hasApprovalRequired) {
+          overallState = "BLOCKED";
+        } else {
+          overallState = "AVAILABLE";
+        }
+
+        const policyStr = parts.join(", ");
+        toolReports.push({
+          id,
+          name: tool.metadata.name,
+          state: overallState,
+          policy: policyStr,
+          actions: actionItems,
+        });
+
+        lines.push(
+          `- ${id} (${tool.metadata.name}): وضعیت اصلی: ${overallState} | قوانین اکشن‌ها: ${policyStr}`,
+        );
       } else {
-        policyStr = tool.metadata.safetyLevel || "SAFE";
+        const fallbackLevel = tool.metadata.safetyLevel || "SAFE";
+        if (fallbackLevel === "BLOCKED") {
+          overallState = "BLOCKED";
+        } else if (!isRuntimeAvailable) {
+          overallState = "UNAVAILABLE";
+        } else if (fallbackLevel === "APPROVAL_REQUIRED") {
+          overallState = "APPROVAL_REQUIRED";
+        } else {
+          overallState = "AVAILABLE";
+        }
+
+        toolReports.push({
+          id,
+          name: tool.metadata.name,
+          state: overallState,
+          policy: fallbackLevel,
+        });
+
+        lines.push(
+          `- ${id} (${tool.metadata.name}): وضعیت: ${overallState} | سطح دسترسی: ${fallbackLevel}`,
+        );
       }
-
-      toolReports.push({
-        id,
-        name: tool.metadata.name,
-        registered: true,
-        status,
-        policy: policyStr,
-      });
-
-      lines.push(
-        `- ${id} (${tool.metadata.name}): ثبت شده | وضعیت: ${status} | قوانین دسترسی: ${policyStr}`,
-      );
     }
 
     return {

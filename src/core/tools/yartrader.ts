@@ -50,12 +50,12 @@ export class YarTraderTool implements Tool<
 
   private resourceResolver?: ResourceResolver;
   private overrideBaseUrl?: string;
-  private overrideSecret?: string;
+  private testSecret?: string;
 
   constructor(options?: {
     resourceResolver?: ResourceResolver;
     baseUrl?: string;
-    secret?: string;
+    testSecret?: string;
   }) {
     if (options?.resourceResolver) {
       this.resourceResolver = options.resourceResolver;
@@ -63,8 +63,8 @@ export class YarTraderTool implements Tool<
     if (options?.baseUrl) {
       this.overrideBaseUrl = options.baseUrl;
     }
-    if (options?.secret) {
-      this.overrideSecret = options.secret;
+    if (options?.testSecret) {
+      this.testSecret = options.testSecret;
     }
   }
 
@@ -76,8 +76,8 @@ export class YarTraderTool implements Tool<
     this.overrideBaseUrl = url;
   }
 
-  public setSecret(secret: string): void {
-    this.overrideSecret = secret;
+  public setTestSecret(secret: string): void {
+    this.testSecret = secret;
   }
 
   public isAvailable(): boolean {
@@ -92,14 +92,11 @@ export class YarTraderTool implements Tool<
   }
 
   private resolveSecret(): string | null {
-    if (this.overrideSecret) {
-      return this.overrideSecret;
+    if (this.testSecret) {
+      return this.testSecret;
     }
     if (process.env.OPERATOR_YARTRADER_SECRET) {
       return process.env.OPERATOR_YARTRADER_SECRET;
-    }
-    if (process.env.OPERATOR_YARTRADER_TOKEN) {
-      return process.env.OPERATOR_YARTRADER_TOKEN;
     }
     return null;
   }
@@ -270,7 +267,6 @@ export class YarTraderTool implements Tool<
 
     const headers: Record<string, string> = {
       Authorization: `Bearer ${secret}`,
-      "X-YarTrader-Secret": secret,
     };
 
     // 5. Issue Bounded Authenticated Request (GET for reads, POST for mutations)
