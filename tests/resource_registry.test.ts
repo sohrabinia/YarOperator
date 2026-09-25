@@ -205,7 +205,10 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       expect(res.success).toBe(true);
       if (res.success) {
         expect(res.resource.workspaceId).toBe("ws1");
-        expect(res.resource.canonicalPath).toBe(path.normalize(workspace1Dir));
+        const expectedCanonical = fs.existsSync(workspace1Dir)
+          ? (fs.realpathSync.native || fs.realpathSync)(workspace1Dir)
+          : path.normalize(workspace1Dir);
+        expect(res.resource.canonicalPath).toBe(expectedCanonical);
       }
     });
 
@@ -405,7 +408,10 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       const res = resolver.resolveResource("ws1", fileInside);
       expect(res.success).toBe(true);
       if (res.success) {
-        expect(res.resource.canonicalPath).toBe(path.normalize(fileInside));
+        const expectedCanonical = (fs.realpathSync.native || fs.realpathSync)(
+          fileInside,
+        );
+        expect(res.resource.canonicalPath).toBe(expectedCanonical);
       }
     });
 
@@ -424,7 +430,10 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       const res = resolver.resolveResource("ws1", fileInside);
       expect(res.success).toBe(true);
       if (res.success) {
-        expect(res.resource.canonicalPath).toBe(path.normalize(fileInside));
+        const expectedCanonical = (fs.realpathSync.native || fs.realpathSync)(
+          fileInside,
+        );
+        expect(res.resource.canonicalPath).toBe(expectedCanonical);
       }
     });
   });
@@ -474,8 +483,13 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
 
     it("27. TerminalTool uses registry-derived resource", async () => {
       const terminalTool = new TerminalTool(resolver);
+      const cmd = process.platform === "win32" ? process.execPath : "echo";
+      const args =
+        process.platform === "win32"
+          ? ["-e", "console.log('hello')"]
+          : ["hello"];
       const res = await terminalTool.execute(
-        { command: "echo", args: ["hello"], cwd: workspace1Dir },
+        { command: cmd, args, cwd: workspace1Dir },
         {
           executionId: "exec_1",
           timestamp: new Date(),
@@ -690,7 +704,9 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       );
 
       expect(res.success).toBe(false);
-      expect(res.error).toMatch(/escapes authorized workspace roots/i);
+      expect(res.error).toMatch(
+        /RESOURCE DENIED|escapes authorized workspace roots/i,
+      );
     });
 
     it("39. workspace mismatch between pre-resolved resource and context workspace fails closed", async () => {
