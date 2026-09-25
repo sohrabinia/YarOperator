@@ -642,6 +642,22 @@ export class DeterministicBrain implements Brain {
       keywords: ["hello", "hi", "hey", "good morning", "good evening"],
       reply: "Hello! How can I assist you today?",
     },
+    {
+      keywords: [
+        "چه ابزارها",
+        "چه دسترسی",
+        "چه ابزارهایی",
+        "چه دسترسی‌هایی",
+        "ابزارها",
+        "دسترسی‌ها",
+        "قابلیت‌ها",
+        "capabilities",
+        "tools",
+        "what tools",
+      ],
+      reply:
+        "من YarOperator هستم. ابزارهای فعال و سطح دسترسی من عبارتند از:\n- operator_health (بررسی سلامت سیستم - SAFE)\n- yartrader_adapter (پایش وضعیت و سلامت یارتریدر - SAFE / کنترل سرویس: نیازمند تأیید / معاملات زنده: مسدود)\n- web_research (جستجو در وب - SAFE)\n- browser_operate (پیمایش وب - SAFE / کلیک و فرم: نیازمند تأیید)\n- git_operate (وضعیت و داف گیت - SAFE / کامیت و پوش: نیازمند تأیید)\n- github_operate (مشاهده PR - SAFE / ساخت PR: نیازمند تأیید / مرج PR: مسدود)\n- terminal_execute (اجرای دستورات مجاز - نیازمند تأیید)",
+    },
   ];
 
   public interpret(input: BrainInput): BrainResult {

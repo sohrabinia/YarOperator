@@ -6,6 +6,11 @@ export {
   SystemHealthProvider,
   type SystemHealthReport,
 } from "./health.js";
+export {
+  YarTraderTool,
+  type YarTraderToolParams,
+  type YarTraderToolOutput,
+} from "./yartrader.js";
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
 import { EnvironmentManager } from "../environment/index.js";
 import { WorkspacePolicyManager } from "../workspace/policy.js";
