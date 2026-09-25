@@ -154,21 +154,6 @@ export class ResourceResolver {
     const { canonical: canonicalPath } =
       this.resolveCanonicalPath(targetNormalized);
 
-    if (has83Pattern && /~[0-9]/.test(canonicalPath)) {
-      const errReason = `RESOURCE DENIED: Alternate 8.3 short-name representation detected in '${rawPath}' for workspace '${effectiveWorkspaceId}'.`;
-      this.auditDenial(
-        "EIGHT_DOT_THREE_BYPASS",
-        effectiveWorkspaceId,
-        rawPath,
-        errReason,
-      );
-      return {
-        success: false,
-        code: "EIGHT_DOT_THREE_BYPASS",
-        error: errReason,
-      };
-    }
-
     // Evaluate against each authorized root for this workspace
     let matchedRoot: string | undefined;
     for (const allowedRoot of ws.allowedRoots) {
@@ -312,6 +297,21 @@ export class ResourceResolver {
       }
     } else {
       targetNormalized = canonicalPath;
+    }
+
+    if (has83Pattern && /~[0-9]/.test(targetNormalized)) {
+      const errReason = `RESOURCE DENIED: Alternate 8.3 short-name representation detected in '${rawPath}' for workspace '${effectiveWorkspaceId}'.`;
+      this.auditDenial(
+        "EIGHT_DOT_THREE_BYPASS",
+        effectiveWorkspaceId,
+        rawPath,
+        errReason,
+      );
+      return {
+        success: false,
+        code: "EIGHT_DOT_THREE_BYPASS",
+        error: errReason,
+      };
     }
 
     // Match bound repository ID if available
