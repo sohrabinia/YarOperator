@@ -398,6 +398,17 @@ describe("Resource / Environment Registry & Security Resolution Boundary Suite",
       }
     });
 
+    it("22b. legitimate Windows path containing an 8.3 component succeeds when authorized", () => {
+      const fileInside = path.join(workspace1Dir, "valid_short.txt");
+      fs.writeFileSync(fileInside, "short name content", "utf-8");
+
+      const res = resolver.resolveResource("ws1", fileInside);
+      expect(res.success).toBe(true);
+      if (res.success) {
+        expect(res.resource.canonicalPath).toBe(path.normalize(fileInside));
+      }
+    });
+
     it("23. trailing-dot/space variant cannot bypass boundary", () => {
       const resDot = resolver.resolveResource("ws1", workspace1Dir + ".");
       expect(resDot.success).toBe(false);
