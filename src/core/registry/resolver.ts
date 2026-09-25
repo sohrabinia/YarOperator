@@ -246,16 +246,17 @@ export class ResourceResolver {
       };
     }
 
-    // Real filesystem symlink / junction resolution check (if path exists on current system)
+    // Real filesystem symlink / junction / 8.3 short-name resolution check (if path exists on current system)
     if (fs.existsSync(targetNormalized)) {
       try {
-        const realTargetPath = fs.realpathSync(targetNormalized);
+        const realpath = fs.realpathSync.native || fs.realpathSync;
+        const realTargetPath = realpath(targetNormalized);
         const realTargetPathNorm = this.pathAdapter.normalize(realTargetPath);
 
         let realMatchFound = false;
         for (const allowedRoot of ws.allowedRoots) {
           const realAllowedRoot = fs.existsSync(allowedRoot)
-            ? this.pathAdapter.normalize(fs.realpathSync(allowedRoot))
+            ? this.pathAdapter.normalize(realpath(allowedRoot))
             : this.pathAdapter.normalize(allowedRoot);
 
           if (this.isPathContained(realAllowedRoot, realTargetPathNorm)) {
@@ -421,11 +422,12 @@ export class ResourceResolver {
   } {
     let current = targetPath;
     let tail = "";
+    const realpath = fs.realpathSync.native || fs.realpathSync;
 
     while (current) {
       if (fs.existsSync(current)) {
         try {
-          const real = fs.realpathSync(current);
+          const real = realpath(current);
           const realNorm = this.pathAdapter.normalize(real);
           const full = tail
             ? this.pathAdapter.resolve(realNorm, tail)
