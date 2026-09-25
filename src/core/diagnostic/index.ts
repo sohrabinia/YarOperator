@@ -700,51 +700,81 @@ export class DiagnosticWorker {
     const timestamp = new Date().toISOString();
 
     // --- Subsystem 1: Git Read-Only Diagnostics ---
-    try {
-      spies?.gitSpy?.();
+    const targetGitAction = "status";
 
-      const gitTool = new GitTool(this.resolver);
-      const gitContext: ExecutionContext = context || {
-        executionId: `diag_git_${Date.now()}`,
-        timestamp: new Date(),
-        workspaceId: params.workspaceId,
-      };
-
-      const gitStatusRes = await gitTool.execute(
-        { action: "status", cwd: resourceRes.resource.canonicalPath },
-        gitContext,
-      );
-
-      toolExecutionCount++;
-
-      if (gitStatusRes.success) {
-        const rawOut = gitStatusRes.output?.output || "Git status clean";
-        items.push({
-          name: "Git Status Check",
-          source: "GitTool",
-          timestamp,
-          status: "OK",
-          rawResult: this.escapeHtml(
-            this.redactSecrets(rawOut.substring(0, 1000)),
-          ),
-        });
-      } else {
-        items.push({
-          name: "Git Status Check",
-          source: "GitTool",
-          timestamp,
-          status: "FAIL",
-          rawResult: this.escapeHtml(gitStatusRes.error || "Git status failed"),
-        });
-      }
-    } catch (err: any) {
+    if (!this.validateGitAction(targetGitAction)) {
       items.push({
         name: "Git Status Check",
         source: "GitTool",
         timestamp,
         status: "FAIL",
-        rawResult: this.escapeHtml(err.message),
+        rawResult: `AUTHORIZATION FAILURE: Git action '${targetGitAction}' is not in allowedGitActions list.`,
       });
+    } else {
+      const gitPolicyRule = this.policyEngine.getRule(
+        `git_operate:${targetGitAction}`,
+      );
+      if (gitPolicyRule !== "SAFE") {
+        items.push({
+          name: "Git Status Check",
+          source: "GitTool",
+          timestamp,
+          status: "FAIL",
+          rawResult: `AUTHORIZATION FAILURE: Policy rule for 'git_operate:${targetGitAction}' is '${gitPolicyRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
+        });
+      } else {
+        try {
+          spies?.gitSpy?.();
+
+          const gitTool = new GitTool(this.resolver);
+          const gitContext: ExecutionContext = context || {
+            executionId: `diag_git_${Date.now()}`,
+            timestamp: new Date(),
+            workspaceId: params.workspaceId,
+          };
+
+          const gitStatusRes = await gitTool.execute(
+            {
+              action: targetGitAction as any,
+              cwd: resourceRes.resource.canonicalPath,
+            },
+            gitContext,
+          );
+
+          toolExecutionCount++;
+
+          if (gitStatusRes.success) {
+            const rawOut = gitStatusRes.output?.output || "Git status clean";
+            items.push({
+              name: "Git Status Check",
+              source: "GitTool",
+              timestamp,
+              status: "OK",
+              rawResult: this.escapeHtml(
+                this.redactSecrets(rawOut.substring(0, 1000)),
+              ),
+            });
+          } else {
+            items.push({
+              name: "Git Status Check",
+              source: "GitTool",
+              timestamp,
+              status: "FAIL",
+              rawResult: this.escapeHtml(
+                gitStatusRes.error || "Git status failed",
+              ),
+            });
+          }
+        } catch (err: any) {
+          items.push({
+            name: "Git Status Check",
+            source: "GitTool",
+            timestamp,
+            status: "FAIL",
+            rawResult: this.escapeHtml(err.message),
+          });
+        }
+      }
     }
 
     // --- Subsystem 2: Bounded HTTP Probe Diagnostics ---
