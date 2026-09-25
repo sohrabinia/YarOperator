@@ -403,7 +403,14 @@ export class DiagnosticWorker {
     private policyEngine: PolicyEngine,
     private auditManager: AuditManager,
     private healthProvider?: SystemHealthProvider,
-  ) {}
+  ) {
+    if (this.policyEngine.getRule("http_probe:get") === undefined) {
+      this.policyEngine.setRule("http_probe:get", "SAFE");
+    }
+    if (this.policyEngine.getRule("system_health:read") === undefined) {
+      this.policyEngine.setRule("system_health:read", "SAFE");
+    }
+  }
 
   public static normalizeIntentText(text: string): string {
     if (!text) return "";
@@ -782,77 +789,99 @@ export class DiagnosticWorker {
       params.targetOrigin ||
       (ws.allowedHttpOrigins && ws.allowedHttpOrigins.length > 0)
     ) {
-      const firstOrigin = ws.allowedHttpOrigins![0];
-      const probeUrl =
-        params.targetOrigin ||
-        (typeof firstOrigin === "string"
-          ? firstOrigin
-          : (firstOrigin as HttpOriginResourceConfig).origin);
-      try {
-        spies?.httpSpy?.();
-
-        const httpProbe = new BoundedHttpProbe(
-          ws.allowedHttpOrigins || [],
-          5000,
-          1000,
-        );
-        const probeRes = await httpProbe.get(probeUrl);
-        toolExecutionCount++;
-
-        if (probeRes.success) {
-          items.push({
-            name: "HTTP Origin Probe",
-            source: "BoundedHttpProbe",
-            timestamp,
-            status: "OK",
-            rawResult: this.escapeHtml(
-              `HTTP ${probeRes.statusCode}: ${probeRes.body || "OK"}`,
-            ),
-          });
-        } else {
-          items.push({
-            name: "HTTP Origin Probe",
-            source: "BoundedHttpProbe",
-            timestamp,
-            status: "FAIL",
-            rawResult: this.escapeHtml(probeRes.error || "HTTP probe failed"),
-          });
-        }
-      } catch (err: any) {
+      const httpPolicyRule = this.policyEngine.getRule("http_probe:get");
+      if (httpPolicyRule !== "SAFE") {
         items.push({
           name: "HTTP Origin Probe",
           source: "BoundedHttpProbe",
           timestamp,
           status: "FAIL",
-          rawResult: this.escapeHtml(err.message),
+          rawResult: `AUTHORIZATION FAILURE: Policy rule for 'http_probe:get' is '${httpPolicyRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
         });
+      } else {
+        const firstOrigin = ws.allowedHttpOrigins![0];
+        const probeUrl =
+          params.targetOrigin ||
+          (typeof firstOrigin === "string"
+            ? firstOrigin
+            : (firstOrigin as HttpOriginResourceConfig).origin);
+        try {
+          spies?.httpSpy?.();
+
+          const httpProbe = new BoundedHttpProbe(
+            ws.allowedHttpOrigins || [],
+            5000,
+            1000,
+          );
+          const probeRes = await httpProbe.get(probeUrl);
+          toolExecutionCount++;
+
+          if (probeRes.success) {
+            items.push({
+              name: "HTTP Origin Probe",
+              source: "BoundedHttpProbe",
+              timestamp,
+              status: "OK",
+              rawResult: this.escapeHtml(
+                `HTTP ${probeRes.statusCode}: ${probeRes.body || "OK"}`,
+              ),
+            });
+          } else {
+            items.push({
+              name: "HTTP Origin Probe",
+              source: "BoundedHttpProbe",
+              timestamp,
+              status: "FAIL",
+              rawResult: this.escapeHtml(probeRes.error || "HTTP probe failed"),
+            });
+          }
+        } catch (err: any) {
+          items.push({
+            name: "HTTP Origin Probe",
+            source: "BoundedHttpProbe",
+            timestamp,
+            status: "FAIL",
+            rawResult: this.escapeHtml(err.message),
+          });
+        }
       }
     }
 
     // --- Subsystem 3: Service Health Diagnostics ---
     if (this.healthProvider) {
-      try {
-        spies?.healthSpy?.();
-
-        const report = this.healthProvider.getReport();
-        toolExecutionCount++;
-        items.push({
-          name: "Service Health Check",
-          source: "SystemHealthProvider",
-          timestamp,
-          status: report.health.status === "HEALTHY" ? "OK" : "FAIL",
-          rawResult: this.escapeHtml(
-            `Status: ${report.health.status}, Uptime: ${report.health.uptimeMs}ms`,
-          ),
-        });
-      } catch (err: any) {
+      const healthPolicyRule = this.policyEngine.getRule("system_health:read");
+      if (healthPolicyRule !== "SAFE") {
         items.push({
           name: "Service Health Check",
           source: "SystemHealthProvider",
           timestamp,
           status: "FAIL",
-          rawResult: this.escapeHtml(err.message),
+          rawResult: `AUTHORIZATION FAILURE: Policy rule for 'system_health:read' is '${healthPolicyRule || "UNKNOWN"}'. Strictly requires SAFE rule.`,
         });
+      } else {
+        try {
+          spies?.healthSpy?.();
+
+          const report = this.healthProvider.getReport();
+          toolExecutionCount++;
+          items.push({
+            name: "Service Health Check",
+            source: "SystemHealthProvider",
+            timestamp,
+            status: report.health.status === "HEALTHY" ? "OK" : "FAIL",
+            rawResult: this.escapeHtml(
+              `Status: ${report.health.status}, Uptime: ${report.health.uptimeMs}ms`,
+            ),
+          });
+        } catch (err: any) {
+          items.push({
+            name: "Service Health Check",
+            source: "SystemHealthProvider",
+            timestamp,
+            status: "FAIL",
+            rawResult: this.escapeHtml(err.message),
+          });
+        }
       }
     } else {
       items.push({

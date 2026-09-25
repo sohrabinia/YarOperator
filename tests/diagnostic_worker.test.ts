@@ -163,6 +163,54 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(gitCalls).toBe(0);
     });
 
+    it("14d. HTTP capability requires its own SAFE policy (non-SAFE prevents HTTP probe execution)", async () => {
+      policyEngine.setRule("git_operate:status", "SAFE");
+      policyEngine.setRule("http_probe:get", "BLOCKED");
+
+      let httpCalls = 0;
+      const res = await worker.executeDiagnostics(
+        {
+          token: validToken,
+          workspaceId,
+          rawCommandText: "check YarTrader status",
+        },
+        undefined,
+        { httpSpy: () => httpCalls++ },
+      );
+
+      expect(res.success).toBe(true);
+      expect(httpCalls).toBe(0);
+      const httpItem = res.report?.items.find(
+        (i) => i.source === "BoundedHttpProbe",
+      );
+      expect(httpItem?.status).toBe("FAIL");
+      expect(httpItem?.rawResult).toMatch(/AUTHORIZATION FAILURE/i);
+    });
+
+    it("14e. Service Health capability requires its own SAFE policy (non-SAFE prevents Health execution)", async () => {
+      policyEngine.setRule("git_operate:status", "SAFE");
+      policyEngine.setRule("system_health:read", "APPROVAL_REQUIRED");
+
+      let healthCalls = 0;
+      const res = await worker.executeDiagnostics(
+        {
+          token: validToken,
+          workspaceId,
+          rawCommandText: "check YarTrader status",
+        },
+        undefined,
+        { healthSpy: () => healthCalls++ },
+      );
+
+      expect(res.success).toBe(true);
+      expect(healthCalls).toBe(0);
+      const healthItem = res.report?.items.find(
+        (i) => i.source === "SystemHealthProvider",
+      );
+      expect(healthItem?.status).toBe("FAIL");
+      expect(healthItem?.rawResult).toMatch(/AUTHORIZATION FAILURE/i);
+    });
+
     it("14b. Policy Engine APPROVAL_REQUIRED rule causes fail-closed zero tool execution", async () => {
       policyEngine.setRule("git_operate:status", "APPROVAL_REQUIRED");
 
