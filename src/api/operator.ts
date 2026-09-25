@@ -63,13 +63,18 @@ export interface OperatorApiResponse {
 export class OperatorApiHandler {
   private identityStore: IdentityStore;
   private healthProvider: SystemHealthProvider;
+  private closeCallbacks: Array<() => void> = [];
 
   constructor(
     private commandReceiver: OwnerCommandReceiver,
     initialTokens?: Record<string, string>,
     identityStore?: IdentityStore,
     healthProvider?: SystemHealthProvider,
+    closeCallbacks?: Array<() => void>,
   ) {
+    if (closeCallbacks) {
+      this.closeCallbacks = closeCallbacks;
+    }
     if (!identityStore) {
       throw new Error(
         "AUTHENTICATION SECURITY FAILURE: IdentityStore must be provided to OperatorApiHandler.",
@@ -86,6 +91,23 @@ export class OperatorApiHandler {
       for (const [token, ownerId] of Object.entries(initialTokens)) {
         this.registerBearerToken(token, ownerId);
       }
+    }
+  }
+
+  public registerCloseCallback(cb: () => void): void {
+    this.closeCallbacks.push(cb);
+  }
+
+  public close(): void {
+    if (this.identityStore) {
+      try {
+        this.identityStore.close();
+      } catch {}
+    }
+    for (const cb of this.closeCallbacks) {
+      try {
+        cb();
+      } catch {}
     }
   }
 

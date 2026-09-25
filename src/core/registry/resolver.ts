@@ -217,22 +217,46 @@ export class ResourceResolver {
         );
       });
 
-      const code = siblingAttempt
-        ? "SIBLING_PREFIX_BYPASS"
-        : has83Pattern
-          ? "EIGHT_DOT_THREE_BYPASS"
-          : "UNAUTHORIZED_ROOT";
+      if (siblingAttempt) {
+        const errReason = `RESOURCE DENIED: Sibling prefix bypass attempt detected on '${rawPath}' for workspace '${effectiveWorkspaceId}'.`;
+        this.auditDenial(
+          "SIBLING_PREFIX_BYPASS",
+          effectiveWorkspaceId,
+          rawPath,
+          errReason,
+        );
+        return {
+          success: false,
+          code: "SIBLING_PREFIX_BYPASS",
+          error: errReason,
+        };
+      }
 
-      const errReason = siblingAttempt
-        ? `RESOURCE DENIED: Sibling prefix bypass attempt detected on '${rawPath}' for workspace '${effectiveWorkspaceId}'.`
-        : has83Pattern
-          ? `RESOURCE DENIED: Alternate 8.3 short-name representation detected in '${rawPath}' for workspace '${effectiveWorkspaceId}'.`
-          : `RESOURCE DENIED: Target path '${rawPath}' (resolved: '${canonicalPath}') escapes authorized workspace roots [${ws.allowedRoots.join(", ")}] for workspace '${effectiveWorkspaceId}'.`;
+      if (has83Pattern) {
+        const errReason = `RESOURCE DENIED: Alternate 8.3 short-name representation detected in '${rawPath}' for workspace '${effectiveWorkspaceId}'.`;
+        this.auditDenial(
+          "EIGHT_DOT_THREE_BYPASS",
+          effectiveWorkspaceId,
+          rawPath,
+          errReason,
+        );
+        return {
+          success: false,
+          code: "EIGHT_DOT_THREE_BYPASS",
+          error: errReason,
+        };
+      }
 
-      this.auditDenial(code, effectiveWorkspaceId, rawPath, errReason);
+      const errReason = `RESOURCE DENIED: Target path '${rawPath}' (resolved: '${canonicalPath}') escapes authorized workspace roots [${ws.allowedRoots.join(", ")}] for workspace '${effectiveWorkspaceId}'.`;
+      this.auditDenial(
+        "UNAUTHORIZED_ROOT",
+        effectiveWorkspaceId,
+        rawPath,
+        errReason,
+      );
       return {
         success: false,
-        code,
+        code: "UNAUTHORIZED_ROOT",
         error: errReason,
       };
     }
