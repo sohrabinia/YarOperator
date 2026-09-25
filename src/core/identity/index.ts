@@ -418,6 +418,7 @@ export class IdentityStore {
       try {
         this.db.close();
       } catch {}
+      this.db = null;
     }
   }
 }

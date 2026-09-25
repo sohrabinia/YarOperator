@@ -409,6 +409,7 @@ export class ApprovalManager {
       try {
         this.db.close();
       } catch {}
+      this.db = null;
     }
   }
 }

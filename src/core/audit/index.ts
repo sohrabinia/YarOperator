@@ -214,7 +214,12 @@ export class SQLiteAuditStore implements AuditStore {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+      this.db = null;
+    }
   }
 }
 
