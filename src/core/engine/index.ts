@@ -29,20 +29,28 @@ export class ExecutionEngine {
   constructor(
     private registry: ToolRegistry,
     private auditLogger: AuditLogger,
-    private policyEvaluator?: PolicyEvaluator,
-    toolEcosystem?: SecureToolEcosystem,
+    policyEvaluatorOrEcosystem?: PolicyEvaluator | SecureToolEcosystem,
+    explicitEcosystem?: SecureToolEcosystem,
   ) {
-    if (toolEcosystem) {
-      this.ecosystem = toolEcosystem;
+    if (explicitEcosystem) {
+      this.ecosystem = explicitEcosystem;
+    } else if (policyEvaluatorOrEcosystem instanceof SecureToolEcosystem) {
+      this.ecosystem = policyEvaluatorOrEcosystem;
     } else {
       const policyEngine =
-        policyEvaluator instanceof PolicyEngine
-          ? policyEvaluator
+        policyEvaluatorOrEcosystem instanceof PolicyEngine
+          ? policyEvaluatorOrEcosystem
           : new PolicyEngine();
 
-      if (policyEvaluator && !(policyEvaluator instanceof PolicyEngine)) {
+      if (
+        policyEvaluatorOrEcosystem &&
+        !(policyEvaluatorOrEcosystem instanceof PolicyEngine)
+      ) {
         policyEngine.evaluate = async (request, actionKey) => {
-          const evalRes = await policyEvaluator.evaluate(request, actionKey);
+          const evalRes = await policyEvaluatorOrEcosystem.evaluate(
+            request,
+            actionKey,
+          );
           return {
             allowed: evalRes.allowed,
             safetyLevel: evalRes.allowed ? "SAFE" : "BLOCKED",
@@ -54,17 +62,19 @@ export class ExecutionEngine {
       const envManager = new EnvironmentManager();
       const wsPolicyManager = new WorkspacePolicyManager();
 
+      const registeredTools = registry.list().map((t) => t.metadata.id);
+
       wsPolicyManager.registerPolicy(
         new WorkspacePolicy({
           workspaceId: "yartrader",
-          allowedTools: ["*"],
+          allowedTools: registeredTools,
           allowedRoots: [process.cwd()],
         }),
       );
       wsPolicyManager.registerPolicy(
         new WorkspacePolicy({
           workspaceId: "ws_default",
-          allowedTools: ["*"],
+          allowedTools: registeredTools,
           allowedRoots: [process.cwd()],
         }),
       );
@@ -73,7 +83,7 @@ export class ExecutionEngine {
         id: "env_yartrader",
         name: "Default Environment",
         type: "PRODUCTION",
-        capabilities: [],
+        capabilities: registeredTools,
         accessScope: "workspace",
         riskLevel: "SAFE",
         healthy: true,
@@ -82,7 +92,7 @@ export class ExecutionEngine {
         id: "env_ws_default",
         name: "Default Environment",
         type: "PRODUCTION",
-        capabilities: [],
+        capabilities: registeredTools,
         accessScope: "workspace",
         riskLevel: "SAFE",
         healthy: true,
@@ -125,20 +135,6 @@ export class ExecutionEngine {
       });
       this.transitionState("FAILED", context.executionId);
       return { success: false, error: errorMsg };
-    }
-
-    if (!this.policyEvaluator && this.ecosystem) {
-      const pe = this.ecosystem.getPolicyEngine();
-      if (pe && pe.resolveSafetyLevel(toolId) === undefined) {
-        let canonicalAction = toolId;
-        if (typeof tool.resolveCanonicalAction === "function") {
-          canonicalAction = tool.resolveCanonicalAction(params);
-        }
-        pe.setRule(toolId, "SAFE");
-        if (canonicalAction !== toolId) {
-          pe.setRule(canonicalAction, "SAFE");
-        }
-      }
     }
 
     const wsId = context.workspaceId || "yartrader";

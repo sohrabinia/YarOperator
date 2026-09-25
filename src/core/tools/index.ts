@@ -174,6 +174,7 @@ export class SecureToolEcosystem {
     const evalResult = await this.policyEngine.evaluate(
       { toolId, params, context },
       canonicalAction,
+      tool.metadata?.safetyLevel,
     );
 
     if (evalResult.safetyLevel === "BLOCKED") {
