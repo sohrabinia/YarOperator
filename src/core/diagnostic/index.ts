@@ -548,7 +548,7 @@ export class DiagnosticWorker {
       };
     }
 
-    // Stage 4: Active Workspace Membership Validation
+    // Stage 4: Active Workspace Membership & Execution Context Authority Validation
     if (!params.workspaceId) {
       const auditOk = await this.auditDenial(
         "STAGE_4_MEMBERSHIP",
@@ -560,6 +560,22 @@ export class DiagnosticWorker {
         error: auditOk
           ? "AUTHORIZATION FAILURE: workspaceId is required."
           : "AUTHORIZATION FAILURE: Missing workspaceId and audit persistence failed.",
+        denialStage: "4. Workspace Membership",
+        toolExecutionCount,
+      };
+    }
+
+    if (context?.workspaceId && context.workspaceId !== params.workspaceId) {
+      const auditOk = await this.auditDenial(
+        "STAGE_4_MEMBERSHIP",
+        params.workspaceId,
+        `Context workspaceId mismatch ('${context.workspaceId}' vs '${params.workspaceId}')`,
+      );
+      return {
+        success: false,
+        error: auditOk
+          ? `AUTHORIZATION FAILURE: Execution context workspaceId '${context.workspaceId}' mismatch with requested workspaceId '${params.workspaceId}'.`
+          : "AUTHORIZATION FAILURE: Execution context mismatch and audit persistence failed.",
         denialStage: "4. Workspace Membership",
         toolExecutionCount,
       };
@@ -641,19 +657,19 @@ export class DiagnosticWorker {
       };
     }
 
-    // Stage 7: PolicyEngine Evaluation
+    // Stage 7: PolicyEngine Evaluation (MUST be explicitly SAFE)
     const gitRule = this.policyEngine.getRule("git_operate:status");
-    if (gitRule === "BLOCKED") {
+    if (gitRule !== "SAFE") {
       const auditOk = await this.auditDenial(
         "STAGE_7_POLICY",
         params.workspaceId,
-        "git_operate:status is BLOCKED by PolicyEngine",
+        `git_operate:status rule is '${gitRule || "UNKNOWN"}' (requires SAFE)`,
       );
       return {
         success: false,
         error: auditOk
-          ? "AUTHORIZATION FAILURE: Diagnostic capability 'git_operate:status' is BLOCKED by PolicyEngine."
-          : "AUTHORIZATION FAILURE: Policy BLOCKED and audit persistence failed.",
+          ? `AUTHORIZATION FAILURE: Diagnostic capability 'git_operate:status' rule is '${gitRule || "UNKNOWN"}'. Strictly requires SAFE rule.`
+          : "AUTHORIZATION FAILURE: Policy not SAFE and audit persistence failed.",
         denialStage: "7. PolicyEngine",
         toolExecutionCount,
       };

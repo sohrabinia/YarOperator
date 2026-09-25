@@ -163,6 +163,53 @@ describe("Read-Only DiagnosticWorker Vertical Slice Suite (41 Tests)", () => {
       expect(gitCalls).toBe(0);
     });
 
+    it("14b. Policy Engine APPROVAL_REQUIRED rule causes fail-closed zero tool execution", async () => {
+      policyEngine.setRule("git_operate:status", "APPROVAL_REQUIRED");
+
+      let gitCalls = 0;
+      const res = await worker.executeDiagnostics(
+        {
+          token: validToken,
+          workspaceId,
+          rawCommandText: "check YarTrader status",
+        },
+        undefined,
+        { gitSpy: () => gitCalls++ },
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.denialStage).toBe("7. PolicyEngine");
+      expect(res.error).toMatch(/Strictly requires SAFE rule/i);
+      expect(res.toolExecutionCount).toBe(0);
+      expect(gitCalls).toBe(0);
+    });
+
+    it("14c. Execution context workspaceId mismatch causes fail-closed zero tool execution", async () => {
+      let gitCalls = 0;
+      const mismatchedContext = {
+        executionId: "cmd_mismatch_123",
+        timestamp: new Date(),
+        workspaceId: "forbidden_workspace",
+        environmentId: "env_forbidden",
+      };
+
+      const res = await worker.executeDiagnostics(
+        {
+          token: validToken,
+          workspaceId: "yartrader",
+          rawCommandText: "check YarTrader status",
+        },
+        mismatchedContext as any,
+        { gitSpy: () => gitCalls++ },
+      );
+
+      expect(res.success).toBe(false);
+      expect(res.denialStage).toBe("4. Workspace Membership");
+      expect(res.error).toMatch(/mismatch/i);
+      expect(res.toolExecutionCount).toBe(0);
+      expect(gitCalls).toBe(0);
+    });
+
     it("36b. Diagnostic intent with trailing instructions (e.g. check YarTrader status and then reset) rejected with zero execution", async () => {
       let gitCalls = 0;
       const res = await worker.executeDiagnostics(

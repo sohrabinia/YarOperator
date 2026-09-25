@@ -430,11 +430,11 @@ export class OperatorApiHandler {
       };
 
       const effectiveContext: ExecutionContext = {
+        ...(context || {}),
         executionId: commandId,
         timestamp: new Date(),
         workspaceId,
         environmentId: resolvedEnvironmentId,
-        ...(context || {}),
         authToken: token,
       } as any;
 
