@@ -261,7 +261,7 @@ export class GitTool implements Tool<GitOperationParams, GitOperationResult> {
 }
 
 export interface GitHubPRParams {
-  action: "create_pr" | "merge_pr" | "get_pr" | "inspect" | "get_repo";
+  action: "create_pr" | "merge_pr" | "get_pr";
   title?: string;
   body?: string;
   prNumber?: number;
@@ -273,13 +273,9 @@ export interface GitHubPRParams {
 }
 
 export interface GitHubPRResult {
-  prNumber?: number;
+  prNumber: number;
   url: string;
   status: string;
-  repo?: string;
-  defaultBranch?: string;
-  openIssuesCount?: number;
-  stargazersCount?: number;
 }
 
 export class GitHubTool implements Tool<GitHubPRParams, GitHubPRResult> {
@@ -291,14 +287,7 @@ export class GitHubTool implements Tool<GitHubPRParams, GitHubPRResult> {
     safetyLevel: "APPROVAL_REQUIRED",
   };
 
-  resolveCanonicalAction(params?: GitHubPRParams): string {
-    if (
-      !params ||
-      !params.action ||
-      params.action === "inspect" ||
-      params.action === "get_repo"
-    )
-      return "github_operate:inspect";
+  resolveCanonicalAction(params: GitHubPRParams): string {
     if (params.action === "get_pr") return "github_operate:get_pr";
     if (params.action === "create_pr") return "github_operate:create_pr";
     if (params.action === "merge_pr") return "github_operate:merge_pr";
@@ -324,44 +313,6 @@ export class GitHubTool implements Tool<GitHubPRParams, GitHubPRResult> {
     const repo = params.repo || process.env.GITHUB_REPO || "YarOperator";
 
     try {
-      if (
-        !params.action ||
-        params.action === "inspect" ||
-        params.action === "get_repo"
-      ) {
-        const res = await fetch(
-          `https://api.github.com/repos/${owner}/${repo}`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              Accept: "application/vnd.github.v3+json",
-              "User-Agent": "YarOperator",
-            },
-          },
-        );
-
-        if (!res.ok) {
-          const errText = await res.text();
-          return {
-            success: false,
-            error: `GitHub API error (${res.status}): ${errText}`,
-          };
-        }
-
-        const data = (await res.json()) as any;
-        return {
-          success: true,
-          output: {
-            repo: data.full_name,
-            defaultBranch: data.default_branch,
-            openIssuesCount: data.open_issues_count,
-            stargazersCount: data.stargazers_count,
-            url: data.html_url,
-            status: "ACTIVE",
-          },
-        };
-      }
-
       if (params.action === "create_pr") {
         if (!params.title || !params.head) {
           return {

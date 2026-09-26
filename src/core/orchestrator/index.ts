@@ -55,6 +55,7 @@ export interface OrchestrationResult {
 
 export class AgentOrchestrator {
   private capabilityResolver: CapabilityResolver;
+  private lastResolvedEntityByWorkspace: Map<string, string> = new Map();
 
   constructor(
     private registry: AgentRegistry,
@@ -65,6 +66,16 @@ export class AgentOrchestrator {
   ) {
     this.capabilityResolver =
       capabilityResolver || new CapabilityResolver(this.registry);
+  }
+
+  public setLastResolvedEntity(workspaceId: string, entity: string): void {
+    if (workspaceId && entity) {
+      this.lastResolvedEntityByWorkspace.set(workspaceId, entity);
+    }
+  }
+
+  public getLastResolvedEntity(workspaceId: string): string | undefined {
+    return this.lastResolvedEntityByWorkspace.get(workspaceId);
   }
 
   public setPolicyEngine(policyEngine: PolicyEngine): void {
@@ -537,13 +548,6 @@ export class AgentOrchestrator {
           break;
         }
 
-        const accumulatedEvidence: Record<string, unknown> = {};
-        for (const [sId, res] of Object.entries(stepResults)) {
-          if (res.state === "SUCCEEDED" && res.output !== undefined) {
-            accumulatedEvidence[sId] = res.output;
-          }
-        }
-
         const stepReq: OrchestrationRequest = {
           brainResult: {
             intent: "ACTION",
@@ -554,12 +558,7 @@ export class AgentOrchestrator {
           environmentId: envId,
           targetCapability: undefined,
           requestedToolId: currentStep.toolId,
-          params: {
-            ...(currentStep.params || {}),
-            ...(Object.keys(accumulatedEvidence).length > 0
-              ? { previousEvidence: accumulatedEvidence }
-              : {}),
-          },
+          params: currentStep.params || {},
           rawCommandText: currentStep.purpose,
         };
 

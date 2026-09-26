@@ -17,6 +17,7 @@ export interface AssistantGoal {
   targetCapability: string;
   requestedToolId: string;
   params: Record<string, unknown>;
+  mode?: "DISCOVERY" | "AUTONOMOUS_GOAL" | "EXPLICIT_MODIFICATION";
   consequential?: boolean;
 }
 
@@ -200,20 +201,11 @@ export class RealWorldAssistant {
     step.status = "EXECUTED";
     step.result = runResult.evidence?.toolResult;
 
-    const toolOutput = runResult.evidence?.toolResult;
-    const summaryText =
-      typeof toolOutput === "string"
-        ? toolOutput
-        : toolOutput && typeof toolOutput === "object"
-          ? "اقدام درخواستی با موفقیت انجام شد:"
-          : `Successfully executed real-world goal '${goal.description}'.`;
-
     const evidence = {
       goalId: goal.id,
       workspaceId: goal.workspaceId,
       toolId: goal.requestedToolId,
-      toolResult: toolOutput,
-      summary: summaryText,
+      toolResult: runResult.evidence?.toolResult,
       executedAt: new Date().toISOString(),
     };
 
