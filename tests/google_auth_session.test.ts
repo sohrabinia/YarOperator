@@ -353,7 +353,7 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
 
     expect(chatRes.status).toBe(200);
     const chatData = (await chatRes.json()) as any;
-    // Authenticated command reaches Policy Engine intake boundary, which resolves operator_health check as COMPLETED
+    // Authenticated command reaches Policy Engine intake boundary, which resolves SAFE operator_health check as COMPLETED
     expect(chatData.result.accepted).toBe(true);
     expect(chatData.result.status).toBe("COMPLETED");
   });

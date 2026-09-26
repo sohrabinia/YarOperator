@@ -346,6 +346,7 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(isHealthReadinessIntent("سلامت سامانه را بررسی کن")).toBe(true);
       expect(isHealthReadinessIntent("آمادگی سیستم را بررسی کن")).toBe(true);
       expect(isHealthReadinessIntent("وضعیت سرویس را بررسی کن")).toBe(true);
+      expect(isHealthReadinessIntent("وضعیت اپراتور را بررسی کن")).toBe(true);
     });
 
     it("colloquial Persian positive health/readiness phrases match isHealthReadinessIntent", () => {
@@ -363,6 +364,7 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(isHealthReadinessIntent("یه بررسی از وضعیت سیستم انجام بده")).toBe(
         true,
       );
+      expect(isHealthReadinessIntent("وضعیت سرویس را ببین")).toBe(true);
     });
 
     it("spacing, Unicode, and Arabic character variations match isHealthReadinessIntent", () => {
@@ -386,11 +388,14 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(isHealthReadinessIntent("is the system healthy?")).toBe(true);
       expect(isHealthReadinessIntent("is the system ready?")).toBe(true);
       expect(isHealthReadinessIntent("check service status")).toBe(true);
+      expect(isHealthReadinessIntent("inspect runtime health")).toBe(true);
+      expect(isHealthReadinessIntent("report service status")).toBe(true);
     });
 
-    it("negative non-system-health phrases fail closed and do not match isHealthReadinessIntent", () => {
+    it("negative domain protection phrases fail closed and do not match isHealthReadinessIntent", () => {
       expect(isHealthReadinessIntent("وضعیت پروژه را بررسی کن")).toBe(false);
       expect(isHealthReadinessIntent("وضعیت معامله را بررسی کن")).toBe(false);
+      expect(isHealthReadinessIntent("وضعیت معاملات را بررسی کن")).toBe(false);
       expect(isHealthReadinessIntent("وضعیت بازار را بررسی کن")).toBe(false);
       expect(isHealthReadinessIntent("سلامت داده‌ها را بررسی کن")).toBe(false);
       expect(isHealthReadinessIntent("سلامت داده‌های بازار را بررسی کن")).toBe(
@@ -409,7 +414,14 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(isHealthReadinessIntent("readiness")).toBe(false);
     });
 
-    it("exact production request 'وضعیت سیستم را بررسی کن' resolves to system-monitoring and operator_health", async () => {
+    it("broad generic words without system target nouns fail closed as false positives", () => {
+      expect(isHealthReadinessIntent("سیستم خریده است")).toBe(false);
+      expect(isHealthReadinessIntent("یک کار انجام بده")).toBe(false);
+      expect(isHealthReadinessIntent("است")).toBe(false);
+      expect(isHealthReadinessIntent("دارد")).toBe(false);
+    });
+
+    it("end-to-end trace: exact production request 'وضعیت سیستم را بررسی کن' resolves to system-monitoring -> operator_health -> COMPLETED", async () => {
       const spyHealth = vi.spyOn(OperatorHealthTool.prototype, "execute");
 
       const req: OperatorApiRequest = {

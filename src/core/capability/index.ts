@@ -14,14 +14,20 @@ import { Normalizer } from "../brain/index.js";
 export function isHealthReadinessIntent(text?: string): boolean {
   if (!text) return false;
   const norm = Normalizer.normalize(text);
+  if (!norm) return false;
 
-  // Negative boundary checks: Unrelated non-system-health operational/domain contexts MUST fail closed
-  const negativeKeywords = [
+  // Tokenize normalized text on whitespace
+  const tokens = norm.split(" ").filter(Boolean);
+  const tokenSet = new Set(tokens);
+
+  // Negative boundary keywords for non-system-health operational & business domain contexts
+  const negativeTokens = [
     "git",
     "branch",
     "commit",
     "pr",
-    "pull request",
+    "pull",
+    "request",
     "build",
     "test",
     "tests",
@@ -35,28 +41,35 @@ export function isHealthReadinessIntent(text?: string): boolean {
     "بازار",
     "داده",
     "داده‌ها",
-    "داده ها",
+    "دادهها",
     "فایل",
     "فایل‌ها",
-    "فایل ها",
+    "فایلها",
+    "وبسایت",
     "وب‌سایت",
-    "وب سایت",
     "سایت",
   ];
 
-  for (const neg of negativeKeywords) {
-    // Check as separate word token in normalized text
-    const negTokenRegex = new RegExp(`(?:^|\\s)${neg}(?:$|\\s)`, "i");
-    if (negTokenRegex.test(norm)) {
+  for (const neg of negativeTokens) {
+    if (tokenSet.has(neg)) {
       return false;
     }
   }
 
-  // Reject standalone words without operational/system context
+  // Multi-word negative phrases
+  if (
+    norm.includes("pull request") ||
+    norm.includes("وب سایت") ||
+    norm.includes("وب‌سایت")
+  ) {
+    return false;
+  }
+
+  // Reject standalone words without operational/system target context
   if (
     norm === "health" ||
     norm === "readiness" ||
-    norm === " status" ||
+    norm === "status" ||
     norm === "وضعیت" ||
     norm === "سلامت" ||
     norm === "آمادگی"
@@ -64,76 +77,98 @@ export function isHealthReadinessIntent(text?: string): boolean {
     return false;
   }
 
-  // Tokens / Concepts Analysis
+  // Operational Target Noun Concepts
   const hasSystemTarget =
+    tokenSet.has("سیستم") ||
+    tokenSet.has("سامانه") ||
+    tokenSet.has("سرویس") ||
+    tokenSet.has("سرویس‌ها") ||
+    tokenSet.has("سرویسها") ||
+    tokenSet.has("اپراتور") ||
+    tokenSet.has("اوپراتور") ||
+    tokenSet.has("system") ||
+    tokenSet.has("operator") ||
+    tokenSet.has("runtime") ||
+    tokenSet.has("service") ||
+    tokenSet.has("services") ||
     norm.includes("سیستم") ||
     norm.includes("سامانه") ||
     norm.includes("سرویس") ||
     norm.includes("اپراتور") ||
-    norm.includes("اوپراتور") ||
-    norm.includes("system") ||
-    norm.includes("operator") ||
-    norm.includes("runtime") ||
-    norm.includes("service");
+    norm.includes("اوپراتور");
 
+  // Operational Health/Status Concepts
   const hasHealthConcept =
+    tokenSet.has("وضعیت") ||
+    tokenSet.has("سلامت") ||
+    tokenSet.has("سالم") ||
+    tokenSet.has("سالمه") ||
+    tokenSet.has("سالمد") ||
+    tokenSet.has("آمادگی") ||
+    tokenSet.has("آماده") ||
+    tokenSet.has("وضعیتش") ||
+    tokenSet.has("status") ||
+    tokenSet.has("health") ||
+    tokenSet.has("readiness") ||
+    tokenSet.has("healthy") ||
+    tokenSet.has("ready") ||
     norm.includes("وضعیت") ||
     norm.includes("سلامت") ||
     norm.includes("سالم") ||
-    norm.includes("آمادگی") ||
     norm.includes("آماده") ||
-    norm.includes("status") ||
-    norm.includes("health") ||
-    norm.includes("readiness") ||
-    norm.includes("healthy") ||
-    norm.includes("ready");
+    norm.includes("آمادگی");
 
+  // Inquiry/Action Verb Contexts
   const hasActionVerb =
+    tokenSet.has("بررسی") ||
+    tokenSet.has("چک") ||
+    tokenSet.has("چطوره") ||
+    tokenSet.has("چیست") ||
+    tokenSet.has("داره") ||
+    tokenSet.has("ببین") ||
+    tokenSet.has("انجام") ||
+    tokenSet.has("check") ||
+    tokenSet.has("inspect") ||
+    tokenSet.has("report") ||
     norm.includes("بررسی") ||
     norm.includes("چک") ||
     norm.includes("چطوره") ||
-    norm.includes("چیست") ||
     norm.includes("چگونه است") ||
-    norm.includes("دارد") ||
-    norm.includes("است") ||
-    norm.includes("ببین") ||
-    norm.includes("انجام بده") ||
-    norm.includes("check") ||
-    norm.includes("inspect") ||
-    norm.includes("report");
+    norm.includes("چه وضعیتی");
 
-  // Rule A: Explicit System Target + Health Concept
+  // Rule A: Coherent Composition — Operational Target Noun + Operational Health Concept
   if (hasSystemTarget && hasHealthConcept) {
     return true;
   }
 
-  // Rule A2: Explicit System Target + Health Check Inquiry (e.g. "چک the system", "check system", "check operator", "سیستم را بررسی کن")
-  if (hasSystemTarget && (hasActionVerb || norm.includes("the"))) {
+  // Rule B: Operational Target Noun + Direct Health Inquiry Verb
+  if (
+    hasSystemTarget &&
+    hasActionVerb &&
+    (norm.includes("بررسی") || norm.includes("چک") || norm.includes("check"))
+  ) {
+    return true;
+  }
+
+  // Rule C: English System Health Expressions
+  const hasEnglishHealth =
+    tokenSet.has("health") ||
+    tokenSet.has("readiness") ||
+    tokenSet.has("status");
+  if (hasEnglishHealth || tokenSet.has("inspect") || tokenSet.has("report")) {
     if (
-      norm.includes("check") ||
-      norm.includes("بررسی") ||
-      norm.includes("چک")
+      tokenSet.has("check") ||
+      tokenSet.has("report") ||
+      tokenSet.has("inspect") ||
+      tokenSet.has("system") ||
+      tokenSet.has("operator") ||
+      tokenSet.has("runtime") ||
+      tokenSet.has("service") ||
+      tokenSet.has("healthy") ||
+      tokenSet.has("ready")
     ) {
       return true;
     }
-  }
-
-  // Rule B: English specific patterns
-  const hasEnglishHealth = norm.includes("health");
-  const hasEnglishReadiness = norm.includes("readiness");
-  const hasEnglishStatus = norm.includes("status");
-
-  if (
-    (hasEnglishHealth || hasEnglishReadiness || hasEnglishStatus) &&
-    (norm.includes("check") ||
-      norm.includes("report") ||
-      norm.includes("current") ||
-      norm.includes("system") ||
-      norm.includes("operator") ||
-      norm.includes("runtime") ||
-      norm.includes("service"))
-  ) {
-    return true;
   }
 
   return false;
