@@ -81,12 +81,26 @@ export function isHealthReadinessIntent(text?: string): boolean {
     }
   }
 
-  // Check multi-word negative phrases boundary-aware
+  // Token sequence helper for exact multi-word phrase matching
+  const hasTokenSequence = (seq: string[]): boolean => {
+    if (tokens.length < seq.length) return false;
+    for (let i = 0; i <= tokens.length - seq.length; i++) {
+      let match = true;
+      for (let j = 0; j < seq.length; j++) {
+        if (tokens[i + j] !== seq[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return true;
+    }
+    return false;
+  };
+
   if (
-    norm.includes("pull request") ||
-    norm.includes("وب سایت") ||
-    norm.includes("وب‌سایت") ||
-    norm.includes("پایگاه داده")
+    hasTokenSequence(["pull", "request"]) ||
+    hasTokenSequence(["وب", "سایت"]) ||
+    hasTokenSequence(["پایگاه", "داده"])
   ) {
     return false;
   }
