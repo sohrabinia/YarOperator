@@ -185,6 +185,16 @@ export class Normalizer {
       .replace(/[\u064B-\u0652]/g, "") // Strip Arabic Tashkeel / diacritics (e.g., Fathatan, Dammatan, Shadda)
       .replace(/ي/g, "ی") // Arabic Yah to Persian Ye
       .replace(/ك/g, "ک") // Arabic Kaf to Persian Ke
+      .replace(/[۰٠]/g, "0") // Normalize Persian/Arabic digits
+      .replace(/[۱١]/g, "1")
+      .replace(/[۲٢]/g, "2")
+      .replace(/[۳٣]/g, "3")
+      .replace(/[۴٤]/g, "4")
+      .replace(/[۵٥]/g, "5")
+      .replace(/[۶٦]/g, "6")
+      .replace(/[۷٧]/g, "7")
+      .replace(/[۸٨]/g, "8")
+      .replace(/[۹٩]/g, "9")
       .replace(/[\u200B-\u200D\uFEFF]/g, " ") // Replace zero-width spaces with space
       .replace(/[\u200C]/g, " ") // Replace Persian ZWNJ (نیم‌فاصله) with space
       .replace(/[،,.:;؟!?\-\\_«»"'"`]/g, " ") // Normalize punctuation including Persian guillemets
@@ -415,6 +425,10 @@ export class OperatorKnowledgeBase {
         "وضعیت رو بررسی کن",
         "مشکلش رو بررسی کن",
         "مشکل رو پیدا کن",
+        "ممیزی کن",
+        "ممیزی",
+        "ممیزیش کن",
+        "کامل ممیزی کن",
         "بفهم مشکل چیه",
         "علتش رو پیدا کن",
         "ریشه مشکل رو پیدا کن",
@@ -619,7 +633,25 @@ export class OperatorKnowledgeBase {
 
 export class DeterministicBrain implements Brain {
   private static readonly SEQUENTIAL_DELIMITERS =
-    /(?:\s+و\s+بعد\s+از\s+آن\s+|\s+و\s+در\s+نهایت\s+|\s+and\s+after\s+that\s+|\s+after\s+that\s+|\s+and\s+then\s+|\s+و\s+بعدش\s+|\s+و\s+بعدا\s+|\s+و\s+بعد\s+هم\s+|\s+و\s+بعد\s+|\s+و\s+سپس\s+|\s+سپس\s+|\s+بعدش\s+|\s+then\s+)/gi;
+    /(?:\s+و\s+اگر\s+مشکلی\s+داشت\s+|\s+و\s+در\s+صورت\s+وجود\s+مشکل\s+|\s+و\s+بعد\s+از\s+آن\s+|\s+و\s+در\s+نهایت\s+|\s+and\s+after\s+that\s+|\s+after\s+that\s+|\s+and\s+then\s+|\s+و\s+بعدش\s+|\s+و\s+بعدا\s+|\s+و\s+بعد\s+هم\s+|\s+و\s+بعد\s+|\s+و\s+سپس\s+|\s+سپس\s+|\s+بعدش\s+|\s+then\s+)/gi;
+
+  private static readonly DISCOVERY_CONSULTATION_TRIGGERS = [
+    "چطور می تونم",
+    "چطور می‌توانم",
+    "چگونه می توان",
+    "چگونه می‌توان",
+    "چطور میتونم",
+    "چگونه می تونم",
+    "چطور افزایش",
+    "چگونه افزایش",
+    "راهکارهای",
+    "راهکار",
+    "راهنمایی",
+    "پیشنهاد",
+    "how can i",
+    "how to increase",
+    "recommendations for",
+  ];
 
   private static readonly conversationalPatterns: Array<{
     keywords: string[];
@@ -773,6 +805,52 @@ export class DeterministicBrain implements Brain {
             "Synthesized single-step plan failed validation fail-closed check.",
         };
       }
+    }
+
+    // 1.5 Check for DISCOVERY / CONSULTATION Mode requests
+    const isConsultation =
+      DeterministicBrain.DISCOVERY_CONSULTATION_TRIGGERS.some((trig) =>
+        normText.includes(Normalizer.normalize(trig)),
+      );
+
+    if (isConsultation) {
+      const targetEntity = OperatorKnowledgeBase.resolveEntity(text);
+      const entityName = targetEntity ? targetEntity.name : "سیستم درخواستی";
+
+      const consultationReply = `تحلیل و مشاوره ساختاریافته برای: ${entityName}
+
+۱. حقایق (Facts):
+- وضعیت پروژه ${entityName} در محدوده عملیاتی تعریف‌شده پایش می‌شود.
+- ابزارهای پایش و سرویس به صورت SAFE تعریف شده‌اند و تغییرات ساختاری نیازمند تأییدیه مالک هستند.
+
+۲. فرضیات (Assumptions):
+- هدف ارتقای بازدهی و بهبود عملکرد با حفظ امنیت پایدار در محیط پروداکشن است.
+
+۳. مجهولات (Unknowns):
+- نرخ دقیق بازدهی فعلی به دسترسی به داده‌های استراتژی و متریک‌های عملکردی وابسته است.
+
+۴. اقدامات ممکن (Possible Actions):
+- پایش سلامت و زمان پاسخ‌دهی سرویس
+- بررسی لاگ‌های ورکر و بهینه‌سازی پارامترها
+- تست سناریوهای بازدهی در محیط ایزوله
+
+۵. وابستگی‌ها (Dependencies):
+- اتصال پایدار به API و سرویس‌های زیرساختی
+
+۶. ریسک‌ها (Risks):
+- هرگونه تغییر در معاملات یا تنظیمات زنده مالی طبق شیوه‌نامه امنیتی BLOCKED می‌باشد.
+
+۷. معیارهای سنجش (Measurement Criteria):
+- پایداری سرویس (Uptime)، زمان پاسخ‌دهی و نرخ موفقیت تراکنش‌ها/تسک‌ها.
+
+تذکر: موارد فوق تنها جهت بررسی و مشاوره ارائه شده‌اند و هیچ اقدام عملیاتی یا مالی به صورت خودکار انجام نشده است.`;
+
+      return {
+        intent: "CONVERSATION",
+        reply: consultationReply,
+        confidence: 0.95,
+        reason: "Input matches DISCOVERY/CONSULTATION mode request.",
+      };
     }
 
     // 2. Check for conversation patterns (CONVERSATION for pure greetings/pleasantries)

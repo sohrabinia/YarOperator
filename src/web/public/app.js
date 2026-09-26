@@ -228,44 +228,54 @@ document.addEventListener("DOMContentLoaded", () => {
     const content = document.createElement("div");
     content.className = "message-content";
 
-    // Executive Assistant response text formulation
+    // Executive Assistant response text formulation with dynamic evidence synthesis
     let textOutput = "";
 
-    if (
-      result.resolvedCapability === "conversation" &&
-      result.details &&
-      result.details.evidence &&
-      result.details.evidence.summary
-    ) {
-      textOutput = result.details.evidence.summary;
+    const summaryEvidence = result.details && result.details.evidence && result.details.evidence.summary;
+
+    if (summaryEvidence) {
+      textOutput = summaryEvidence;
     } else if (status === "COMPLETED") {
-      textOutput = "حتماً. اقدام درخواستی با موفقیت انجام شد.";
+      textOutput = "اقدام درخواستی با موفقیت اجرا شد. نتایج و شواهد کامل در زیر گزارش شده است:";
     } else if (status === "APPROVAL_REQUIRED") {
-      textOutput = "برای انجام این اقدام به تأیید شما نیاز دارم. فعلاً متوقف می‌مانم.";
+      textOutput = `برای انجام این اقدام به تأیید شما نیاز است. علت: ${result.reason || "نیاز به مجوز سطح بالادست"}`;
     } else if (status === "BLOCKED") {
-      textOutput = "این اقدام در محدوده اختیار فعلی من نیست و اجازه اجرای آن را ندارم.";
+      textOutput = `این اقدام در محدوده اختیار مجاز قرار ندارد و مسدود گردید. علت: ${result.reason || "شیوه‌نامه امنیتی BLOCKED"}`;
     } else if (status === "FAILED") {
-      textOutput = "در اجرای درخواست مشکلی پیش آمد و اقدام انجام نشد.";
+      const errDetail = result.reason || (result.details && result.details.error) || "خطا در اجرای ابزار";
+      textOutput = `در اجرای درخواست مشکلی پیش آمد: ${errDetail}`;
     } else {
-      textOutput = "درخواست شما دریافت شد و بررسی گردید.";
+      textOutput = "درخواست شما دریافت گردید و وضعیت آن گزارش می‌شود:";
     }
 
     content.textContent = textOutput;
     msgDiv.appendChild(header);
     msgDiv.appendChild(content);
 
-    // Render tool execution output if present
-    if (result.details && result.details.executedSteps) {
-      const lastStep = result.details.executedSteps[result.details.executedSteps.length - 1];
-      if (lastStep && lastStep.toolOutput) {
-        const codeDiv = document.createElement("div");
-        codeDiv.className = "code-block";
-        const outputStr = typeof lastStep.toolOutput === "string"
-          ? lastStep.toolOutput
-          : JSON.stringify(lastStep.toolOutput, null, 2);
-        codeDiv.textContent = outputStr;
-        msgDiv.appendChild(codeDiv);
+    // Render tool execution output / evidence dynamically for all executed steps
+    if (result.details && Array.isArray(result.details.executedSteps) && result.details.executedSteps.length > 0) {
+      for (const step of result.details.executedSteps) {
+        const outputData = step.result !== undefined ? step.result : step.toolOutput;
+        if (outputData !== undefined && outputData !== null) {
+          const codeDiv = document.createElement("div");
+          codeDiv.className = "code-block";
+          const outputStr = typeof outputData === "string"
+            ? outputData
+            : JSON.stringify(outputData, null, 2);
+          codeDiv.textContent = outputStr;
+          msgDiv.appendChild(codeDiv);
+        } else if (step.error) {
+          const errDiv = document.createElement("div");
+          errDiv.className = "code-block error";
+          errDiv.textContent = `خطای گام [${step.stepId || step.toolId}]: ${step.error}`;
+          msgDiv.appendChild(errDiv);
+        }
       }
+    } else if (result.details && result.details.evidence && !summaryEvidence) {
+      const codeDiv = document.createElement("div");
+      codeDiv.className = "code-block";
+      codeDiv.textContent = JSON.stringify(result.details.evidence, null, 2);
+      msgDiv.appendChild(codeDiv);
     }
 
     messagesList.appendChild(msgDiv);

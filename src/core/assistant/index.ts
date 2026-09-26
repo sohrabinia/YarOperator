@@ -27,6 +27,7 @@ export interface AssistantWorkflowStep {
   policyDecision: ActionSafetyLevel | "UNCLASSIFIED";
   status: "PENDING" | "EXECUTED" | "BLOCKED" | "APPROVAL_REQUIRED" | "FAILED";
   result?: unknown;
+  toolOutput?: unknown;
   error?: string;
 }
 
