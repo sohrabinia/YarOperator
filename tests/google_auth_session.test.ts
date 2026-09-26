@@ -353,9 +353,9 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
 
     expect(chatRes.status).toBe(200);
     const chatData = (await chatRes.json()) as any;
-    // Authenticated command reaches Policy Engine intake boundary, which rejects or blocks unauthorized actions
+    // Authenticated command reaches Policy Engine intake boundary, which resolves operator_health check as COMPLETED
     expect(chatData.result.accepted).toBe(true);
-    expect(chatData.result.status).toBe("BLOCKED");
+    expect(chatData.result.status).toBe("COMPLETED");
   });
 
   it("5. Real Google JWKS RS256 signature verification succeeds with valid key and fails on tampered signature", async () => {
@@ -494,9 +494,9 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
       console.log("CHAT RES ERROR:", chatData);
     }
     expect(chatRes.status).toBe(200);
-    expect(chatData.success).toBe(false);
+    expect(chatData.success).toBe(true);
     expect(chatData.result.accepted).toBe(true);
-    expect(chatData.result.status).toBe("BLOCKED");
+    expect(chatData.result.status).toBe("COMPLETED");
   });
 
   it("10. Owner anti-impersonation enforces isolation on session-authenticated requests", async () => {

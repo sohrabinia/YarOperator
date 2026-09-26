@@ -338,27 +338,67 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
     });
   });
 
-  describe("5. Bounded Intent Classification Positive & Negative Cases", () => {
-    it("positive health/readiness phrases match isHealthReadinessIntent", () => {
-      expect(
-        isHealthReadinessIntent(
-          "Check operator runtime health and report current readiness status.",
-        ),
-      ).toBe(true);
-      expect(isHealthReadinessIntent("Check operator runtime health")).toBe(
-        true,
-      );
-      expect(isHealthReadinessIntent("check runtime readiness")).toBe(true);
-      expect(isHealthReadinessIntent("operator health")).toBe(true);
-      expect(isHealthReadinessIntent("operator readiness")).toBe(true);
-      expect(isHealthReadinessIntent("report current readiness status")).toBe(
-        true,
-      );
-      expect(isHealthReadinessIntent("بررسی سلامت اپراتور")).toBe(true);
-      expect(isHealthReadinessIntent("وضعیت آمادگی اپراتور")).toBe(true);
+  describe("5. Bounded Intent Classification Positive & Negative Cases Matrix", () => {
+    it("formal Persian positive health/readiness phrases match isHealthReadinessIntent", () => {
+      expect(isHealthReadinessIntent("وضعیت سیستم را بررسی کن")).toBe(true);
+      expect(isHealthReadinessIntent("وضعیت سامانه را بررسی کن")).toBe(true);
+      expect(isHealthReadinessIntent("سلامت سیستم را بررسی کن")).toBe(true);
+      expect(isHealthReadinessIntent("سلامت سامانه را بررسی کن")).toBe(true);
+      expect(isHealthReadinessIntent("آمادگی سیستم را بررسی کن")).toBe(true);
+      expect(isHealthReadinessIntent("وضعیت سرویس را بررسی کن")).toBe(true);
     });
 
-    it("negative non-health phrases fail closed and do not match isHealthReadinessIntent", () => {
+    it("colloquial Persian positive health/readiness phrases match isHealthReadinessIntent", () => {
+      expect(isHealthReadinessIntent("وضعیت سیستم رو بررسی کن")).toBe(true);
+      expect(isHealthReadinessIntent("وضعیت سیستم رو چک کن")).toBe(true);
+      expect(isHealthReadinessIntent("وضعیت سیستم چطوره؟")).toBe(true);
+      expect(isHealthReadinessIntent("سیستم چه وضعیتی داره؟")).toBe(true);
+      expect(isHealthReadinessIntent("سیستم سالمه؟")).toBe(true);
+      expect(isHealthReadinessIntent("آیا سیستم سالم است؟")).toBe(true);
+      expect(isHealthReadinessIntent("سیستم آماده است؟")).toBe(true);
+      expect(isHealthReadinessIntent("سرویس‌ها سالم هستند؟")).toBe(true);
+      expect(isHealthReadinessIntent("لطفاً وضعیت سیستم را بررسی کن")).toBe(
+        true,
+      );
+      expect(isHealthReadinessIntent("یه بررسی از وضعیت سیستم انجام بده")).toBe(
+        true,
+      );
+    });
+
+    it("spacing, Unicode, and Arabic character variations match isHealthReadinessIntent", () => {
+      // Arabic Kafka (ك) and Yaf (ي)
+      expect(isHealthReadinessIntent("وضعيّت سيستم را بررسی كن")).toBe(true);
+      // Half-space (ZWNJ) and zero-width spaces
+      expect(isHealthReadinessIntent("وضعیت\u200Cسیستم را بررسی\u200Cکن")).toBe(
+        true,
+      );
+      // Extra whitespace
+      expect(
+        isHealthReadinessIntent("   وضعیت    سیستم    را   بررسی  کن   "),
+      ).toBe(true);
+    });
+
+    it("English positive health/readiness phrases match isHealthReadinessIntent", () => {
+      expect(isHealthReadinessIntent("check system status")).toBe(true);
+      expect(isHealthReadinessIntent("check the system")).toBe(true);
+      expect(isHealthReadinessIntent("system status")).toBe(true);
+      expect(isHealthReadinessIntent("system health")).toBe(true);
+      expect(isHealthReadinessIntent("is the system healthy?")).toBe(true);
+      expect(isHealthReadinessIntent("is the system ready?")).toBe(true);
+      expect(isHealthReadinessIntent("check service status")).toBe(true);
+    });
+
+    it("negative non-system-health phrases fail closed and do not match isHealthReadinessIntent", () => {
+      expect(isHealthReadinessIntent("وضعیت پروژه را بررسی کن")).toBe(false);
+      expect(isHealthReadinessIntent("وضعیت معامله را بررسی کن")).toBe(false);
+      expect(isHealthReadinessIntent("وضعیت بازار را بررسی کن")).toBe(false);
+      expect(isHealthReadinessIntent("سلامت داده‌ها را بررسی کن")).toBe(false);
+      expect(isHealthReadinessIntent("سلامت داده‌های بازار را بررسی کن")).toBe(
+        false,
+      );
+      expect(isHealthReadinessIntent("وضعیت فایل‌ها را بررسی کن")).toBe(false);
+      expect(isHealthReadinessIntent("وضعیت Git را بررسی کن")).toBe(false);
+      expect(isHealthReadinessIntent("وضعیت وب‌سایت را بررسی کن")).toBe(false);
       expect(isHealthReadinessIntent("check git status")).toBe(false);
       expect(isHealthReadinessIntent("verify test results")).toBe(false);
       expect(isHealthReadinessIntent("run build")).toBe(false);
@@ -367,6 +407,28 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(isHealthReadinessIntent("check pr status")).toBe(false);
       expect(isHealthReadinessIntent("health")).toBe(false);
       expect(isHealthReadinessIntent("readiness")).toBe(false);
+    });
+
+    it("exact production request 'وضعیت سیستم را بررسی کن' resolves to system-monitoring and operator_health", async () => {
+      const spyHealth = vi.spyOn(OperatorHealthTool.prototype, "execute");
+
+      const req: OperatorApiRequest = {
+        headers: { authorization: `Bearer ${bearerToken}` },
+        body: {
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "وضعیت سیستم را بررسی کن",
+        },
+      };
+
+      const res = await apiHandler.handleChatRequest(req);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.result?.status).toBe("COMPLETED");
+      expect(res.body.result?.resolvedCapability).toBe("system-monitoring");
+      expect(res.body.result?.resolvedToolId).toBe("operator_health");
+      expect(spyHealth).toHaveBeenCalledTimes(1);
     });
   });
 });

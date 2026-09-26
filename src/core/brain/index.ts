@@ -182,7 +182,9 @@ export class Normalizer {
     return input
       .trim()
       .toLowerCase()
-      .replace(/[\u200B-\u200D\uFEFF]/g, " ") // Replace zero-width spaces / half-spaces with space
+      .replace(/ي/g, "ی") // Arabic Yah to Persian Ye
+      .replace(/ك/g, "ک") // Arabic Kaf to Persian Ke
+      .replace(/[\u200B-\u200D\uFEFF]/g, " ") // Replace zero-width spaces with space
       .replace(/[\u200C]/g, " ") // Replace Persian ZWNJ (نیم‌فاصله) with space
       .replace(/[،,.:;؟!?\-\\_«»"'"`]/g, " ") // Normalize punctuation including Persian guillemets
       .replace(/\s+/g, " ") // Collapse multiple spaces

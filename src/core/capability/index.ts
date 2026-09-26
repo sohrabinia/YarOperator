@@ -9,81 +9,129 @@ export interface CapabilityResolutionRequest {
   rawCommandText?: string;
 }
 
+import { Normalizer } from "../brain/index.js";
+
 export function isHealthReadinessIntent(text?: string): boolean {
   if (!text) return false;
-  const norm = text.toLowerCase().trim();
+  const norm = Normalizer.normalize(text);
 
-  // Negative word boundary checks for non-health operational contexts
+  // Negative boundary checks: Unrelated non-system-health operational/domain contexts MUST fail closed
+  const negativeKeywords = [
+    "git",
+    "branch",
+    "commit",
+    "pr",
+    "pull request",
+    "build",
+    "test",
+    "tests",
+    "logs",
+    "code",
+    "repo",
+    "repository",
+    "پروژه",
+    "معامله",
+    "معاملات",
+    "بازار",
+    "داده",
+    "داده‌ها",
+    "داده ها",
+    "فایل",
+    "فایل‌ها",
+    "فایل ها",
+    "وب‌سایت",
+    "وب سایت",
+    "سایت",
+  ];
+
+  for (const neg of negativeKeywords) {
+    // Check as separate word token in normalized text
+    const negTokenRegex = new RegExp(`(?:^|\\s)${neg}(?:$|\\s)`, "i");
+    if (negTokenRegex.test(norm)) {
+      return false;
+    }
+  }
+
+  // Reject standalone words without operational/system context
   if (
-    /\b(git|branch|commit|pull request|pr|build|test|tests|logs|code|repo|repository)\b/i.test(
-      norm,
-    )
+    norm === "health" ||
+    norm === "readiness" ||
+    norm === " status" ||
+    norm === "وضعیت" ||
+    norm === "سلامت" ||
+    norm === "آمادگی"
   ) {
     return false;
   }
 
-  // Reject standalone "health" or "readiness" without operator/runtime/system/check/status/report context
-  if (norm === "health" || norm === "readiness") {
-    return false;
+  // Tokens / Concepts Analysis
+  const hasSystemTarget =
+    norm.includes("سیستم") ||
+    norm.includes("سامانه") ||
+    norm.includes("سرویس") ||
+    norm.includes("اپراتور") ||
+    norm.includes("اوپراتور") ||
+    norm.includes("system") ||
+    norm.includes("operator") ||
+    norm.includes("runtime") ||
+    norm.includes("service");
+
+  const hasHealthConcept =
+    norm.includes("وضعیت") ||
+    norm.includes("سلامت") ||
+    norm.includes("سالم") ||
+    norm.includes("آمادگی") ||
+    norm.includes("آماده") ||
+    norm.includes("status") ||
+    norm.includes("health") ||
+    norm.includes("readiness") ||
+    norm.includes("healthy") ||
+    norm.includes("ready");
+
+  const hasActionVerb =
+    norm.includes("بررسی") ||
+    norm.includes("چک") ||
+    norm.includes("چطوره") ||
+    norm.includes("چیست") ||
+    norm.includes("چگونه است") ||
+    norm.includes("دارد") ||
+    norm.includes("است") ||
+    norm.includes("ببین") ||
+    norm.includes("انجام بده") ||
+    norm.includes("check") ||
+    norm.includes("inspect") ||
+    norm.includes("report");
+
+  // Rule A: Explicit System Target + Health Concept
+  if (hasSystemTarget && hasHealthConcept) {
+    return true;
   }
 
-  const hasHealth = norm.includes("health");
-  const hasReadiness = norm.includes("readiness");
-  const hasOperator = norm.includes("operator");
-  const hasRuntime = norm.includes("runtime");
-  const hasSystem = norm.includes("system");
-
-  // Rule 1: operator + (health | readiness)
-  if (hasOperator && (hasHealth || hasReadiness)) return true;
-
-  // Rule 2: runtime + (health | readiness)
-  if (hasRuntime && (hasHealth || hasReadiness)) return true;
-
-  // Rule 3: (system | operator | runtime) + health
-  if (
-    hasHealth &&
-    (hasSystem || norm.includes("check") || norm.includes("report"))
-  ) {
+  // Rule A2: Explicit System Target + Health Check Inquiry (e.g. "چک the system", "check system", "check operator", "سیستم را بررسی کن")
+  if (hasSystemTarget && (hasActionVerb || norm.includes("the"))) {
     if (
-      hasOperator ||
-      hasRuntime ||
-      hasSystem ||
-      norm.includes("runtime health") ||
-      norm.includes("operator health")
+      norm.includes("check") ||
+      norm.includes("بررسی") ||
+      norm.includes("چک")
     ) {
       return true;
     }
   }
 
-  // Rule 4: (readiness status | current readiness | check readiness | report readiness)
-  if (
-    hasReadiness &&
-    (hasOperator ||
-      hasRuntime ||
-      norm.includes("readiness status") ||
-      norm.includes("current readiness") ||
-      norm.includes("runtime readiness") ||
-      norm.includes("check readiness") ||
-      norm.includes("report readiness"))
-  ) {
-    return true;
-  }
-
-  // Positive Persian patterns requiring explicit operator/system health/readiness context
-  if (
-    norm.includes("سلامت") &&
-    (norm.includes("اپراتور") ||
-      norm.includes("اوپراتور") ||
-      norm.includes("سیستم"))
-  ) {
-    return true;
-  }
+  // Rule B: English specific patterns
+  const hasEnglishHealth = norm.includes("health");
+  const hasEnglishReadiness = norm.includes("readiness");
+  const hasEnglishStatus = norm.includes("status");
 
   if (
-    norm.includes("آمادگی") &&
-    (norm.includes("اپراتور") ||
-      norm.includes("اوپراتور") ||
-      norm.includes("سیستم"))
+    (hasEnglishHealth || hasEnglishReadiness || hasEnglishStatus) &&
+    (norm.includes("check") ||
+      norm.includes("report") ||
+      norm.includes("current") ||
+      norm.includes("system") ||
+      norm.includes("operator") ||
+      norm.includes("runtime") ||
+      norm.includes("service"))
   ) {
     return true;
   }
