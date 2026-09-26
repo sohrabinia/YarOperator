@@ -338,7 +338,7 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
     });
   });
 
-  describe("5. Bounded Intent Classification Positive, Negative & Mutation Test Matrix", () => {
+  describe("5. Bounded Intent Classification Positive, Negative, Boundary & Mutation Test Matrix", () => {
     it("formal Persian positive health/readiness phrases match isHealthReadinessIntent", () => {
       expect(isHealthReadinessIntent("وضعیت سیستم را بررسی کن")).toBe(true);
       expect(isHealthReadinessIntent("وضعیت سامانه را بررسی کن")).toBe(true);
@@ -396,6 +396,21 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(isHealthReadinessIntent("check server health")).toBe(true);
     });
 
+    it("boundary compound words containing substrings do NOT cause false positive health or mutation blocks", () => {
+      // Compound words containing "سیستم" or "سرویس" but with different meanings
+      expect(isHealthReadinessIntent("رویکرد سیستماتیک داشته باش")).toBe(false);
+      expect(isHealthReadinessIntent("سرویسکار فرستاده شد")).toBe(false);
+      // Compound words containing "روشن" or "راه" but not mutation (target noun absent -> fails)
+      expect(isHealthReadinessIntent("او یک روشنفکر است")).toBe(false);
+    });
+
+    it("non-health investigation requests fail closed and do NOT resolve to health checks", () => {
+      expect(isHealthReadinessIntent("سیستم را تحلیل کن")).toBe(false);
+      expect(isHealthReadinessIntent("سیستم را توضیح بده")).toBe(false);
+      expect(isHealthReadinessIntent("explain the system")).toBe(false);
+      expect(isHealthReadinessIntent("analyze the service")).toBe(false);
+    });
+
     it("negative domain protection phrases fail closed and do not match isHealthReadinessIntent", () => {
       expect(isHealthReadinessIntent("وضعیت پروژه را بررسی کن")).toBe(false);
       expect(isHealthReadinessIntent("وضعیت معامله را بررسی کن")).toBe(false);
@@ -424,6 +439,8 @@ describe("CTO Forensic Remediation — Real Task Execution Path & API/UI Status 
       expect(isHealthReadinessIntent("سیستم را خاموش کن")).toBe(false);
       expect(isHealthReadinessIntent("سیستم را روشن کن")).toBe(false);
       expect(isHealthReadinessIntent("سرور را تغییر بده")).toBe(false);
+      expect(isHealthReadinessIntent("restart the service")).toBe(false);
+      expect(isHealthReadinessIntent("stop the server")).toBe(false);
     });
 
     it("broad generic words without operational target nouns fail closed as false positives", () => {

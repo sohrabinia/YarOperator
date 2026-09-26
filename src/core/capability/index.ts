@@ -16,35 +16,37 @@ export function isHealthReadinessIntent(text?: string): boolean {
   const norm = Normalizer.normalize(text);
   if (!norm) return false;
 
+  // Tokenize normalized text on whitespace
   const tokens = norm.split(" ").filter(Boolean);
   const tokenSet = new Set(tokens);
 
-  // 1. Negative Mutation Filter: State-changing verbs must NEVER resolve to read-only operator_health:check
-  const mutationKeywords = [
+  // 1. Boundary-Aware Mutation Filter: Exact token/concept check for state-changing verbs
+  const mutationTokens = new Set([
     "ریستارت",
     "متوقف",
     "تغییر",
     "خاموش",
     "روشن",
-    "راه",
-    "اندازی",
     "اصلاح",
     "ویرایش",
+    "حذف",
+    "حذفش",
     "restart",
     "stop",
     "start",
     "modify",
     "change",
     "shutdown",
-  ];
-  for (const m of mutationKeywords) {
-    if (tokenSet.has(m) || norm.includes(m)) {
+  ]);
+
+  for (const t of tokens) {
+    if (mutationTokens.has(t)) {
       return false;
     }
   }
 
-  // 2. Negative Domain Filter: Unrelated operational domains must NOT enter system health monitoring
-  const negativeTokens = [
+  // 2. Boundary-Aware Negative Domain Filter: Exact token set check for unrelated domains
+  const negativeTokens = new Set([
     "git",
     "github",
     "branch",
@@ -70,17 +72,16 @@ export function isHealthReadinessIntent(text?: string): boolean {
     "فایل‌ها",
     "فایلها",
     "وبسایت",
-    "وب‌سایت",
-    "سایت",
     "دیتابیس",
-  ];
+  ]);
 
-  for (const neg of negativeTokens) {
-    if (tokenSet.has(neg)) {
+  for (const t of tokens) {
+    if (negativeTokens.has(t)) {
       return false;
     }
   }
 
+  // Check multi-word negative phrases boundary-aware
   if (
     norm.includes("pull request") ||
     norm.includes("وب سایت") ||
@@ -90,23 +91,24 @@ export function isHealthReadinessIntent(text?: string): boolean {
     return false;
   }
 
-  // Reject standalone words lacking an explicit target/concept pairing
+  // Reject standalone single words lacking target + concept pairing
   if (
-    norm === "health" ||
-    norm === "readiness" ||
-    norm === "status" ||
-    norm === "وضعیت" ||
-    norm === "سلامت" ||
-    norm === "آمادگی" ||
-    norm === "سرور" ||
-    norm === "سرویس" ||
-    norm === "سیستم" ||
-    norm === "اپراتور"
+    tokens.length === 1 &&
+    (tokenSet.has("health") ||
+      tokenSet.has("readiness") ||
+      tokenSet.has("status") ||
+      tokenSet.has("وضعیت") ||
+      tokenSet.has("سلامت") ||
+      tokenSet.has("آمادگی") ||
+      tokenSet.has("سرور") ||
+      tokenSet.has("سرویس") ||
+      tokenSet.has("سیستم") ||
+      tokenSet.has("اپراتور"))
   ) {
     return false;
   }
 
-  // 3. Concept Sets Analysis
+  // 3. Concept Sets Analysis using exact token set presence
   // Operational Target Nouns
   const hasSystemTarget =
     tokenSet.has("سیستم") ||
@@ -123,63 +125,41 @@ export function isHealthReadinessIntent(text?: string): boolean {
     tokenSet.has("runtime") ||
     tokenSet.has("service") ||
     tokenSet.has("services") ||
-    tokenSet.has("server") ||
-    norm.includes("سیستم") ||
-    norm.includes("سامانه") ||
-    norm.includes("سرویس") ||
-    norm.includes("اپراتور") ||
-    norm.includes("اوپراتور") ||
-    norm.includes("سرور");
+    tokenSet.has("server");
 
   // Operational Health/Status Concepts
   const hasHealthConcept =
     tokenSet.has("وضعیت") ||
+    tokenSet.has("وضعیتش") ||
+    tokenSet.has("وضعیتی") ||
     tokenSet.has("سلامت") ||
     tokenSet.has("سالم") ||
     tokenSet.has("سالمه") ||
     tokenSet.has("آمادگی") ||
     tokenSet.has("آماده") ||
-    tokenSet.has("وضعیتش") ||
-    tokenSet.has("وضعیتش") ||
+    tokenSet.has("آماده‌ست") ||
+    tokenSet.has("آمادهست") ||
     tokenSet.has("status") ||
     tokenSet.has("health") ||
     tokenSet.has("readiness") ||
     tokenSet.has("healthy") ||
-    tokenSet.has("ready") ||
-    norm.includes("وضعیت") ||
-    norm.includes("سلامت") ||
-    norm.includes("سالم") ||
-    norm.includes("آماده") ||
-    norm.includes("آمادگی") ||
-    norm.includes("چه وضعیتی");
+    tokenSet.has("ready");
 
-  // Inquiry/Check Concepts
-  const hasInquiryConcept =
-    tokenSet.has("بررسی") ||
-    tokenSet.has("چک") ||
-    tokenSet.has("چطوره") ||
-    tokenSet.has("چیست") ||
-    tokenSet.has("ببین") ||
-    tokenSet.has("بگو") ||
-    tokenSet.has("check") ||
-    tokenSet.has("inspect") ||
-    tokenSet.has("report") ||
-    norm.includes("بررسی") ||
-    norm.includes("چک") ||
-    norm.includes("چطوره") ||
-    norm.includes("چگونه است");
-
-  // Rule Composition Enforcement
-  // Must possess a valid Target Noun AND an Operational Health/Status Concept or Health Inquiry Verb
-  if (hasSystemTarget && (hasHealthConcept || hasInquiryConcept)) {
+  // Coherent Semantic Rule Composition
+  // System-health intent REQUIRES an Operational Target Noun AND an explicit Operational Health/Status Concept.
+  // Generic investigation verbs (e.g., "بررسی", "تحلیل", "توضیح") without health concepts must NOT resolve to operator_health.
+  if (hasSystemTarget && hasHealthConcept) {
     return true;
   }
 
-  // English Expressions Composition
+  // English System Health Expressions Composition
   const hasEnglishHealth =
     tokenSet.has("health") ||
     tokenSet.has("readiness") ||
-    tokenSet.has("status");
+    tokenSet.has("status") ||
+    tokenSet.has("healthy") ||
+    tokenSet.has("ready");
+
   if (
     hasEnglishHealth &&
     (tokenSet.has("check") ||
@@ -189,9 +169,7 @@ export function isHealthReadinessIntent(text?: string): boolean {
       tokenSet.has("operator") ||
       tokenSet.has("runtime") ||
       tokenSet.has("service") ||
-      tokenSet.has("server") ||
-      tokenSet.has("healthy") ||
-      tokenSet.has("ready"))
+      tokenSet.has("server"))
   ) {
     return true;
   }

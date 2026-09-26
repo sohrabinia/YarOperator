@@ -182,6 +182,7 @@ export class Normalizer {
     return input
       .trim()
       .toLowerCase()
+      .replace(/[\u064B-\u0652]/g, "") // Strip Arabic Tashkeel / diacritics (e.g., Fathatan, Dammatan, Shadda)
       .replace(/ي/g, "ی") // Arabic Yah to Persian Ye
       .replace(/ك/g, "ک") // Arabic Kaf to Persian Ke
       .replace(/[\u200B-\u200D\uFEFF]/g, " ") // Replace zero-width spaces with space
