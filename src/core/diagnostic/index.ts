@@ -160,8 +160,13 @@ export class BoundedHttpProbe {
     private maxResponseBytes: number = 1000,
   ) {}
 
-  public async get(
+  public async request(
     urlStr: string,
+    options: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string;
+    } = {},
     redirectCount: number = 0,
     globalDeadlineMs?: number,
   ): Promise<HttpProbeResult> {
@@ -268,26 +273,24 @@ export class BoundedHttpProbe {
         };
       }
 
-      /**
-       * RESIDUAL TOCTOU / DNS REBINDING RISK DOCUMENTATION:
-       * While BoundedHttpProbe validates target URLs against origin allowlists and private IP regexes
-       * before dispatching fetch(), a concurrent DNS rebinding attack (where a public hostname's A record
-       * is changed to a private IP between pre-check resolution and socket connection) remains a residual
-       * OS-level networking race condition unless pinned at the socket level.
-       */
+      const method = options.method || "GET";
+      const headers = {
+        Accept: "text/plain, application/json, */*",
+        "User-Agent": "YarOperator-DiagnosticProbe/1.0",
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      };
+
       const response = await fetch(parsedUrl.toString(), {
-        method: "GET",
-        headers: {
-          Accept: "text/plain, application/json, */*",
-          "User-Agent": "YarOperator-DiagnosticProbe/1.0",
-        },
-        redirect: "manual", // Explicit manual redirect revalidation
+        method,
+        headers,
+        body: options.body,
+        redirect: "manual",
         signal: controller.signal,
       });
 
       // Handle redirects with explicit destination re-validation
       if (response.status >= 300 && response.status < 400) {
-        // Explicitly cancel/release the redirect response body before following next hop
         try {
           await response.body?.cancel();
         } catch {}
@@ -321,14 +324,14 @@ export class BoundedHttpProbe {
           };
         }
 
-        return this.get(
+        return this.request(
           resolvedRedirect.toString(),
+          options,
           redirectCount + 1,
           deadline,
         );
       }
 
-      // Bounded streaming response read up to maxResponseBytes
       let bodyText = "";
       if (response.body) {
         const reader = response.body.getReader();
@@ -374,6 +377,19 @@ export class BoundedHttpProbe {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  public async get(
+    urlStr: string,
+    redirectCount: number = 0,
+    globalDeadlineMs?: number,
+  ): Promise<HttpProbeResult> {
+    return this.request(
+      urlStr,
+      { method: "GET" },
+      redirectCount,
+      globalDeadlineMs,
+    );
   }
 
   private redactSecrets(text: string): string {

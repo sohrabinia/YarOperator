@@ -16,6 +16,7 @@ import {
   SecureToolEcosystem,
   OperatorHealthTool,
   SystemHealthProvider,
+  YarTraderTool,
 } from "../tools/index.js";
 import { TerminalTool } from "../terminal/index.js";
 import { GitTool, GitHubTool, JulesWorkerAdapter } from "../git/index.js";
@@ -144,8 +145,29 @@ export async function bootstrapOperatorApplication(
 
   policyEngine.setRule("operator_health:check", "SAFE");
 
+  policyEngine.setRule("yartrader_adapter:health", "SAFE");
+  policyEngine.setRule("yartrader_adapter:worker_status", "SAFE");
+  policyEngine.setRule("yartrader_adapter:logs", "SAFE");
+  policyEngine.setRule("yartrader_adapter:diagnostics", "SAFE");
+  policyEngine.setRule("yartrader_adapter:config_read", "SAFE");
+  policyEngine.setRule("yartrader_adapter:trading_state", "SAFE");
+
+  policyEngine.setRule(
+    "yartrader_adapter:restart_service",
+    "APPROVAL_REQUIRED",
+  );
+  policyEngine.setRule("yartrader_adapter:stop_service", "APPROVAL_REQUIRED");
+  policyEngine.setRule("yartrader_adapter:start_service", "APPROVAL_REQUIRED");
+  policyEngine.setRule("yartrader_adapter:config_write", "APPROVAL_REQUIRED");
+
+  policyEngine.setRule("yartrader_adapter:order_place", "BLOCKED");
+  policyEngine.setRule("yartrader_adapter:order_modify", "BLOCKED");
+  policyEngine.setRule("yartrader_adapter:order_cancel", "BLOCKED");
+  policyEngine.setRule("yartrader_adapter:live_enable", "BLOCKED");
+
   // Base tool fallback defaults for legacy toolId lookups
   policyEngine.setRule("operator_health", "SAFE");
+  policyEngine.setRule("yartrader_adapter", "SAFE");
   policyEngine.setRule("browser_operate", "SAFE");
   policyEngine.setRule("web_research", "SAFE");
   policyEngine.setRule("git_operate", "APPROVAL_REQUIRED");
@@ -225,6 +247,7 @@ export async function bootstrapOperatorApplication(
     new BrowserTool(),
     new WebResearchTool(),
     healthTool,
+    new YarTraderTool(),
   ];
 
   const registeredToolIds: string[] = [];
@@ -280,6 +303,7 @@ export async function bootstrapOperatorApplication(
       "browser_operate",
       "web_research",
       "operator_health",
+      "yartrader_adapter",
     ],
     provider: "DefaultProvider",
     model: "default-v1",

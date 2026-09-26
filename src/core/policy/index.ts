@@ -427,6 +427,16 @@ export class PolicyEngine {
     return this.explicitRules.get(toolIdOrAction);
   }
 
+  getRulesForTool(toolId: string): Map<string, ActionSafetyLevel> {
+    const rules = new Map<string, ActionSafetyLevel>();
+    for (const [key, level] of this.explicitRules.entries()) {
+      if (key === toolId || key.startsWith(`${toolId}:`)) {
+        rules.set(key, level);
+      }
+    }
+    return rules;
+  }
+
   resolveSafetyLevel(
     toolId: string,
     actionKey?: string,

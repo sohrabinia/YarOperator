@@ -6,10 +6,179 @@ export {
   SystemHealthProvider,
   type SystemHealthReport,
 } from "./health.js";
+export {
+  YarTraderTool,
+  type YarTraderToolParams,
+  type YarTraderToolOutput,
+} from "./yartrader.js";
 import { PolicyEngine, ApprovalManager } from "../policy/index.js";
 import { EnvironmentManager } from "../environment/index.js";
 import { WorkspacePolicyManager } from "../workspace/policy.js";
 import { ResourceResolver } from "../registry/resolver.js";
+
+export type CapabilityState =
+  "REGISTERED" | "AVAILABLE" | "APPROVAL_REQUIRED" | "BLOCKED" | "UNAVAILABLE";
+
+export interface ToolCapabilityReportItem {
+  id: string;
+  name: string;
+  state: CapabilityState;
+  policy: string;
+  actions?: Array<{
+    action: string;
+    state: CapabilityState;
+    rule?: string;
+  }>;
+}
+
+export class CapabilityReporter {
+  public static generateReport(
+    registry: ToolRegistry,
+    policyEngine?: PolicyEngine,
+    overrideAvailability?: Record<string, boolean>,
+  ): {
+    tools: ToolCapabilityReportItem[];
+    formattedReport: string;
+  } {
+    const registeredTools = registry.list();
+    const toolReports: ToolCapabilityReportItem[] = [];
+
+    const lines: string[] = [
+      "من YarOperator هستم. گزارش پویای ابزارها و قابلیت‌های سیستم:",
+    ];
+
+    for (const tool of registeredTools) {
+      const id = tool.metadata.id;
+      const toolRules = policyEngine
+        ? policyEngine.getRulesForTool(id)
+        : new Map<string, string>();
+
+      let isRuntimeAvailable = true;
+      if (overrideAvailability && id in overrideAvailability) {
+        isRuntimeAvailable = Boolean(overrideAvailability[id]);
+      } else if (typeof (tool as any).isAvailable === "function") {
+        try {
+          isRuntimeAvailable = Boolean((tool as any).isAvailable());
+        } catch {
+          isRuntimeAvailable = false;
+        }
+      }
+
+      const actionItems: Array<{
+        action: string;
+        state: CapabilityState;
+        rule?: string;
+      }> = [];
+
+      let overallState: CapabilityState = isRuntimeAvailable
+        ? "AVAILABLE"
+        : "UNAVAILABLE";
+
+      if (toolRules.size > 0) {
+        const parts: string[] = [];
+        let hasApprovalRequired = false;
+        let hasBlocked = false;
+        let hasSafe = false;
+
+        for (const [actionKey, level] of toolRules.entries()) {
+          const subAction = actionKey.includes(":")
+            ? actionKey.split(":")[1]
+            : actionKey;
+
+          let actionState: CapabilityState = "REGISTERED";
+          if (level === "BLOCKED") {
+            actionState = "BLOCKED";
+            hasBlocked = true;
+          } else if (!isRuntimeAvailable) {
+            actionState = "UNAVAILABLE";
+          } else if (level === "APPROVAL_REQUIRED") {
+            actionState = "APPROVAL_REQUIRED";
+            hasApprovalRequired = true;
+          } else if (level === "SAFE") {
+            actionState = "AVAILABLE";
+            hasSafe = true;
+          }
+
+          actionItems.push({
+            action: subAction,
+            state: actionState,
+            rule: level,
+          });
+
+          parts.push(`${subAction}: ${actionState}`);
+        }
+
+        if (hasBlocked && !hasSafe && !hasApprovalRequired) {
+          overallState = "BLOCKED";
+        } else if (!isRuntimeAvailable) {
+          overallState = "UNAVAILABLE";
+        } else if (hasApprovalRequired && !hasSafe) {
+          overallState = "APPROVAL_REQUIRED";
+        } else if (hasSafe) {
+          overallState = "AVAILABLE";
+        } else {
+          overallState = "REGISTERED";
+        }
+
+        const policyStr = parts.join(", ");
+        toolReports.push({
+          id,
+          name: tool.metadata.name,
+          state: overallState,
+          policy: policyStr,
+          actions: actionItems,
+        });
+
+        lines.push(
+          `- ${id} (${tool.metadata.name}): وضعیت اصلی: ${overallState} | قوانین اکشن‌ها: ${policyStr}`,
+        );
+      } else if (policyEngine) {
+        // Explicit PolicyEngine supplied but no action rules registered for this tool -> REGISTERED
+        overallState = "REGISTERED";
+        const policyStr = "NO_EXPLICIT_POLICY_RULE";
+
+        toolReports.push({
+          id,
+          name: tool.metadata.name,
+          state: overallState,
+          policy: policyStr,
+        });
+
+        lines.push(
+          `- ${id} (${tool.metadata.name}): وضعیت: REGISTERED | سطح دسترسی: بدون قانون صریح PolicyEngine`,
+        );
+      } else {
+        // Backward compatibility fallback when NO PolicyEngine instance is supplied
+        const fallbackLevel = tool.metadata.safetyLevel || "SAFE";
+        if (fallbackLevel === "BLOCKED") {
+          overallState = "BLOCKED";
+        } else if (!isRuntimeAvailable) {
+          overallState = "UNAVAILABLE";
+        } else if (fallbackLevel === "APPROVAL_REQUIRED") {
+          overallState = "APPROVAL_REQUIRED";
+        } else {
+          overallState = "AVAILABLE";
+        }
+
+        toolReports.push({
+          id,
+          name: tool.metadata.name,
+          state: overallState,
+          policy: fallbackLevel,
+        });
+
+        lines.push(
+          `- ${id} (${tool.metadata.name}): وضعیت: ${overallState} | سطح دسترسی (توصیفی): ${fallbackLevel}`,
+        );
+      }
+    }
+
+    return {
+      tools: toolReports,
+      formattedReport: lines.join("\n"),
+    };
+  }
+}
 
 export class SecureToolEcosystem {
   constructor(

@@ -108,12 +108,12 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
       }
 
       createProductionServer({
-        port: ${port},
+        port: 0,
         host: "127.0.0.1",
         bearerToken: "token_crash_100",
         ownerId: "owner_sohrab",
-      }).then(() => {
-        console.log("CRASH_TEST_SERVER_READY");
+      }).then(({ port: actualPort }) => {
+        console.log("CRASH_TEST_SERVER_READY:" + actualPort);
       }).catch((err) => {
         console.error(err);
         process.exit(1);
@@ -130,13 +130,16 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
     });
   }
 
-  async function waitForServerReady(proc: ChildProcess): Promise<void> {
+  async function waitForServerReady(proc: ChildProcess): Promise<number> {
     return new Promise((resolve, reject) => {
       let output = "";
       proc.stdout?.on("data", (chunk) => {
         output += chunk.toString();
-        if (output.includes("CRASH_TEST_SERVER_READY")) {
-          resolve();
+        if (output.includes("CRASH_TEST_SERVER_READY:")) {
+          const match = output.match(/CRASH_TEST_SERVER_READY:(\d+)/);
+          if (match) {
+            resolve(parseInt(match[1], 10));
+          }
         }
       });
       proc.stderr?.on("data", (chunk) => {
@@ -158,10 +161,11 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
     // 1. Spawn Child Process 1 with in-flight action checkpoint
     // =========================================================================
     let child1 = spawnServerProcess(dbPath, "BOOT1");
-    await waitForServerReady(child1);
+    const port1 = await waitForServerReady(child1);
+    const baseUrl1 = `http://127.0.0.1:${port1}`;
 
     // Verify initial liveness
-    const resHealth1 = await fetch(`${baseUrl}/health`);
+    const resHealth1 = await fetch(`${baseUrl1}/health`);
     expect(resHealth1.status).toBe(200);
 
     // =========================================================================
@@ -172,7 +176,7 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
 
     // Verify process is killed
     try {
-      await fetch(`${baseUrl}/health`);
+      await fetch(`${baseUrl1}/health`);
       expect.unreachable("Server should be dead after SIGKILL");
     } catch (err) {
       expect(err).toBeDefined();
@@ -182,9 +186,10 @@ describe("Phase 6: Real Child-Process Crash Recovery Test", () => {
     // 3. Restart Server Process & Trigger Recovery
     // =========================================================================
     let child2 = spawnServerProcess(dbPath, "BOOT2");
-    await waitForServerReady(child2);
+    const port2 = await waitForServerReady(child2);
+    const baseUrl2 = `http://127.0.0.1:${port2}`;
 
-    const healthRes2 = await fetch(`${baseUrl}/health`);
+    const healthRes2 = await fetch(`${baseUrl2}/health`);
     expect(healthRes2.status).toBe(200);
 
     // Explicitly run ControlledAutonomyEngine.recoverInterruptedTasks against DB
