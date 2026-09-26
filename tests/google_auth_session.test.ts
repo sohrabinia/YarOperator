@@ -550,4 +550,190 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
     expect(apiData.result.accepted).toBe(true);
     expect(apiData.result.status).toBe("BLOCKED");
   });
+
+  // Dual-Credential & Session Consistency Boundary Tests (Modes 1-8)
+  it("18. Dual-Credential Rule 1: Cookie-only Chat succeeds", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `yo_session=${session.sessionId}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(200);
+    const chatData = (await chatRes.json()) as any;
+    expect(chatData.result.accepted).toBe(true);
+  });
+
+  it("19. Dual-Credential Rule 2: Same Cookie + Same Bearer succeeds", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `yo_session=${session.sessionId}`,
+          Authorization: `Bearer ${session.sessionId}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(200);
+    const chatData = (await chatRes.json()) as any;
+    expect(chatData.result.accepted).toBe(true);
+  });
+
+  it("20. Dual-Credential Rule 3: Valid Cookie + Invalid Bearer fails closed (401)", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `yo_session=${session.sessionId}`,
+          Authorization: "Bearer invalid_or_revoked_bearer_999",
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(401);
+    const chatData = (await chatRes.json()) as any;
+    expect(chatData.success).toBe(false);
+    expect(chatData.error).toContain(
+      "Mismatched or invalid dual credentials provided",
+    );
+  });
+
+  it("21. Dual-Credential Rule 4: Valid Cookie + Mismatched Valid Bearer fails closed (401)", async () => {
+    const sessionA = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+    const sessionB = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `yo_session=${sessionA.sessionId}`,
+          Authorization: `Bearer ${sessionB.sessionId}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(401);
+    const chatData = (await chatRes.json()) as any;
+    expect(chatData.success).toBe(false);
+    expect(chatData.error).toContain(
+      "Mismatched or invalid dual credentials provided",
+    );
+  });
+
+  it("22. Dual-Credential Rule 5: Bearer-only succeeds", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.sessionId}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(200);
+    const chatData = (await chatRes.json()) as any;
+    expect(chatData.result.accepted).toBe(true);
+  });
+
+  it("23. Dual-Credential Rule 6: Invalid Bearer-only fails (401)", async () => {
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer invalid_bearer_token",
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(401);
+    const chatData = (await chatRes.json()) as any;
+    expect(chatData.success).toBe(false);
+  });
+
+  it("24. Dual-Credential Rule 7: Revoked session fails (401)", async () => {
+    const session = server.createSession(AUTHORIZED_EMAIL, "owner_sohrab");
+    server.revokeSession(session.sessionId);
+
+    const chatRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/v1/operator/chat`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `yo_session=${session.sessionId}`,
+        },
+        body: JSON.stringify({
+          workspaceId: "yartrader",
+          environmentId: "env_yartrader",
+          rawCommandText: "سلام",
+        }),
+      },
+    );
+
+    expect(chatRes.status).toBe(401);
+  });
+
+  it("25. Frontend Regression: app.js contains zero yo_bearer_token references", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const appJsPath = path.resolve("src/web/public/app.js");
+    const appJsContent = fs.readFileSync(appJsPath, "utf-8");
+
+    expect(appJsContent).not.toContain("yo_bearer_token");
+    expect(appJsContent).not.toContain("sessionStorage");
+  });
 });
