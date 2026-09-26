@@ -200,6 +200,7 @@ export class OperatorKnowledgeBase {
       name: "YarTrader",
       aliases: [
         "yartrader",
+        "sohrabinia/yartrader",
         "یار تریدر",
         "یارتریدر",
         "یار‌تریدر",
@@ -208,6 +209,8 @@ export class OperatorKnowledgeBase {
         "یارتریدر پروژه",
         "اون یار تریدر",
         "تریدر",
+        "گیت هاب یارتریدر",
+        "گیتهاب یارتریدر",
       ],
     },
     {

@@ -17,6 +17,7 @@ export interface AssistantGoal {
   targetCapability: string;
   requestedToolId: string;
   params: Record<string, unknown>;
+  mode?: "DISCOVERY" | "AUTONOMOUS_GOAL" | "EXPLICIT_MODIFICATION";
   consequential?: boolean;
 }
 

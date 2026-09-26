@@ -254,18 +254,28 @@ document.addEventListener("DOMContentLoaded", () => {
     msgDiv.appendChild(header);
     msgDiv.appendChild(content);
 
-    // Render tool execution output if present
+    // Generic Data-Driven Tool Execution Result Renderer
+    let stepResult = null;
+
     if (result.details && result.details.executedSteps) {
       const lastStep = result.details.executedSteps[result.details.executedSteps.length - 1];
-      if (lastStep && lastStep.toolOutput) {
-        const codeDiv = document.createElement("div");
-        codeDiv.className = "code-block";
-        const outputStr = typeof lastStep.toolOutput === "string"
-          ? lastStep.toolOutput
-          : JSON.stringify(lastStep.toolOutput, null, 2);
-        codeDiv.textContent = outputStr;
-        msgDiv.appendChild(codeDiv);
+      if (lastStep) {
+        stepResult = lastStep.result !== undefined ? lastStep.result : lastStep.toolOutput;
       }
+    }
+
+    if (!stepResult && result.details && result.details.evidence && result.details.evidence.toolResult) {
+      stepResult = result.details.evidence.toolResult;
+    }
+
+    if (stepResult !== null && stepResult !== undefined) {
+      const codeDiv = document.createElement("div");
+      codeDiv.className = "code-block";
+      const outputStr = typeof stepResult === "string"
+        ? stepResult
+        : JSON.stringify(stepResult, null, 2);
+      codeDiv.textContent = outputStr;
+      msgDiv.appendChild(codeDiv);
     }
 
     messagesList.appendChild(msgDiv);

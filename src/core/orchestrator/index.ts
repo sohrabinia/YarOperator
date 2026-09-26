@@ -55,6 +55,7 @@ export interface OrchestrationResult {
 
 export class AgentOrchestrator {
   private capabilityResolver: CapabilityResolver;
+  private lastResolvedEntityByWorkspace: Map<string, string> = new Map();
 
   constructor(
     private registry: AgentRegistry,
@@ -65,6 +66,16 @@ export class AgentOrchestrator {
   ) {
     this.capabilityResolver =
       capabilityResolver || new CapabilityResolver(this.registry);
+  }
+
+  public setLastResolvedEntity(workspaceId: string, entity: string): void {
+    if (workspaceId && entity) {
+      this.lastResolvedEntityByWorkspace.set(workspaceId, entity);
+    }
+  }
+
+  public getLastResolvedEntity(workspaceId: string): string | undefined {
+    return this.lastResolvedEntityByWorkspace.get(workspaceId);
   }
 
   public setPolicyEngine(policyEngine: PolicyEngine): void {
