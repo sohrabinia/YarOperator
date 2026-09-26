@@ -911,11 +911,50 @@ export class OperatorWebServer {
         }
       }
 
-      // Extract authorization header or active session cookie
-      let authHeader = req.headers.authorization;
-      const session = this.extractSessionFromRequest(req);
-      if (!authHeader && session) {
-        authHeader = `Bearer ${session.sessionId}`;
+      // Dual-credential resolution & session consistency
+      const cookies = this.parseCookies(req);
+      const rawCookieSessionId = cookies["yo_session"];
+      const rawAuthHeader = req.headers.authorization;
+      const rawBearerToken = rawAuthHeader?.startsWith("Bearer ")
+        ? rawAuthHeader.replace("Bearer ", "").trim()
+        : null;
+
+      let authHeader: string | undefined = rawAuthHeader;
+
+      if (rawCookieSessionId && rawAuthHeader !== undefined) {
+        // Both Cookie and Authorization header are present
+        const cookieSession = this.getSession(rawCookieSessionId);
+        const bearerSession = rawBearerToken
+          ? this.getSession(rawBearerToken)
+          : null;
+
+        if (
+          !cookieSession ||
+          !bearerSession ||
+          cookieSession.sessionId !== bearerSession.sessionId ||
+          cookieSession.ownerId !== bearerSession.ownerId
+        ) {
+          res.writeHead(401, {
+            "Content-Type": "application/json; charset=utf-8",
+            Connection: "close",
+          });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error:
+                "Unauthorized: Mismatched or invalid dual credentials provided.",
+            }),
+          );
+          return;
+        }
+
+        authHeader = `Bearer ${cookieSession.sessionId}`;
+      } else if (rawCookieSessionId && rawAuthHeader === undefined) {
+        // Cookie-only present
+        const cookieSession = this.getSession(rawCookieSessionId);
+        if (cookieSession) {
+          authHeader = `Bearer ${cookieSession.sessionId}`;
+        }
       }
 
       const apiReq: OperatorApiRequest = {
