@@ -537,6 +537,13 @@ export class AgentOrchestrator {
           break;
         }
 
+        const accumulatedEvidence: Record<string, unknown> = {};
+        for (const [sId, res] of Object.entries(stepResults)) {
+          if (res.state === "SUCCEEDED" && res.output !== undefined) {
+            accumulatedEvidence[sId] = res.output;
+          }
+        }
+
         const stepReq: OrchestrationRequest = {
           brainResult: {
             intent: "ACTION",
@@ -547,7 +554,12 @@ export class AgentOrchestrator {
           environmentId: envId,
           targetCapability: undefined,
           requestedToolId: currentStep.toolId,
-          params: currentStep.params || {},
+          params: {
+            ...(currentStep.params || {}),
+            ...(Object.keys(accumulatedEvidence).length > 0
+              ? { previousEvidence: accumulatedEvidence }
+              : {}),
+          },
           rawCommandText: currentStep.purpose,
         };
 

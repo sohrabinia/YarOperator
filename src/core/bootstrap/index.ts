@@ -129,6 +129,8 @@ export async function bootstrapOperatorApplication(
   policyEngine.setRule("git_operate:diff", "SAFE");
   policyEngine.setRule("git_operate:branch_list", "SAFE");
   policyEngine.setRule("github_operate:get_pr", "SAFE");
+  policyEngine.setRule("github_operate:inspect", "SAFE");
+  policyEngine.setRule("github_operate:get_repo", "SAFE");
   policyEngine.setRule("web_research:search", "SAFE");
 
   policyEngine.setRule("browser_operate:click", "APPROVAL_REQUIRED");
@@ -295,11 +297,14 @@ export async function bootstrapOperatorApplication(
       "web-browsing",
       "terminal-execution",
       "system-monitoring",
+      "github_operate",
+      "yartrader_adapter",
     ],
     workspaceScopes: ["yartrader", "ws_default"],
     toolScopes: [
       "terminal_execute",
       "git_operate",
+      "github_operate",
       "browser_operate",
       "web_research",
       "operator_health",

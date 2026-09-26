@@ -245,6 +245,13 @@ export class OperatorKnowledgeBase {
         "گیتهاب",
         "گیت هاب",
         "گیت‌هاب",
+        "گیت هاب یارتریدر",
+        "گیت‌هاب یارتریدر",
+        "گیتهاب یارتریدر",
+        "github yartrader",
+        "yartrader repo",
+        "sohrabinia/yartrader",
+        "sohrabinia/yaroperator",
         "repo",
         "repository",
         "ریپازیتوری",
@@ -743,6 +750,24 @@ export class DeterministicBrain implements Brain {
     const resolvedEntity = OperatorKnowledgeBase.resolveEntity(text);
     const restrictions = OperatorKnowledgeBase.resolveRestrictions(text);
 
+    // If verb phrase is present BUT target entity is missing and prompt is a standalone pronoun/phrase like "بررسیش کن", mark AMBIGUOUS for clarification
+    const isStandalonePronounVerb =
+      !resolvedEntity &&
+      (normText === "بررسیش کن" ||
+        normText === "چکش کن" ||
+        normText === "نگاهش کن" ||
+        normText === "بررسیش کن ببین" ||
+        normText === "بررسیش بکن");
+
+    if (isStandalonePronounVerb) {
+      return {
+        intent: "AMBIGUOUS",
+        confidence: 0.2,
+        reason:
+          "دستور شما مبهم است. لطفاً مشخص کنید که قصد بررسی کدام بخش یا سیستم را دارید (مثلاً وضعیت سیستم، یارتریدر، یا گیت‌هاب).",
+      };
+    }
+
     if (resolvedActionGoal) {
       const plan: BrainPlan = {
         goal: text,
@@ -796,12 +821,22 @@ export class DeterministicBrain implements Brain {
       }
     }
 
-    // 3. Ambiguous / Fail Closed fallback
+    // 3. Ambiguous / Fail Closed fallback with contextual clarification
+    const isUnderspecifiedVerb =
+      normText.includes("بررسی") ||
+      normText.includes("چک") ||
+      normText.includes("نگاه") ||
+      normText.includes("check") ||
+      normText.includes("inspect");
+
+    const clarificationMsg = isUnderspecifiedVerb
+      ? "دستور شما مبهم است. لطفاً مشخص کنید که قصد بررسی کدام بخش یا سیستم را دارید (مثلاً وضعیت سیستم، یارتریدر، یا گیت‌هاب)."
+      : "ورودی شما مبهم است. لطفاً هدف خود را شفاف‌تر بیان کنید.";
+
     return {
       intent: "AMBIGUOUS",
       confidence: 0.2,
-      reason:
-        "Input could not be deterministically classified as CONVERSATION or ACTION.",
+      reason: clarificationMsg,
     };
   }
 }

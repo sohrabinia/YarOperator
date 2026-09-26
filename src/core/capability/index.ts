@@ -258,6 +258,30 @@ export class CapabilityResolver {
       toolId = "operator_health";
     }
 
+    // Entity Resolution for Natural Language Goals
+    if (!capability && !toolId && commandTextCandidate) {
+      const normText = Normalizer.normalize(commandTextCandidate);
+      const isGitHub =
+        normText.includes("گیت هاب") ||
+        normText.includes("گیتهاب") ||
+        normText.includes("github") ||
+        normText.includes("ریپازیتوری") ||
+        normText.includes("مخزن");
+
+      const isYarTrader =
+        normText.includes("یارتریدر") ||
+        normText.includes("یار تریدر") ||
+        normText.includes("yartrader");
+
+      if (isGitHub) {
+        capability = "github_operate";
+        toolId = "github_operate";
+      } else if (isYarTrader) {
+        capability = "yartrader_adapter";
+        toolId = "yartrader_adapter";
+      }
+    }
+
     if (capability === "system-monitoring" && !toolId) {
       toolId = "operator_health";
     }

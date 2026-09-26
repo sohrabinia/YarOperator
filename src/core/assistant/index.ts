@@ -200,11 +200,20 @@ export class RealWorldAssistant {
     step.status = "EXECUTED";
     step.result = runResult.evidence?.toolResult;
 
+    const toolOutput = runResult.evidence?.toolResult;
+    const summaryText =
+      typeof toolOutput === "string"
+        ? toolOutput
+        : toolOutput && typeof toolOutput === "object"
+          ? "اقدام درخواستی با موفقیت انجام شد:"
+          : `Successfully executed real-world goal '${goal.description}'.`;
+
     const evidence = {
       goalId: goal.id,
       workspaceId: goal.workspaceId,
       toolId: goal.requestedToolId,
-      toolResult: runResult.evidence?.toolResult,
+      toolResult: toolOutput,
+      summary: summaryText,
       executedAt: new Date().toISOString(),
     };
 

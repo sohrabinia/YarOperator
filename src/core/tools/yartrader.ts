@@ -197,7 +197,7 @@ export class YarTraderTool implements Tool<
       return {
         success: false,
         error:
-          "YarTrader connection UNAVAILABLE: Server-side authentication secret (OPERATOR_YARTRADER_SECRET) is not configured.",
+          "YarTrader connection UNAVAILABLE: Server-side authentication credential is not configured.",
         output: {
           status: "UNAVAILABLE",
           capability: action,

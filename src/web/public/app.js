@@ -228,6 +228,44 @@ document.addEventListener("DOMContentLoaded", () => {
     const content = document.createElement("div");
     content.className = "message-content";
 
+    // Extract actual result and step error metadata from executedSteps or evidence
+    let stepResult = undefined;
+    let stepError = undefined;
+
+    if (result.details && Array.isArray(result.details.executedSteps) && result.details.executedSteps.length > 0) {
+      const lastStep = result.details.executedSteps[result.details.executedSteps.length - 1];
+      if (lastStep) {
+        stepResult = lastStep.result;
+        stepError = lastStep.error;
+      }
+    }
+
+    if (stepResult === undefined && result.details && result.details.evidence) {
+      if (result.details.evidence.toolResult !== undefined) {
+        stepResult = result.details.evidence.toolResult;
+      } else if (result.details.evidence.summary !== undefined) {
+        stepResult = result.details.evidence.summary;
+      }
+    }
+
+    // Unwrap toolResult if stepResult is an evidence envelope object
+    if (
+      stepResult &&
+      typeof stepResult === "object" &&
+      "toolResult" in stepResult
+    ) {
+      stepResult = stepResult.toolResult;
+    }
+
+    // Determine if meaningful step result exists beyond simple success boolean envelope
+    let hasActualResult = stepResult !== undefined && stepResult !== null;
+    if (hasActualResult && typeof stepResult === "object") {
+      const keys = Object.keys(stepResult);
+      if (keys.length === 0 || (keys.length === 1 && keys[0] === "success")) {
+        hasActualResult = false;
+      }
+    }
+
     // Executive Assistant response text formulation
     let textOutput = "";
 
@@ -239,13 +277,22 @@ document.addEventListener("DOMContentLoaded", () => {
     ) {
       textOutput = result.details.evidence.summary;
     } else if (status === "COMPLETED") {
-      textOutput = "حتماً. اقدام درخواستی با موفقیت انجام شد.";
+      if (typeof stepResult === "string" && stepResult.trim().length > 0) {
+        textOutput = stepResult;
+      } else if (hasActualResult) {
+        textOutput = "اقدام درخواستی با موفقیت انجام شد:";
+      } else {
+        textOutput = "حتماً. اقدام درخواستی با موفقیت انجام شد.";
+      }
     } else if (status === "APPROVAL_REQUIRED") {
-      textOutput = "برای انجام این اقدام به تأیید شما نیاز دارم. فعلاً متوقف می‌مانم.";
+      const reason = stepError || result.details?.error || result.reason || "برای انجام این اقدام به تأیید شما نیاز دارم. فعلاً متوقف می‌مانم.";
+      textOutput = `نیازمند تأیید: ${reason}`;
     } else if (status === "BLOCKED") {
-      textOutput = "این اقدام در محدوده اختیار فعلی من نیست و اجازه اجرای آن را ندارم.";
+      const reason = stepError || result.details?.error || result.reason || "این اقدام در محدوده اختیار فعلی من نیست و اجازه اجرای آن را ندارم.";
+      textOutput = `اقدام مسدود شد: ${reason}`;
     } else if (status === "FAILED") {
-      textOutput = "در اجرای درخواست مشکلی پیش آمد و اقدام انجام نشد.";
+      const errorMsg = stepError || result.details?.error || result.reason || "در اجرای درخواست مشکلی پیش آمد و اقدام انجام نشد.";
+      textOutput = `خطا در اجرای اقدام: ${errorMsg}`;
     } else {
       textOutput = "درخواست شما دریافت شد و بررسی گردید.";
     }
@@ -254,16 +301,22 @@ document.addEventListener("DOMContentLoaded", () => {
     msgDiv.appendChild(header);
     msgDiv.appendChild(content);
 
-    // Render tool execution output if present
-    if (result.details && result.details.executedSteps) {
-      const lastStep = result.details.executedSteps[result.details.executedSteps.length - 1];
-      if (lastStep && lastStep.toolOutput) {
+    // Render structured / object / array / primitive tool execution result if present
+    if (hasActualResult) {
+      if (typeof stepResult === "object") {
         const codeDiv = document.createElement("div");
         codeDiv.className = "code-block";
-        const outputStr = typeof lastStep.toolOutput === "string"
-          ? lastStep.toolOutput
-          : JSON.stringify(lastStep.toolOutput, null, 2);
-        codeDiv.textContent = outputStr;
+        codeDiv.textContent = JSON.stringify(stepResult, null, 2);
+        msgDiv.appendChild(codeDiv);
+      } else if (typeof stepResult === "number" || typeof stepResult === "boolean") {
+        const codeDiv = document.createElement("div");
+        codeDiv.className = "code-block";
+        codeDiv.textContent = String(stepResult);
+        msgDiv.appendChild(codeDiv);
+      } else if (typeof stepResult === "string" && textOutput !== stepResult && stepResult.trim().length > 0) {
+        const codeDiv = document.createElement("div");
+        codeDiv.className = "code-block";
+        codeDiv.textContent = stepResult;
         msgDiv.appendChild(codeDiv);
       }
     }
