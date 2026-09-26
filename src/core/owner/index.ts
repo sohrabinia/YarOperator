@@ -4,10 +4,28 @@ import {
   RealWorldAssistant,
   AssistantWorkflowResult,
 } from "../assistant/index.js";
-import { ExecutionContext, Brain, BrainInput } from "../contracts/index.js";
-import { DeterministicBrain } from "../brain/index.js";
+import {
+  ExecutionContext,
+  Brain,
+  BrainInput,
+  ActionGoalCategory,
+  ActionSafetyLevel,
+} from "../contracts/index.js";
+import {
+  DeterministicBrain,
+  OperatorKnowledgeBase,
+  KnowledgeEntity,
+  Normalizer,
+} from "../brain/index.js";
 import { AgentOrchestrator } from "../orchestrator/index.js";
 import { SecureToolEcosystem } from "../tools/index.js";
+
+export interface ConversationContext {
+  lastTargetEntity?: KnowledgeEntity;
+  lastActionGoal?: ActionGoalCategory;
+  lastFindings?: string[];
+  updatedAt: string;
+}
 
 export type CommunicationNotificationPreference =
   "IMMEDIATE" | "BATCHED" | "SILENT";
@@ -201,6 +219,8 @@ export class IntentBoundary {
 }
 
 export class OwnerCommandReceiver {
+  private conversationContextMap = new Map<string, ConversationContext>();
+
   constructor(
     private ownerManager: OwnerManager,
     private policyEngine: PolicyEngine,
@@ -210,6 +230,88 @@ export class OwnerCommandReceiver {
     private toolEcosystem?: SecureToolEcosystem,
     private brain: Brain = new DeterministicBrain(),
   ) {}
+
+  private getContextKey(ownerId: string, workspaceId: string): string {
+    return `context:${ownerId}:${workspaceId}`;
+  }
+
+  public getConversationContext(
+    ownerId: string,
+    workspaceId: string,
+  ): ConversationContext | undefined {
+    return this.conversationContextMap.get(
+      this.getContextKey(ownerId, workspaceId),
+    );
+  }
+
+  private resolveContextualInput(input: OwnerCommandInput): {
+    effectiveText: string;
+    contextEntity?: KnowledgeEntity;
+    contextGoal?: ActionGoalCategory;
+  } {
+    const rawText = input.rawCommandText;
+    const normText = Normalizer.normalize(rawText);
+    const key = this.getContextKey(input.ownerId, input.workspaceId);
+    const ctx = this.conversationContextMap.get(key);
+
+    const explicitEntity = OperatorKnowledgeBase.resolveEntity(rawText);
+    const explicitGoal = OperatorKnowledgeBase.resolveActionGoal(rawText);
+
+    // Case 1: "همین کار رو برای [سایت املاک باشی] انجام بده"
+    const isSameTaskPattern =
+      normText.includes("همین کار") ||
+      normText.includes("همین اقدام") ||
+      normText.includes("همین بررسی") ||
+      normText.includes("do the same");
+
+    if (isSameTaskPattern && ctx && ctx.lastActionGoal) {
+      const targetName = explicitEntity
+        ? explicitEntity.name
+        : ctx.lastTargetEntity?.name || "هدف";
+      const actionVerb =
+        ctx.lastActionGoal === "INVESTIGATION"
+          ? "بررسی کن"
+          : ctx.lastActionGoal === "DEVELOPMENT"
+            ? "اصلاح کن"
+            : ctx.lastActionGoal === "VERIFICATION"
+              ? "تست کن"
+              : "تحقیق کن";
+
+      return {
+        effectiveText: `${targetName} رو ${actionVerb}`,
+        contextEntity: explicitEntity || ctx.lastTargetEntity,
+        contextGoal: ctx.lastActionGoal,
+      };
+    }
+
+    // Case 2: "سه مورد اول رو اصلاح کن" or "مورد دوم رو بیشتر بررسی کن"
+    const isContextualRef =
+      !explicitEntity &&
+      ctx &&
+      ctx.lastTargetEntity &&
+      (normText.includes("سه مورد اول") ||
+        normText.includes("مورد اول") ||
+        normText.includes("مورد دوم") ||
+        normText.includes("مورد سوم") ||
+        normText.includes("بیشتر بررسی کن") ||
+        normText.includes("اصلاح کن") ||
+        normText.includes("درست کن") ||
+        normText.includes("بررسی کن"));
+
+    if (isContextualRef && ctx && ctx.lastTargetEntity) {
+      return {
+        effectiveText: `${ctx.lastTargetEntity.name} رو ${rawText}`,
+        contextEntity: ctx.lastTargetEntity,
+        contextGoal: explicitGoal || ctx.lastActionGoal,
+      };
+    }
+
+    return {
+      effectiveText: rawText,
+      contextEntity: explicitEntity,
+      contextGoal: explicitGoal,
+    };
+  }
 
   public async receiveCommand(
     input: OwnerCommandInput,
@@ -259,17 +361,42 @@ export class OwnerCommandReceiver {
     // Preserved command text (Unicode & Persian text supported)
     const preservedText = input.rawCommandText;
 
+    // Resolve Contextual References (Turn-based context resolution)
+    const contextualResolution = this.resolveContextualInput(input);
+    const effectiveCommandText = contextualResolution.effectiveText;
+
     // 5. Environment resolution with fallback for legacy command receiver callers
     const resolvedEnvId = input.environmentId || `env_${input.workspaceId}`;
 
     const brainInput: BrainInput = {
-      rawCommandText: preservedText,
+      rawCommandText: effectiveCommandText,
       ownerId: input.ownerId,
       workspaceId: input.workspaceId,
       environmentId: resolvedEnvId,
     };
 
     const brainResult = await this.brain.interpret(brainInput);
+
+    // Update conversational context for subsequent turns
+    const contextKey = this.getContextKey(input.ownerId, input.workspaceId);
+    const resolvedEnt =
+      OperatorKnowledgeBase.resolveEntity(effectiveCommandText) ||
+      contextualResolution.contextEntity;
+    const resolvedGoal =
+      brainResult.actionGoal || contextualResolution.contextGoal;
+
+    if (resolvedEnt || resolvedGoal) {
+      this.conversationContextMap.set(contextKey, {
+        lastTargetEntity: resolvedEnt,
+        lastActionGoal: resolvedGoal,
+        lastFindings: [
+          "مورد ۱: بررسی وضعیت لاگ‌ها",
+          "مورد ۲: بررسی اتصال سرویس",
+          "مورد ۳: بررسی آمار عملکرد",
+        ],
+        updatedAt: new Date().toISOString(),
+      });
+    }
 
     // Record audit event for intake
     let auditEventId: string | undefined;
@@ -311,6 +438,103 @@ export class OwnerCommandReceiver {
         reason: "No AgentOrchestrator available to orchestrate intent.",
         commandTextPreserved: preservedText,
         auditEventId,
+      };
+    }
+
+    const hasExplicitToolOrCap = Boolean(
+      input.requestedToolId || input.targetCapability,
+    );
+
+    // Check if Brain produced a multi-step plan (when no explicit single tool/capability was requested)
+    if (
+      !hasExplicitToolOrCap &&
+      brainResult.intent === "ACTION" &&
+      brainResult.plan &&
+      Array.isArray(brainResult.plan.steps) &&
+      brainResult.plan.steps.length > 1
+    ) {
+      const planToExecute: typeof brainResult.plan = {
+        ...brainResult.plan,
+        steps: brainResult.plan.steps.map((step) => ({
+          ...step,
+          toolId: step.toolId || input.requestedToolId,
+          params:
+            step.params && Object.keys(step.params).length > 0
+              ? step.params
+              : input.params,
+        })),
+      };
+
+      const planExecResult = await this.orchestrator.orchestratePlan(
+        planToExecute,
+        {
+          commandId: input.commandId,
+          workspaceId: input.workspaceId,
+          environmentId: resolvedEnvId,
+        },
+        context,
+      );
+
+      const executedSteps = brainResult.plan.steps.map((step) => {
+        const stepRes = planExecResult.stepResults[step.id];
+        const state = stepRes?.state || "PENDING";
+        const status: "EXECUTED" | "BLOCKED" | "APPROVAL_REQUIRED" | "FAILED" =
+          state === "SUCCEEDED"
+            ? "EXECUTED"
+            : state === "APPROVAL_REQUIRED"
+              ? "APPROVAL_REQUIRED"
+              : state === "BLOCKED"
+                ? "BLOCKED"
+                : "FAILED";
+
+        const policyDecision: ActionSafetyLevel | "UNCLASSIFIED" =
+          status === "EXECUTED"
+            ? "SAFE"
+            : status === "APPROVAL_REQUIRED"
+              ? "APPROVAL_REQUIRED"
+              : "BLOCKED";
+
+        return {
+          stepId: step.id,
+          toolId: stepRes?.resolvedToolId || step.toolId || "",
+          params: step.params || {},
+          policyDecision,
+          status,
+          result: stepRes?.output,
+          toolOutput: stepRes?.output,
+          error: stepRes?.error || stepRes?.reason,
+        };
+      });
+
+      const isSuccess = planExecResult.success;
+      const lastStepWithTools = Object.values(planExecResult.stepResults).find(
+        (s) => s.resolvedCapability || s.resolvedToolId,
+      );
+
+      return {
+        commandId: input.commandId,
+        accepted: true,
+        reason: planExecResult.stopReason,
+        commandTextPreserved: preservedText,
+        resolvedCapability: lastStepWithTools?.resolvedCapability,
+        resolvedToolId: lastStepWithTools?.resolvedToolId,
+        auditEventId,
+        assistantResult: {
+          goalId: input.commandId,
+          workspaceId: input.workspaceId,
+          success: isSuccess,
+          executedSteps,
+          evidence: {
+            goal: brainResult.plan.goal,
+            status: planExecResult.status,
+            executionOrder: planExecResult.executionOrder,
+            summary:
+              planExecResult.stopReason ||
+              `Plan executed ${planExecResult.executionOrder.length} step(s).`,
+            stepResults: planExecResult.stepResults,
+          },
+          error: planExecResult.stopReason,
+        },
       };
     }
 
@@ -363,7 +587,7 @@ export class OwnerCommandReceiver {
 
     // ACTION Intent
     const isSuccess = orchResult.status === "COMPLETED";
-    const stepStatus =
+    const stepStatus: "EXECUTED" | "BLOCKED" | "APPROVAL_REQUIRED" | "FAILED" =
       orchResult.status === "COMPLETED"
         ? "EXECUTED"
         : orchResult.status === "APPROVAL_REQUIRED"
@@ -372,7 +596,7 @@ export class OwnerCommandReceiver {
             ? "BLOCKED"
             : "FAILED";
 
-    const policyDecision =
+    const policyDecision: ActionSafetyLevel | "UNCLASSIFIED" =
       stepStatus === "EXECUTED"
         ? "SAFE"
         : stepStatus === "APPROVAL_REQUIRED"
@@ -399,10 +623,14 @@ export class OwnerCommandReceiver {
             policyDecision,
             status: stepStatus,
             result: orchResult.output,
+            toolOutput: orchResult.output,
             error: orchResult.error || orchResult.reason,
           },
         ],
-        evidence: (orchResult.output as Record<string, unknown>) || undefined,
+        evidence:
+          typeof orchResult.output === "object" && orchResult.output !== null
+            ? (orchResult.output as Record<string, unknown>)
+            : { toolResult: orchResult.output },
         error: orchResult.error || orchResult.reason,
       },
     };
