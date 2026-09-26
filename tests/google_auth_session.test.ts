@@ -346,7 +346,7 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
         body: JSON.stringify({
           workspaceId: "yartrader",
           environmentId: "env_yartrader",
-          rawCommandText: "وضعیت سیستم را بررسی کن",
+          rawCommandText: "وضعیت پروژه را بررسی کن",
         }),
       },
     );
@@ -494,9 +494,9 @@ describe("Google OIDC + Session Authentication Test Suite", () => {
       console.log("CHAT RES ERROR:", chatData);
     }
     expect(chatRes.status).toBe(200);
-    expect(chatData.success).toBe(false);
+    expect(chatData.success).toBe(true);
     expect(chatData.result.accepted).toBe(true);
-    expect(chatData.result.status).toBe("BLOCKED");
+    expect(chatData.result.status).toBe("COMPLETED");
   });
 
   it("10. Owner anti-impersonation enforces isolation on session-authenticated requests", async () => {

@@ -9,81 +9,181 @@ export interface CapabilityResolutionRequest {
   rawCommandText?: string;
 }
 
+import { Normalizer } from "../brain/index.js";
+
 export function isHealthReadinessIntent(text?: string): boolean {
   if (!text) return false;
-  const norm = text.toLowerCase().trim();
+  const norm = Normalizer.normalize(text);
+  if (!norm) return false;
 
-  // Negative word boundary checks for non-health operational contexts
-  if (
-    /\b(git|branch|commit|pull request|pr|build|test|tests|logs|code|repo|repository)\b/i.test(
-      norm,
-    )
-  ) {
-    return false;
-  }
+  // Tokenize normalized text on whitespace
+  const tokens = norm.split(" ").filter(Boolean);
+  const tokenSet = new Set(tokens);
 
-  // Reject standalone "health" or "readiness" without operator/runtime/system/check/status/report context
-  if (norm === "health" || norm === "readiness") {
-    return false;
-  }
+  // 1. Boundary-Aware Mutation Filter: Exact token/concept check for state-changing verbs
+  const mutationTokens = new Set([
+    "ریستارت",
+    "متوقف",
+    "تغییر",
+    "خاموش",
+    "روشن",
+    "اصلاح",
+    "ویرایش",
+    "حذف",
+    "حذفش",
+    "restart",
+    "stop",
+    "start",
+    "modify",
+    "change",
+    "shutdown",
+  ]);
 
-  const hasHealth = norm.includes("health");
-  const hasReadiness = norm.includes("readiness");
-  const hasOperator = norm.includes("operator");
-  const hasRuntime = norm.includes("runtime");
-  const hasSystem = norm.includes("system");
-
-  // Rule 1: operator + (health | readiness)
-  if (hasOperator && (hasHealth || hasReadiness)) return true;
-
-  // Rule 2: runtime + (health | readiness)
-  if (hasRuntime && (hasHealth || hasReadiness)) return true;
-
-  // Rule 3: (system | operator | runtime) + health
-  if (
-    hasHealth &&
-    (hasSystem || norm.includes("check") || norm.includes("report"))
-  ) {
-    if (
-      hasOperator ||
-      hasRuntime ||
-      hasSystem ||
-      norm.includes("runtime health") ||
-      norm.includes("operator health")
-    ) {
-      return true;
+  for (const t of tokens) {
+    if (mutationTokens.has(t)) {
+      return false;
     }
   }
 
-  // Rule 4: (readiness status | current readiness | check readiness | report readiness)
+  // 2. Boundary-Aware Negative Domain Filter: Exact token set check for unrelated domains
+  const negativeTokens = new Set([
+    "git",
+    "github",
+    "branch",
+    "commit",
+    "pr",
+    "pull",
+    "request",
+    "build",
+    "test",
+    "tests",
+    "logs",
+    "code",
+    "repo",
+    "repository",
+    "پروژه",
+    "معامله",
+    "معاملات",
+    "بازار",
+    "داده",
+    "داده‌ها",
+    "دادهها",
+    "فایل",
+    "فایل‌ها",
+    "فایلها",
+    "وبسایت",
+    "دیتابیس",
+  ]);
+
+  for (const t of tokens) {
+    if (negativeTokens.has(t)) {
+      return false;
+    }
+  }
+
+  // Token sequence helper for exact multi-word phrase matching
+  const hasTokenSequence = (seq: string[]): boolean => {
+    if (tokens.length < seq.length) return false;
+    for (let i = 0; i <= tokens.length - seq.length; i++) {
+      let match = true;
+      for (let j = 0; j < seq.length; j++) {
+        if (tokens[i + j] !== seq[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return true;
+    }
+    return false;
+  };
+
   if (
-    hasReadiness &&
-    (hasOperator ||
-      hasRuntime ||
-      norm.includes("readiness status") ||
-      norm.includes("current readiness") ||
-      norm.includes("runtime readiness") ||
-      norm.includes("check readiness") ||
-      norm.includes("report readiness"))
+    hasTokenSequence(["pull", "request"]) ||
+    hasTokenSequence(["وب", "سایت"]) ||
+    hasTokenSequence(["پایگاه", "داده"])
   ) {
+    return false;
+  }
+
+  // Reject standalone single words lacking target + concept pairing
+  if (
+    tokens.length === 1 &&
+    (tokenSet.has("health") ||
+      tokenSet.has("readiness") ||
+      tokenSet.has("status") ||
+      tokenSet.has("وضعیت") ||
+      tokenSet.has("سلامت") ||
+      tokenSet.has("آمادگی") ||
+      tokenSet.has("سرور") ||
+      tokenSet.has("سرویس") ||
+      tokenSet.has("سیستم") ||
+      tokenSet.has("اپراتور"))
+  ) {
+    return false;
+  }
+
+  // 3. Concept Sets Analysis using exact token set presence
+  // Operational Target Nouns
+  const hasSystemTarget =
+    tokenSet.has("سیستم") ||
+    tokenSet.has("سامانه") ||
+    tokenSet.has("سرویس") ||
+    tokenSet.has("سرویس‌ها") ||
+    tokenSet.has("سرویسها") ||
+    tokenSet.has("اپراتور") ||
+    tokenSet.has("اوپراتور") ||
+    tokenSet.has("سرور") ||
+    tokenSet.has("سرورها") ||
+    tokenSet.has("system") ||
+    tokenSet.has("operator") ||
+    tokenSet.has("runtime") ||
+    tokenSet.has("service") ||
+    tokenSet.has("services") ||
+    tokenSet.has("server");
+
+  // Operational Health/Status Concepts
+  const hasHealthConcept =
+    tokenSet.has("وضعیت") ||
+    tokenSet.has("وضعیتش") ||
+    tokenSet.has("وضعیتی") ||
+    tokenSet.has("سلامت") ||
+    tokenSet.has("سالم") ||
+    tokenSet.has("سالمه") ||
+    tokenSet.has("آمادگی") ||
+    tokenSet.has("آماده") ||
+    tokenSet.has("آماده‌ست") ||
+    tokenSet.has("آمادهست") ||
+    tokenSet.has("status") ||
+    tokenSet.has("health") ||
+    tokenSet.has("readiness") ||
+    tokenSet.has("healthy") ||
+    tokenSet.has("ready");
+
+  // Coherent Semantic Rule Composition
+  // System-health intent REQUIRES an Operational Target Noun AND an explicit Operational Health/Status Concept.
+  // Generic investigation verbs (e.g., "بررسی", "تحلیل", "توضیح") without health concepts must NOT resolve to operator_health.
+  if (hasSystemTarget && hasHealthConcept) {
     return true;
   }
 
-  // Positive Persian patterns requiring explicit operator/system health/readiness context
-  if (
-    norm.includes("سلامت") &&
-    (norm.includes("اپراتور") ||
-      norm.includes("اوپراتور") ||
-      norm.includes("سیستم"))
-  ) {
-    return true;
-  }
+  // English System Health Expressions Composition
+  const hasEnglishHealth =
+    tokenSet.has("health") ||
+    tokenSet.has("readiness") ||
+    tokenSet.has("status") ||
+    tokenSet.has("healthy") ||
+    tokenSet.has("ready");
 
   if (
-    norm.includes("آمادگی") &&
-    (norm.includes("اپراتور") ||
-      norm.includes("اوپراتور") ||
-      norm.includes("سیستم"))
+    hasEnglishHealth &&
+    (tokenSet.has("check") ||
+      tokenSet.has("report") ||
+      tokenSet.has("inspect") ||
+      tokenSet.has("system") ||
+      tokenSet.has("operator") ||
+      tokenSet.has("runtime") ||
+      tokenSet.has("service") ||
+      tokenSet.has("server"))
   ) {
     return true;
   }
